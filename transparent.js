@@ -329,12 +329,15 @@ $.fn.serializeObject = function() {
             $(page).css("opacity", 1);
         }
 
-        $('head').append(function() {
-            $('#page').append(function() {
+        setTimeout(function() {
+            $('head').append(function() {
+                $('#page').append(function() {
 
-                setTimeout(function() {
                     callback(); // Call for showPage if needed, or any other action
                     dispatchEvent(new Event('load'));
+                    setTimeout(function() {
+                        window.scrollTo(0, 0);
+                    });
                 });
             });
         });
