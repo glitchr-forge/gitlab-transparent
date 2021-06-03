@@ -277,7 +277,9 @@ $.fn.serializeObject = function() {
         });
     }
 
-    Transparent.onLoad = function(htmlResponse, callback = function() {}) {
+    Transparent.onLoad = function(htmlResponse, callback = null, scrollToTop = true) {
+
+        if(callback === null) callback = function() {};
 
         // Replace canvases
         Transparent.replaceCanvases(htmlResponse);
@@ -329,15 +331,18 @@ $.fn.serializeObject = function() {
             $(page).css("opacity", 1);
         }
 
+        var currentScroll = window.scrollY;
         setTimeout(function() {
+
+            if(scrollToTop && currentScroll == window.scrollY)
+                window.scrollTo({top: 0, behavior: 'auto'});
+
             $('head').append(function() {
                 $('#page').append(function() {
 
                     callback(); // Call for showPage if needed, or any other action
                     dispatchEvent(new Event('load'));
-                    setTimeout(function() {
-                        window.scrollTo(0, 0);
-                    });
+
                 });
             });
         });
@@ -376,15 +381,12 @@ $.fn.serializeObject = function() {
         dispatchEvent(new Event('onbeforeunload'));
         e.preventDefault();
 
-        // This append on click when user request new state
-        // (It is null when dev is pushing or replacing state)
+        // This append on user click (e.g. when user push a link)
+        // It is null when dev is pushing or replacing state
         var addNewState = !e.state;
         if (addNewState) history.pushState({urlPath: url}, '', url);
 
-
         function handleResponse(xhr) {
-
-            onHold = true;
 
             // Proces html response
             var htmlResponse = document.createElement("html");
@@ -394,9 +396,9 @@ $.fn.serializeObject = function() {
                 return;
 
             if (Transparent.isKnownLayout(htmlResponse))
-                Transparent.onLoad(htmlResponse);
+                Transparent.onLoad(htmlResponse, null, addNewState);
             else Transparent.hidePage(function() {
-                 Transparent.onLoad(htmlResponse, Transparent.showPage);
+                 Transparent.onLoad(htmlResponse, Transparent.showPage, addNewState);
             });
         }
 
@@ -417,7 +419,6 @@ $.fn.serializeObject = function() {
 
     // Initial push state..
     history.pushState({urlPath: window.location.pathname}, '', window.location.pathname);
-
 
     window.onpopstate = __main__;
     document.addEventListener('click', __main__, false);
