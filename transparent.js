@@ -277,7 +277,7 @@ $.fn.serializeObject = function() {
         });
     }
 
-    Transparent.onLoad = function(htmlResponse, callback = null, scrollToTop = true) {
+    Transparent.onLoad = function(htmlResponse, callback = null, scrollTo = true) {
 
         if(callback === null) callback = function() {};
 
@@ -334,13 +334,32 @@ $.fn.serializeObject = function() {
         var currentScroll = window.scrollY;
         setTimeout(function() {
 
-            if(scrollToTop && currentScroll == window.scrollY)
-                window.scrollTo({top: 0, behavior: 'auto'});
+            if(scrollTo && window.location.hash === "") {
+
+                if(currentScroll == window.scrollY)
+                    window.scrollTo({top: 0, behavior: 'auto'});
+            }
 
             $('head').append(function() {
                 $('#page').append(function() {
 
-                    callback(); // Call for showPage if needed, or any other action
+                    // Bootstrap tooltip/popover flickering fix
+                    $('[data-toggle="tooltip"]').each(function() {
+                        $(this).tooltip({html: true, placement:$(this).attr("data-placement")})
+                        .on("mouseenter", function() {$(this).tooltip("show")})
+                        .on("mouseleave", function() {$(this).tooltip("hide")})
+                    });
+
+                    $('[data-toggle="popover"]').each(function() {
+                        $(this).popover({html: true, placement:$(this).attr("data-placement")})
+                        .on("mouseenter", function() {$(this).popover("show")})
+                        .on("mouseleave", function() {$(this).popover("hide")})
+                    });
+
+                     // Callback if needed, or any other action (e.g. call for showPage..)
+                    callback();
+
+                    // Trigger onload event
                     dispatchEvent(new Event('load'));
 
                 });
@@ -418,7 +437,7 @@ $.fn.serializeObject = function() {
     }
 
     // Initial push state..
-    history.pushState({urlPath: window.location.pathname}, '', window.location.pathname);
+    history.pushState({urlPath: location.pathname+location.hash}, '', location.pathname+location.hash);
 
     window.onpopstate = __main__;
     document.addEventListener('click', __main__, false);
