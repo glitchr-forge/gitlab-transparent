@@ -296,6 +296,7 @@ $.fn.serializeObject = function() {
             var found = false;
 
             head.children().each(function() {
+
                 found = this.isEqualNode(el);
                 return !found;
             });
