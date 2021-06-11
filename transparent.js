@@ -102,7 +102,7 @@ $.fn.serializeObject = function() {
 
             var pat  = /^https?:\/\//i;
             if (pat.test(href)) return ["GET", new URL(el.state.urlPath)];
-            return ["GET", new isURL(el.state.urlPath, location.origin)];
+            return ["GET", new URL(el.state.urlPath, location.origin)];
         }
 
         switch (el.tagName) {
@@ -124,7 +124,7 @@ $.fn.serializeObject = function() {
 
                     var pat  = /^https?:\/\//i;
                     if (pat.test(href)) return ["POST", new URL(pathname)];
-                    return ["POST", new isURL(pathname, location.origin)];
+                    return ["POST", new URL(pathname, location.origin)];
                 }
         }
 
@@ -148,7 +148,7 @@ $.fn.serializeObject = function() {
 
             var pat  = /^https?:\/\//i;
             if (pat.test(href)) return ["GET", new URL(href)];
-            return ["GET", new isURL(href, location.origin)];
+            return ["GET", new URL(href, location.origin)];
         }
 
         if (el.target && el.target.parentElement)
@@ -433,8 +433,9 @@ $.fn.serializeObject = function() {
                 return window.location.href = url.href;
 
             if (Transparent.isKnownLayout(htmlResponse))
-                Transparent.onLoad(htmlResponse, null, addNewState);
-            else Transparent.hidePage(function() {
+                return Transparent.onLoad(htmlResponse, null, addNewState);
+
+            Transparent.hidePage(function() {
                  Transparent.onLoad(htmlResponse, Transparent.showPage, addNewState);
             });
         }
