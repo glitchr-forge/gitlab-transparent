@@ -62,9 +62,9 @@ $.fn.serializeObject = function() {
 
     Transparent.addLayout = function() {
 
-        var name = $("#page")[0].getAttribute("name");
-        var isKnown = knownLayout.indexOf(name) !== -1;
-        if(!isKnown) knownLayout.push(name);
+        var layout = $("#page")[0].getAttribute("layout");
+        var isKnown = knownLayout.indexOf(layout) !== -1;
+        if(!isKnown) knownLayout.push(layout);
 
         return !isKnown;
     }
@@ -100,13 +100,19 @@ $.fn.serializeObject = function() {
             if(!el.state)
                 return (window.popStateNew != window.popStateOld ? history.go(-1) : null);
 
-            return ["GET", el.state.urlPath];
+            var pat  = /^https?:\/\//i;
+            if (pat.test(href)) return ["GET", new URL(el.state.urlPath)];
+            return ["GET", new isURL(el.state.urlPath, location.origin)];
         }
 
         switch (el.tagName) {
 
             case "A":
-                return ["GET", el.getAttribute("href")];
+                var href = el.getAttribute("href");
+
+                var pat  = /^https?:\/\//i;
+                if (pat.test(href)) return ["GET", new URL(href)];
+                return ["GET", new URL(href, location.origin)];
 
             case "INPUT":
             case "BUTTON":
@@ -114,8 +120,12 @@ $.fn.serializeObject = function() {
                 var domainFormAction = el.formAction.split('/').slice(0, 3).join('/');
                 var pathname = el.formAction.replace(domainFormAction, "");
 
-                if (domainBaseURI == domainFormAction && el.getAttribute("type") == "submit")
-                    return ["POST", pathname];
+                if (domainBaseURI == domainFormAction && el.getAttribute("type") == "submit") {
+
+                    var pat  = /^https?:\/\//i;
+                    if (pat.test(href)) return ["POST", new URL(pathname)];
+                    return ["POST", new isURL(pathname, location.origin)];
+                }
         }
 
         // Try to detect target element
@@ -132,8 +142,15 @@ $.fn.serializeObject = function() {
         }
 
         // Try to catch a custom href attribute without "A" tag
-        if (el.target && el.target.getAttribute("href"))
-            return ["GET", el.target.getAttribute("href")];
+        if (el.target && el.target.getAttribute("href")) {
+
+            var href = el.target.getAttribute("href");
+
+            var pat  = /^https?:\/\//i;
+            if (pat.test(href)) return ["GET", new URL(href)];
+            return ["GET", new isURL(href, location.origin)];
+        }
+
         if (el.target && el.target.parentElement)
             return  Transparent.findLink(el.target.parentElement);
 
@@ -195,14 +212,11 @@ $.fn.serializeObject = function() {
         return that;
     }
 
-    Transparent.isValidResponse = function(htmlResponse, url) {
+    Transparent.isValidPage = function(htmlResponse) {
 
         // Check if page block found
         var page = $(htmlResponse).find("#page");
-        if (!page.length) {
-            window.location = url;
-            return false;
-        }
+        if (!page.length) return false;
 
         return true;
     }
@@ -213,8 +227,24 @@ $.fn.serializeObject = function() {
         var page = (htmlResponse ? $(htmlResponse).find("#page") : $("#page"));
         if (!page.length) return false;
 
+        var layout = $(page)[0].getAttribute("layout");
+        return knownLayout.indexOf(layout) !== -1;
+    }
+
+    Transparent.isSamePage = function(htmlResponse)
+    {
+        if(!htmlResponse) return false;
+
+        var page = $(htmlResponse).find("#page");
+        if (!page.length) return false;
+
+        var currentPage = $("#page");
+        if (!currentPage.length) return false;
+
         var name = $(page)[0].getAttribute("name");
-        return knownLayout.indexOf(name) !== -1;
+        var currentName = $(currentPage)[0].getAttribute("name");
+
+        return name == currentName;
     }
 
     Transparent.showPage = function(callback = function() {}, delay = 250) {
@@ -284,10 +314,6 @@ $.fn.serializeObject = function() {
         // Replace canvases
         Transparent.replaceCanvases(htmlResponse);
 
-        // Remove bootstrap tooltip & popover
-        $("div[id^='tooltip']").hide().remove();
-        $("div[id^='popover']").hide().remove();
-
         // Replace head..
         var head = $(htmlResponse).find("head");
         $("head").children().each(function() {
@@ -344,19 +370,6 @@ $.fn.serializeObject = function() {
             $('head').append(function() {
                 $('#page').append(function() {
 
-                    // Bootstrap tooltip/popover flickering fix
-                    $('[data-toggle="tooltip"]').each(function() {
-                        $(this).tooltip({html: true, placement:$(this).attr("data-placement")})
-                        .on("mouseenter", function() {$(this).tooltip("show")})
-                        .on("mouseleave", function() {$(this).tooltip("hide")})
-                    });
-
-                    $('[data-toggle="popover"]').each(function() {
-                        $(this).popover({html: true, placement:$(this).attr("data-placement")})
-                        .on("mouseenter", function() {$(this).popover("show")})
-                        .on("mouseleave", function() {$(this).popover("hide")})
-                    });
-
                      // Callback if needed, or any other action (e.g. call for showPage..)
                     callback();
 
@@ -370,33 +383,34 @@ $.fn.serializeObject = function() {
 
     function __main__(e) {
 
+        // Determine link and popState
         window.popStateNew = document.location.pathname;
-
-        // Determine link
         const link = Transparent.findLink(e);
-
         window.popStateOld = document.location.pathname;
         if (link == null) return;
 
         const type = link[0];
         const url = link[1];
-        if (!url) return;
+        if  (!url) return;
 
         // Wait for transparent window event to be triggered
         if (!isReady) return;
 
         // Symfony defaults rejected
-        if (url.startsWith("/_profiler")) return;
-        if (url.startsWith("/_wdt")) return;
+        if (url.pathname.startsWith("/_profiler")) return;
+        if (url.pathname.startsWith("/_wdt")) return;
 
         // Ressources files rejected
-        if (url.startsWith("/css")) return;
-        if (url.startsWith("/js")) return;
-        if (url.startsWith("/images")) return;
-        if (url.startsWith("/vendor")) return;
+        if (url.pathname.startsWith("/css")) return;
+        if (url.pathname.startsWith("/js")) return;
+        if (url.pathname.startsWith("/images")) return;
+        if (url.pathname.startsWith("/vendor")) return;
 
         // Absolute path rejected
-        if (!url.startsWith("/")) return;
+        if (!url.pathname.startsWith("/")) return;
+
+        // Unsecure url
+        if (url.origin != location.origin) return;
 
         dispatchEvent(new Event('onbeforeunload'));
         e.preventDefault();
@@ -404,7 +418,7 @@ $.fn.serializeObject = function() {
         // This append on user click (e.g. when user push a link)
         // It is null when dev is pushing or replacing state
         var addNewState = !e.state;
-        if (addNewState) history.pushState({urlPath: url}, '', url);
+        if (addNewState) history.pushState({urlPath: url.href}, '', url.href);
 
         function handleResponse(xhr) {
 
@@ -412,8 +426,11 @@ $.fn.serializeObject = function() {
             var htmlResponse = document.createElement("html");
             $(htmlResponse)[0].innerHTML = xhr.responseText;
 
-            if(!Transparent.isValidResponse(htmlResponse, url))
-                return;
+            if(!Transparent.isValidPage(htmlResponse))
+                return window.location.href = url.href;
+
+            if(!Transparent.isSamePage(htmlResponse))
+                return window.location.href = url.href;
 
             if (Transparent.isKnownLayout(htmlResponse))
                 Transparent.onLoad(htmlResponse, null, addNewState);
@@ -423,7 +440,7 @@ $.fn.serializeObject = function() {
         }
 
         jQuery.ajax({
-            url: url,
+            url: url.href,
             type: type,
             data: Transparent.findNearestForm(e),
             dataType: 'html',
