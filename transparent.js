@@ -361,11 +361,6 @@ $.fn.serializeObject = function() {
         var currentScroll = window.scrollY;
         setTimeout(function() {
 
-            if(scrollTo && window.location.hash === "") {
-
-                if(currentScroll == window.scrollY)
-                    window.scrollTo({top: 0, behavior: 'auto'});
-            }
 
             $('head').append(function() {
                 $('#page').append(function() {
@@ -376,6 +371,12 @@ $.fn.serializeObject = function() {
                     // Trigger onload event
                     dispatchEvent(new Event('load'));
 
+                    // Go back to top of the page..
+                    if(scrollTo && window.location.hash === "") {
+
+                        if(currentScroll == window.scrollY)
+                            window.scrollTo({top: 0, behavior: 'auto'});
+                    }
                 });
             });
         });
