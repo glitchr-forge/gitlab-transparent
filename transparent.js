@@ -54,6 +54,8 @@ $.fn.serializeObject = function() {
         if(Transparent.addLayout()) // Return true if layout is added
             Transparent.showPage();
 
+        $("form").submit(__main__);
+
         isReady = true;
         dispatchEvent(new Event('transparent:ready'));
 
@@ -72,15 +74,20 @@ $.fn.serializeObject = function() {
     Transparent.findNearestForm = function (el) {
 
         switch (el.tagName) {
-
+            case "FORM":
+                var form = $(el);
+                return (form ? form.serializeObject() : {});
             case "INPUT":
             case "BUTTON":
                 var form = $(el).closest("form");
-                return (form ? form.serializeObject() : null);
+                return (form ? form.serializeObject() : {});
         }
 
         // Try to detect target element
         if (el.target) {
+
+            if (el.target.tagName == "FORM")
+                return Transparent.findNearestForm(el.target);
 
             if (el.target.tagName == "BUTTON" && el.target.getAttribute("type") == "submit")
                 return Transparent.findNearestForm(el.target);
@@ -89,7 +96,7 @@ $.fn.serializeObject = function() {
                 return Transparent.findNearestForm(el.target);
         }
 
-        return null;
+        return {};
     }
 
     window.popStateOld = document.location.pathname;
@@ -97,18 +104,39 @@ $.fn.serializeObject = function() {
 
         if (el.type == "popstate") {
 
+            // Custom action when manipulating user history
             if(!el.state)
                 return (window.popStateNew != window.popStateOld ? history.go(-1) : null);
 
             var pat  = /^https?:\/\//i;
             if (pat.test(href)) return ["GET", new URL(el.state.urlPath)];
             return ["GET", new URL(el.state.urlPath, location.origin)];
+
+        } else if(el.type == "submit") {
+
+            if(el.target && el.target.tagName == "FORM") {
+
+                // Action must be prevented here
+                // This is specific to form submission
+                el.preventDefault();
+
+                var href = el.target.getAttribute("action");
+                if(href == null) href = location.pathname;
+
+                var method = el.target.getAttribute("method") || "GET";
+                    method = method.toUpperCase();
+
+                var pat  = /^https?:\/\//i;
+                if (pat.test(href)) return [method, new URL(href)];
+                return [method, new URL(href, location.origin)];
+            }
         }
 
         switch (el.tagName) {
 
             case "A":
                 var href = el.getAttribute("href");
+                if(href == null) return null;
 
                 var pat  = /^https?:\/\//i;
                 if (pat.test(href)) return ["GET", new URL(href)];
@@ -119,6 +147,7 @@ $.fn.serializeObject = function() {
                 var domainBaseURI = el.baseURI.split('/').slice(0, 3).join('/');
                 var domainFormAction = el.formAction.split('/').slice(0, 3).join('/');
                 var pathname = el.formAction.replace(domainFormAction, "");
+                if(pathname == null) return null;
 
                 if (domainBaseURI == domainFormAction && el.getAttribute("type") == "submit") {
 
@@ -145,6 +174,8 @@ $.fn.serializeObject = function() {
         if (el.target && el.target.getAttribute("href")) {
 
             var href = el.target.getAttribute("href");
+            if(href == null) return null;
+            console.log(href);
 
             var pat  = /^https?:\/\//i;
             if (pat.test(href)) return ["GET", new URL(href)];
@@ -359,25 +390,21 @@ $.fn.serializeObject = function() {
         }
 
         var currentScroll = window.scrollY;
-        setTimeout(function() {
+        $('head').append(function() {
+            $('#page').append(function() {
 
+                    // Callback if needed, or any other action (e.g. call for showPage..)
+                callback();
 
-            $('head').append(function() {
-                $('#page').append(function() {
+                // Trigger onload event
+                dispatchEvent(new Event('load'));
 
-                     // Callback if needed, or any other action (e.g. call for showPage..)
-                    callback();
+                // Go back to top of the page..
+                if(scrollTo && window.location.hash === "") {
 
-                    // Trigger onload event
-                    dispatchEvent(new Event('load'));
-
-                    // Go back to top of the page..
-                    if(scrollTo && window.location.hash === "") {
-
-                        if(currentScroll == window.scrollY)
-                            window.scrollTo({top: 0, behavior: 'auto'});
-                    }
-                });
+                    if(currentScroll == window.scrollY)
+                        window.scrollTo({top: 0, behavior: 'auto'});
+                }
             });
         });
     }
@@ -407,9 +434,6 @@ $.fn.serializeObject = function() {
         if (url.pathname.startsWith("/images")) return;
         if (url.pathname.startsWith("/vendor")) return;
 
-        // Absolute path rejected
-        if (!url.pathname.startsWith("/")) return;
-
         // Unsecure url
         if (url.origin != location.origin) return;
 
@@ -427,8 +451,12 @@ $.fn.serializeObject = function() {
             var htmlResponse = document.createElement("html");
             $(htmlResponse)[0].innerHTML = xhr.responseText;
 
-            if(!Transparent.isValidPage(htmlResponse))
-                return window.location.href = url.href;
+            if(!Transparent.isValidPage(htmlResponse)) {
+
+                $("head").replaceWith($(htmlResponse).find("head"));
+                $("body").replaceWith($(htmlResponse).find("body"));
+                return;
+            }
 
             if(!Transparent.isSamePage(htmlResponse))
                 return window.location.href = url.href;
