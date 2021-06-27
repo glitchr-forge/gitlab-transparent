@@ -262,9 +262,14 @@ $.fn.serializeObject = function() {
         return knownLayout.indexOf(layout) !== -1;
     }
 
-    Transparent.isSamePage = function(htmlResponse)
+    Transparent.isSamePage = function(htmlResponse, method = null, data = null)
     {
+        // If no html response.. skip
         if(!htmlResponse) return false;
+
+        // An exception applies here..
+        // in case the page contains data transfered to the server
+        if(method && !jQuery.isEmptyObject(data)) return true;
 
         var page = $(htmlResponse).find("#page");
         if (!page.length) return false;
@@ -445,7 +450,7 @@ $.fn.serializeObject = function() {
         var addNewState = !e.state;
         if (addNewState) history.pushState({urlPath: url.href}, '', url.href);
 
-        function handleResponse(xhr) {
+        function handleResponse(xhr, method = null, data = null) {
 
             // Proces html response
             var htmlResponse = document.createElement("html");
@@ -458,7 +463,9 @@ $.fn.serializeObject = function() {
                 return;
             }
 
-            if(!Transparent.isSamePage(htmlResponse))
+            console.log(method, data);
+
+            if(!Transparent.isSamePage(htmlResponse, method, data))
                 return window.location.href = url.href;
 
             if (Transparent.isKnownLayout(htmlResponse))
@@ -469,17 +476,18 @@ $.fn.serializeObject = function() {
             });
         }
 
+        var data = Transparent.findNearestForm(e);
         jQuery.ajax({
             url: url.href,
             type: type,
-            data: Transparent.findNearestForm(e),
+            data: data,
             dataType: 'html',
             headers: Settings["headers"] || {},
-            success: function (data, status, xhr) {
-                return handleResponse(xhr);
+            success: function (html, status, xhr) {
+                return handleResponse(xhr, type, data);
             },
             error: function (xhr, ajaxOptions, thrownError) {
-                return handleResponse(xhr);
+                return handleResponse(xhr, type, data);
             }
         });
     }
