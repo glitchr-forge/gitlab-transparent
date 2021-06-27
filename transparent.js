@@ -122,6 +122,7 @@ $.fn.serializeObject = function() {
 
                 var href = el.target.getAttribute("action");
                 if(href == null) href = location.pathname;
+                if(href.startsWith("#")) href = location.pathname + href;
 
                 var method = el.target.getAttribute("method") || "GET";
                     method = method.toUpperCase();
@@ -137,9 +138,11 @@ $.fn.serializeObject = function() {
             case "A":
                 var href = el.getAttribute("href");
                 if(href == null) return null;
+                if(href.startsWith("#")) href = location.pathname + href;
 
                 var pat  = /^https?:\/\//i;
                 if (pat.test(href)) return ["GET", new URL(href)];
+
                 return ["GET", new URL(href, location.origin)];
 
             case "INPUT":
@@ -175,7 +178,7 @@ $.fn.serializeObject = function() {
 
             var href = el.target.getAttribute("href");
             if(href == null) return null;
-            console.log(href);
+            if(href.startsWith("#")) href = location.pathname + href;
 
             var pat  = /^https?:\/\//i;
             if (pat.test(href)) return ["GET", new URL(href)];
@@ -442,13 +445,20 @@ $.fn.serializeObject = function() {
         // Unsecure url
         if (url.origin != location.origin) return;
 
-        dispatchEvent(new Event('onbeforeunload'));
         e.preventDefault();
+        if(url.pathname == location.pathname) {
+
+            if(url.hash) window.location.hash = url.hash;
+            return;
+        }
+
+        dispatchEvent(new Event('onbeforeunload'));
 
         // This append on user click (e.g. when user push a link)
         // It is null when dev is pushing or replacing state
         var addNewState = !e.state;
-        if (addNewState) history.pushState({urlPath: url.href}, '', url.href);
+        if (addNewState)
+            history.pushState({urlPath: url.href}, '', url.href);
 
         function handleResponse(xhr, method = null, data = null) {
 
@@ -462,8 +472,6 @@ $.fn.serializeObject = function() {
                 $("body").replaceWith($(htmlResponse).find("body"));
                 return;
             }
-
-            console.log(method, data);
 
             if(!Transparent.isSamePage(htmlResponse, method, data))
                 return window.location.href = url.href;
