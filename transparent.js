@@ -450,9 +450,8 @@ $.fn.serializeObject = function() {
         if (url.origin != location.origin) return;
 
         e.preventDefault();
-        if(url.pathname == location.pathname) {
-
-            if(url.hash) window.location.hash = url.hash;
+        if(url.pathname == location.pathname && url.hash) {
+            window.location.hash = url.hash;
             return;
         }
 
