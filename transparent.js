@@ -386,6 +386,10 @@ $.fn.serializeObject = function() {
         var page = $(htmlResponse).find("#page");
         var oldPage = $("#page");
 
+        // Make sure name keep the same, after a page change when POST or GET called
+        page[0].setAttribute("name", oldPage[0].getAttribute("name"));
+
+        // Apply changes
         $(page).insertBefore(oldPage);
         oldPage.remove();
 
