@@ -73,6 +73,7 @@ $.fn.serializeObject = function() {
 
     Transparent.findNearestForm = function (el) {
 
+        console.log(el);
         switch (el.tagName) {
             case "FORM":
                 var form = $(el);
@@ -94,6 +95,9 @@ $.fn.serializeObject = function() {
 
             if (el.target.tagName == "INPUT" && el.target.getAttribute("type") == "submit")
                 return Transparent.findNearestForm(el.target);
+
+            var form = $(el.target).closest("form");
+            return (form ? form.serializeObject() : {});
         }
 
         return {};
@@ -108,9 +112,12 @@ $.fn.serializeObject = function() {
             if(!el.state)
                 return (window.popStateNew != window.popStateOld ? history.go(-1) : null);
 
+            var href = el.state.urlPath;
+
             var pat  = /^https?:\/\//i;
-            if (pat.test(href)) return ["GET", new URL(el.state.urlPath)];
-            return ["GET", new URL(el.state.urlPath, location.origin)];
+            if (pat.test(href)) return ["GET", new URL(href)];
+
+            return ["GET", new URL(href, location.origin)];
 
         } else if(el.type == "submit") {
 
@@ -450,7 +457,7 @@ $.fn.serializeObject = function() {
         if (url.origin != location.origin) return;
 
         e.preventDefault();
-        if(url.pathname == location.pathname && url.hash) {
+        if(url.pathname == location.pathname && url.hash && e.type != "popstate") {
             window.location.hash = url.hash;
             return;
         }
@@ -488,6 +495,7 @@ $.fn.serializeObject = function() {
         }
 
         var data = Transparent.findNearestForm(e);
+        console.log(data, type, url);
         jQuery.ajax({
             url: url.href,
             type: type,
