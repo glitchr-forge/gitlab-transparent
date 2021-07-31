@@ -30,10 +30,34 @@ $.fn.serializeObject = function() {
         Transparent.version = '0.1.0';
 
     var Settings = Transparent.settings = {
-        "headers": {}
+        "headers": {},
+        "data": {},
+        "response_text": {},
     };
 
     var isReady = false;
+
+    Transparent.getData = function(uuid)
+    {
+        return (Settings["data"][uuid] ? Settings["data"][uuid] : {});
+    }
+
+    Transparent.setData = function(uuid, data)
+    {
+        Settings["data"][uuid] = data;
+        return this;
+    }
+
+    Transparent.getResponseText = function(uuid)
+    {
+        return sessionStorage.getItem('transparent['+uuid+']') || null;
+    }
+
+    Transparent.setResponseText = function(uuid, responseText)
+    {
+        sessionStorage.setItem('transparent['+uuid+']', responseText);
+        return this;
+    }
 
     Transparent.configure = function (options) {
 
@@ -73,7 +97,6 @@ $.fn.serializeObject = function() {
 
     Transparent.findNearestForm = function (el) {
 
-        console.log(el);
         switch (el.tagName) {
             case "FORM":
                 var form = $(el);
@@ -107,17 +130,18 @@ $.fn.serializeObject = function() {
     Transparent.findLink = function (el) {
 
         if (el.type == "popstate") {
-
+            
             // Custom action when manipulating user history
             if(!el.state)
                 return (window.popStateNew != window.popStateOld ? history.go(-1) : null);
 
-            var href = el.state.urlPath;
+            var href = el.state.href;
+            var type = el.state.type;
+            var data = Transparent.getData(el.state.uuid);
 
             var pat  = /^https?:\/\//i;
-            if (pat.test(href)) return ["GET", new URL(href)];
-
-            return ["GET", new URL(href, location.origin)];
+            if (pat.test(href)) return [type, new URL(href), data];
+            return [type, new URL(href, location.origin), data];
 
         } else if(el.type == "submit") {
 
@@ -134,9 +158,11 @@ $.fn.serializeObject = function() {
                 var method = el.target.getAttribute("method") || "GET";
                     method = method.toUpperCase();
 
+                var data = Transparent.findNearestForm(el);
+
                 var pat  = /^https?:\/\//i;
-                if (pat.test(href)) return [method, new URL(href)];
-                return [method, new URL(href, location.origin)];
+                if (pat.test(href)) return [method, new URL(href), data];
+                return [method, new URL(href, location.origin), data];
             }
         }
 
@@ -148,9 +174,9 @@ $.fn.serializeObject = function() {
                 if(href.startsWith("#")) href = location.pathname + href;
 
                 var pat  = /^https?:\/\//i;
-                if (pat.test(href)) return ["GET", new URL(href)];
+                if (pat.test(href)) return ["GET", new URL(href), Transparent.findNearestForm(el)];
 
-                return ["GET", new URL(href, location.origin)];
+                return ["GET", new URL(href, location.origin), Transparent.findNearestForm(el)];
 
             case "INPUT":
             case "BUTTON":
@@ -162,8 +188,8 @@ $.fn.serializeObject = function() {
                 if (domainBaseURI == domainFormAction && el.getAttribute("type") == "submit") {
 
                     var pat  = /^https?:\/\//i;
-                    if (pat.test(href)) return ["POST", new URL(pathname)];
-                    return ["POST", new URL(pathname, location.origin)];
+                    if (pat.test(href)) return ["POST", new URL(pathname), Transparent.findNearestForm(el)];
+                    return ["POST", new URL(pathname, location.origin), Transparent.findNearestForm(el)];
                 }
         }
 
@@ -188,8 +214,8 @@ $.fn.serializeObject = function() {
             if(href.startsWith("#")) href = location.pathname + href;
 
             var pat  = /^https?:\/\//i;
-            if (pat.test(href)) return ["GET", new URL(href)];
-            return ["GET", new URL(href, location.origin)];
+            if (pat.test(href)) return ["GET", new URL(href), Transparent.findNearestForm(el)];
+            return ["GET", new URL(href, location.origin), Transparent.findNearestForm(el)];
         }
 
         if (el.target && el.target.parentElement)
@@ -253,7 +279,7 @@ $.fn.serializeObject = function() {
         return that;
     }
 
-    Transparent.isValidPage = function(htmlResponse) {
+    Transparent.isPage = function(htmlResponse) {
 
         // Check if page block found
         var page = $(htmlResponse).find("#page");
@@ -272,7 +298,7 @@ $.fn.serializeObject = function() {
         return knownLayout.indexOf(layout) !== -1;
     }
 
-    Transparent.isSamePage = function(htmlResponse, method = null, data = null)
+    Transparent.isCompatibleLayout = function(htmlResponse, method = null, data = null)
     {
         // If no html response.. skip
         if(!htmlResponse) return false;
@@ -353,6 +379,7 @@ $.fn.serializeObject = function() {
         });
     }
 
+
     Transparent.onLoad = function(htmlResponse, callback = null, scrollTo = true) {
 
         if(callback === null) callback = function() {};
@@ -428,6 +455,13 @@ $.fn.serializeObject = function() {
         });
     }
 
+    function uuidv4() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+          var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+          return v.toString(16);
+        });
+      }
+
     function __main__(e) {
 
         // Determine link and popState
@@ -436,8 +470,10 @@ $.fn.serializeObject = function() {
         window.popStateOld = document.location.pathname;
         if (link == null) return;
 
+        const uuid = uuidv4();
         const type = link[0];
-        const url = link[1];
+        const url  = link[1];
+        const data = link[2];
         if  (!url) return;
 
         // Wait for transparent window event to be triggered
@@ -455,64 +491,106 @@ $.fn.serializeObject = function() {
 
         // Unsecure url
         if (url.origin != location.origin) return;
-
         e.preventDefault();
-        if(url.pathname == location.pathname && url.hash && e.type != "popstate") {
-            window.location.hash = url.hash;
+
+        if(url.pathname == location.pathname && (url.hash || window.location.hash) && e.type != "popstate") {
+            
+            console.log("hash history.replaceState("+history.state+")");
+            history.replaceState(history.state, ' ');
+            if (url.hash) window.location.hash = url.hash;
             return;
         }
 
         dispatchEvent(new Event('onbeforeunload'));
 
-        // This append on user click (e.g. when user push a link)
-        // It is null when dev is pushing or replacing state
-        var addNewState = !e.state;
-        if (addNewState)
-            history.pushState({urlPath: url.href}, '', url.href);
+        function handleResponse(uuid, xhr = null, method = null, data = null) {
 
-        function handleResponse(xhr, method = null, data = null) {
-
-            // Proces html response
             var htmlResponse = document.createElement("html");
-            $(htmlResponse)[0].innerHTML = xhr.responseText;
+            var responseText = Transparent.getResponseText(uuid);
+            if(!responseText) {
+            
+                if(!xhr || !xhr.responseText) {
+                    console.error("Unexpected XHR response from "+uuid);
+                    console.error(sessionStorage);
+                    return;
+                }
 
-            if(!Transparent.isValidPage(htmlResponse)) {
+                responseText = xhr.responseText;
+                Transparent.setResponseText(uuid, xhr.responseText);
+            }
+            $(htmlResponse)[0].innerHTML = responseText;
 
+
+            if(!Transparent.isPage(htmlResponse)) {
+                //window.location.href = url.href;
                 $("head").replaceWith($(htmlResponse).find("head"));
                 $("body").replaceWith($(htmlResponse).find("body"));
                 return;
             }
 
-            if(!Transparent.isSamePage(htmlResponse, method, data))
+            // var addNewState = !e.state;
+            // if(addNewState) {
+    
+            //     if(!Transparent.isPage(htmlResponse)) window.location.href = url.href;
+            //     else {
+    
+            //         $("head").replaceWith($(htmlResponse).find("head"));
+            //         $("body").replaceWith($(htmlResponse).find("body"));
+            //     }
+
+            //     return;
+            // }
+                
+            if(!Transparent.isCompatibleLayout(htmlResponse, method, data))
                 return window.location.href = url.href;
 
             if (Transparent.isKnownLayout(htmlResponse))
-                return Transparent.onLoad(htmlResponse, null, addNewState);
+                return Transparent.onLoad(htmlResponse, null, addNewState && method != "POST");
 
             Transparent.hidePage(function() {
-                 Transparent.onLoad(htmlResponse, Transparent.showPage, addNewState);
+                 Transparent.onLoad(htmlResponse, Transparent.showPage, addNewState && method != "POST");
             });
         }
 
-        var data = Transparent.findNearestForm(e);
-        console.log(data, type, url);
-        jQuery.ajax({
-            url: url.href,
-            type: type,
-            data: data,
-            dataType: 'html',
-            headers: Settings["headers"] || {},
-            success: function (html, status, xhr) {
-                return handleResponse(xhr, type, data);
-            },
-            error: function (xhr, ajaxOptions, thrownError) {
-                return handleResponse(xhr, type, data);
-            }
-        });
+        if(history.state && !Transparent.getResponseText(history.state.uuid))
+            Transparent.setResponseText(history.state.uuid, $("html")[0].innerHTML);
+
+        // This append on user click (e.g. when user push a link)
+        // It is null when dev is pushing or replacing state
+        var addNewState = !e.state;
+        if (addNewState) {
+
+            // Submit ajax request..
+            var xhr = new XMLHttpRequest();
+            return jQuery.ajax({
+                url: url.href,
+                type: type,
+                data: data,
+                dataType: 'html',
+                headers: Settings["headers"] || {},
+                xhr: function () { return xhr; }, 
+                success: function (html, status, request) { 
+                    console.log("success history.pushState("+xhr.responseURL+")");
+                    history.pushState({uuid: uuid, type: type, data: data, href: xhr.responseURL}, '', xhr.responseURL);
+                    return handleResponse(uuid, request, type, data);
+                },
+                error:   function (request, ajaxOptions, thrownError) { 
+                    console.log("error history.pushState("+xhr.responseURL+")");
+                    history.pushState({uuid: uuid, type: type, data: data, href: xhr.responseURL}, '', xhr.responseURL);
+                    return handleResponse(uuid, request, type, data);
+                }
+            });
+        }
+
+        return handleResponse(history.state.uuid);
     }
 
-    // Initial push state..
-    history.pushState({urlPath: location.pathname+location.hash}, '', location.pathname+location.hash);
+    // Update history if not refreshing page or different page (avoid double pushState)
+    var href = history.state ? history.state.href : null;
+    if (href != location.pathname+location.hash) {
+        console.log("replace: "+location.pathname+location.hash)
+        history.replaceState({uuid: uuidv4(), type: "GET", href: location.pathname+location.hash}, '', location.pathname+location.hash);
+    }
 
     window.onpopstate = __main__;
     document.addEventListener('click', __main__, false);
