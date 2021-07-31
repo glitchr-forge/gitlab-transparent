@@ -493,9 +493,8 @@ $.fn.serializeObject = function() {
         if (url.origin != location.origin) return;
         e.preventDefault();
 
-        if(url.pathname == location.pathname && (url.hash || window.location.hash) && e.type != "popstate") {
+        if(url.pathname == location.pathname && (url.hash || window.location.hash) && e.type != "popstate" && type != "POST") {
             
-            console.log("hash history.replaceState("+history.state+")");
             history.replaceState(history.state, ' ');
             if (url.hash) window.location.hash = url.hash;
             return;
@@ -570,12 +569,10 @@ $.fn.serializeObject = function() {
                 headers: Settings["headers"] || {},
                 xhr: function () { return xhr; }, 
                 success: function (html, status, request) { 
-                    console.log("success history.pushState("+xhr.responseURL+")");
                     history.pushState({uuid: uuid, type: type, data: data, href: xhr.responseURL}, '', xhr.responseURL);
                     return handleResponse(uuid, request, type, data);
                 },
                 error:   function (request, ajaxOptions, thrownError) { 
-                    console.log("error history.pushState("+xhr.responseURL+")");
                     history.pushState({uuid: uuid, type: type, data: data, href: xhr.responseURL}, '', xhr.responseURL);
                     return handleResponse(uuid, request, type, data);
                 }
@@ -587,11 +584,10 @@ $.fn.serializeObject = function() {
 
     // Update history if not refreshing page or different page (avoid double pushState)
     var href = history.state ? history.state.href : null;
-    if (href != location.pathname+location.hash) {
-        console.log("replace: "+location.pathname+location.hash)
+    if (href != location.pathname+location.hash)
         history.replaceState({uuid: uuidv4(), type: "GET", href: location.pathname+location.hash}, '', location.pathname+location.hash);
-    }
 
+    // Overload onpopstate
     window.onpopstate = __main__;
     document.addEventListener('click', __main__, false);
 
