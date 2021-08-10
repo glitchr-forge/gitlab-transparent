@@ -519,27 +519,25 @@ $.fn.serializeObject = function() {
             }
             $(htmlResponse)[0].innerHTML = responseText;
 
-
+            // Page not recognized..
             if(!Transparent.isPage(htmlResponse)) {
-                //window.location.href = url.href;
                 $("head").replaceWith($(htmlResponse).find("head"));
                 $("body").replaceWith($(htmlResponse).find("body"));
                 return;
             }
 
-            // var addNewState = !e.state;
-            // if(addNewState) {
-    
-            //     if(!Transparent.isPage(htmlResponse)) window.location.href = url.href;
-            //     else {
-    
-            //         $("head").replaceWith($(htmlResponse).find("head"));
-            //         $("body").replaceWith($(htmlResponse).find("body"));
-            //     }
+            // Specific to Symfony profiler..
+            if(xhr) {
 
-            //     return;
-            // }
-                
+                var xdebugToken = xhr.getResponseHeader('X-Debug-Token');
+                if (typeof Sfjs !== "undefined") {
+
+                    var currentElement = $('.sf-toolbar')[0];
+                    Sfjs.load(currentElement.id, '/_wdt/'+ xdebugToken);
+                }
+            }
+
+            // Load new page..
             if(!Transparent.isCompatibleLayout(htmlResponse, method, data))
                 return window.location.href = url.href;
 
