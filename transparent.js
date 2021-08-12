@@ -526,17 +526,6 @@ $.fn.serializeObject = function() {
                 return;
             }
 
-            // Specific to Symfony profiler..
-            if(xhr) {
-
-                var xdebugToken = xhr.getResponseHeader('X-Debug-Token');
-                if (typeof Sfjs !== "undefined") {
-
-                    var currentElement = $('.sf-toolbar')[0];
-                    Sfjs.load(currentElement.id, '/_wdt/'+ xdebugToken);
-                }
-            }
-
             // Load new page..
             if(!Transparent.isCompatibleLayout(htmlResponse, method, data))
                 return window.location.href = url.href;
