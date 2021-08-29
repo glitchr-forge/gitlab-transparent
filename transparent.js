@@ -502,33 +502,33 @@ $.fn.serializeObject = function() {
 
         dispatchEvent(new Event('onbeforeunload'));
 
-        function handleResponse(uuid, xhr = null, method = null, data = null) {
+        function handleResponse(uuid, request = null, method = null, data = null, xhr = null) {
 
             var htmlResponse = document.createElement("html");
             var responseText = Transparent.getResponseText(uuid);
             if(!responseText) {
             
-                if(!xhr || !xhr.responseText) {
+                if(!request || !request.responseText) {
                     console.error("Unexpected XHR response from "+uuid);
                     console.error(sessionStorage);
                     return;
                 }
 
-                responseText = xhr.responseText;
-                Transparent.setResponseText(uuid, xhr.responseText);
+                responseText = request.responseText;
+                Transparent.setResponseText(uuid, request.responseText);
             }
             $(htmlResponse)[0].innerHTML = responseText;
 
             // Page not recognized..
-            if(!Transparent.isPage(htmlResponse)) {
-                $("head").replaceWith($(htmlResponse).find("head"));
-                $("body").replaceWith($(htmlResponse).find("body"));
-                return;
-            }
+            if(!Transparent.isPage(htmlResponse))
+                return window.location.href = url.href;
 
-            // Load new page..
+            // Layout not compatible.. needs to be reloaded
             if(!Transparent.isCompatibleLayout(htmlResponse, method, data))
                 return window.location.href = url.href;
+
+            // Load new page..
+            if(xhr) history.pushState({uuid: uuid, type: type, data: data, href: xhr.responseURL}, '', xhr.responseURL);
 
             if (Transparent.isKnownLayout(htmlResponse))
                 return Transparent.onLoad(htmlResponse, null, addNewState && method != "POST");
@@ -556,12 +556,10 @@ $.fn.serializeObject = function() {
                 headers: Settings["headers"] || {},
                 xhr: function () { return xhr; }, 
                 success: function (html, status, request) { 
-                    history.pushState({uuid: uuid, type: type, data: data, href: xhr.responseURL}, '', xhr.responseURL);
-                    return handleResponse(uuid, request, type, data);
+                    return handleResponse(uuid, request, type, data, xhr);
                 },
                 error:   function (request, ajaxOptions, thrownError) { 
-                    history.pushState({uuid: uuid, type: type, data: data, href: xhr.responseURL}, '', xhr.responseURL);
-                    return handleResponse(uuid, request, type, data);
+                    return handleResponse(uuid, request, type, data, xhr);
                 }
             });
         }
