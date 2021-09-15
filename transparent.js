@@ -78,8 +78,6 @@ $.fn.serializeObject = function() {
         if(Transparent.addLayout()) // Return true if layout is added
             Transparent.showPage();
 
-        $("form").submit(__main__);
-
         isReady = true;
         dispatchEvent(new Event('transparent:ready'));
 
@@ -88,9 +86,13 @@ $.fn.serializeObject = function() {
 
     Transparent.addLayout = function() {
 
-        var layout = $("#page")[0].getAttribute("layout");
-        var isKnown = knownLayout.indexOf(layout) !== -1;
-        if(!isKnown) knownLayout.push(layout);
+        var layout = $("#page")[0];
+        if(!layout) return false;
+
+        var id = layout.getAttribute("layout");
+
+        var isKnown = knownLayout.indexOf(id) !== -1;
+        if(!isKnown) knownLayout.push(id);
 
         return !isKnown;
     }
@@ -469,7 +471,7 @@ $.fn.serializeObject = function() {
         const link = Transparent.findLink(e);
         window.popStateOld = document.location.pathname;
         if (link == null) return;
-
+        
         const uuid = uuidv4();
         const type = link[0];
         const url  = link[1];
@@ -478,6 +480,8 @@ $.fn.serializeObject = function() {
 
         // Wait for transparent window event to be triggered
         if (!isReady) return;
+
+        if( ! $(this).find('#page').length) return;
 
         // Symfony defaults rejected
         if (url.pathname.startsWith("/_profiler")) return;
@@ -555,7 +559,7 @@ $.fn.serializeObject = function() {
                 dataType: 'html',
                 headers: Settings["headers"] || {},
                 xhr: function () { return xhr; }, 
-                success: function (html, status, request) { 
+                success: function (html, status, request) {
                     return handleResponse(uuid, request, type, data, xhr);
                 },
                 error:   function (request, ajaxOptions, thrownError) { 
@@ -575,6 +579,8 @@ $.fn.serializeObject = function() {
     // Overload onpopstate
     window.onpopstate = __main__;
     document.addEventListener('click', __main__, false);
+    
+    $("form").submit(__main__);
 
     return Transparent;
 });
