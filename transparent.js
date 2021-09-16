@@ -409,7 +409,7 @@ $.fn.serializeObject = function() {
 
             var el   = this;
             var found = false;
-
+            
             $("head").children().each(function() {
                 found = this.isEqualNode(el);
                 return !found;
@@ -417,6 +417,7 @@ $.fn.serializeObject = function() {
 
             if(!found) $("head").append(this);
         });
+
 
         // Extract page block to be loaded
         var page = $(htmlResponse).find("#page");
@@ -481,7 +482,7 @@ $.fn.serializeObject = function() {
         // Wait for transparent window event to be triggered
         if (!isReady) return;
 
-        if( ! $(this).find('#page').length) return;
+        if(e.type != "popstate" && ! $(this).find('#page').length) return;
 
         // Symfony defaults rejected
         if (url.pathname.startsWith("/_profiler")) return;
