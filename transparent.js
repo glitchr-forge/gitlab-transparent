@@ -86,11 +86,11 @@ $.fn.serializeObject = function() {
 
     Transparent.addLayout = function() {
 
-        var layout = $("#page")[0];
-        if(!layout) return false;
+        var layout = $("#page");
+        if(!layout.length) return false;
 
-        var id = layout.getAttribute("layout");
-
+        var id = layout.data("layout");
+        
         var isKnown = knownLayout.indexOf(id) !== -1;
         if(!isKnown) knownLayout.push(id);
 
