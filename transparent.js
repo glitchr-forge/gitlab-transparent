@@ -306,19 +306,20 @@ $.fn.serializeObject = function() {
     Transparent.isPage = function(htmlResponse) {
 
         // Check if page block found
-        var page = $(htmlResponse).find("#page");
-        if (!page.length) return false;
-
+        var page = $(htmlResponse).find("#page")[0] || undefined;
+        if (page === undefined) return false;
+        
         return true;
     }
 
     var knownLayout = [];
     Transparent.isKnownLayout = function(htmlResponse)
     {
-        var page = (htmlResponse ? $(htmlResponse).find("#page") : $("#page"));
-        if (!page.length) return false;
+        var page = (htmlResponse ? $(htmlResponse).find("#page") : $("#page"))[0];
+        if (page === undefined) return false;
 
-        var layout = $(page)[0].getAttribute("layout");
+        var layout = page.dataset.layout;
+
         return knownLayout.indexOf(layout) !== -1;
     }
 
@@ -331,15 +332,14 @@ $.fn.serializeObject = function() {
         // in case the page contains data transfered to the server
         if(method && !jQuery.isEmptyObject(data)) return true;
 
-        var page = $(htmlResponse).find("#page");
-        if (!page.length) return false;
+        var page = $(htmlResponse).find("#page")[0] || undefined;
+        if (page === undefined) return false;
 
-        var currentPage = $("#page");
-        if (!currentPage.length) return false;
+        var currentPage = $("#page")[0] || undefined;
+        if (currentPage === undefined) return false;
 
-        var layout = $(currentPage)[0].getAttribute("layout");
-        var prevLayout = $(page)[0].getAttribute("layout-prev") || layout;
- 
+        var layout = currentPage.dataset.layout;
+        var prevLayout = page.dataset.prevLayout || layout;
         return layout == prevLayout;
     }
 
@@ -446,7 +446,8 @@ $.fn.serializeObject = function() {
         var oldPage = $("#page");
 
         // Make sure name keeps the same, after a page change when POST or GET called
-        page[0].setAttribute("layout-prev", oldPage[0].getAttribute("layout"));
+        if  (page.data.layout == oldPage.data.layout) delete page.data.prevLayout;
+        else page.data.prevLayout  = oldPage.data.layout;
 
         // Apply changes
         $(page).insertBefore(oldPage);
@@ -544,6 +545,7 @@ $.fn.serializeObject = function() {
                 responseText = request.responseText;
                 Transparent.setResponseText(uuid, request.responseText);
             }
+
             $(htmlResponse)[0].innerHTML = responseText;
 
             // Page not recognized..
