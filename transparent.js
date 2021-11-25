@@ -33,6 +33,7 @@ $.fn.serializeObject = function() {
         "headers": {},
         "data": {},
         "response_text": {},
+        "response_limit": 25
     };
 
     var isReady = false;
@@ -50,15 +51,36 @@ $.fn.serializeObject = function() {
 
     Transparent.getResponseText = function(uuid)
     {
+        var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
+
+        // Bubble up the most recent uuid
+        var index = array.indexOf(uuid);
+        if (index > -1) {
+            array.splice(index, 1);
+            array.push(uuid);
+        }
+
+        // If no response refresh page based on the requested url
         return sessionStorage.getItem('transparent['+uuid+']') || null;
     }
 
     Transparent.setResponseText = function(uuid, responseText)
     {
+        // Remove older uuid response in the limit of the response buffer..
+        var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
+        if(!array.length)
+            Object.keys(sessionStorage) .filter(function(k) { return /transparent\[.*\]/.test(k); })
+                  .forEach(function(k) { sessionStorage.removeItem(k); });
+
+        array.push(uuid);
+        while(array.length > Settings["response_limit"])
+            sessionStorage.removeItem('transparent['+array.shift()+']');
+
+        sessionStorage.setItem('transparent', JSON.stringify(array));
         sessionStorage.setItem('transparent['+uuid+']', responseText);
         return this;
     }
-
+    
     Transparent.configure = function (options) {
 
         var key, value;
@@ -315,10 +337,10 @@ $.fn.serializeObject = function() {
         var currentPage = $("#page");
         if (!currentPage.length) return false;
 
-        var name = $(page)[0].getAttribute("name");
-        var currentName = $(currentPage)[0].getAttribute("name");
-
-        return name == currentName;
+        var layout = $(currentPage)[0].getAttribute("layout");
+        var prevLayout = $(page)[0].getAttribute("layout-prev") || layout;
+ 
+        return layout == prevLayout;
     }
 
     Transparent.showPage = function(callback = function() {}, delay = 250) {
@@ -423,8 +445,8 @@ $.fn.serializeObject = function() {
         var page = $(htmlResponse).find("#page");
         var oldPage = $("#page");
 
-        // Make sure name keep the same, after a page change when POST or GET called
-        page[0].setAttribute("name", oldPage[0].getAttribute("name"));
+        // Make sure name keeps the same, after a page change when POST or GET called
+        page[0].setAttribute("layout-prev", oldPage[0].getAttribute("layout"));
 
         // Apply changes
         $(page).insertBefore(oldPage);
@@ -463,7 +485,7 @@ $.fn.serializeObject = function() {
           var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
           return v.toString(16);
         });
-      }
+    }
 
     function __main__(e) {
 
@@ -516,7 +538,7 @@ $.fn.serializeObject = function() {
                 if(!request || !request.responseText) {
                     console.error("Unexpected XHR response from "+uuid);
                     console.error(sessionStorage);
-                    return;
+                    return window.location.href = url.href;
                 }
 
                 responseText = request.responseText;
