@@ -33,7 +33,10 @@ $.fn.serializeObject = function() {
         "headers": {},
         "data": {},
         "response_text": {},
-        "response_limit": 25
+        "response_limit": 25,
+        "throttle": 1000,
+        "identifier": "#page",
+        "linkExceptions": ["/_wdt", "/_profiler"]
     };
 
     var isReady = false;
@@ -108,7 +111,7 @@ $.fn.serializeObject = function() {
 
     Transparent.addLayout = function() {
 
-        var layout = $("#page");
+        var layout = $(Settings.identifier);
         if(!layout.length) return false;
 
         var id = layout.data("layout");
@@ -291,7 +294,7 @@ $.fn.serializeObject = function() {
 
     Transparent.findElementFromParents = function(el, parents, from = -1) {
 
-        var that = $(el).find("#page");
+        var that = $(el).find(Settings.identifier);
         for (var i = parents.length - 1, j = 0; i >= 0; i--) {
 
             if (j++ < from) continue;
@@ -306,7 +309,7 @@ $.fn.serializeObject = function() {
     Transparent.isPage = function(htmlResponse) {
 
         // Check if page block found
-        var page = $(htmlResponse).find("#page")[0] || undefined;
+        var page = $(htmlResponse).find(Settings.identifier)[0] || undefined;
         if (page === undefined) return false;
         
         return true;
@@ -315,7 +318,7 @@ $.fn.serializeObject = function() {
     var knownLayout = [];
     Transparent.isKnownLayout = function(htmlResponse)
     {
-        var page = (htmlResponse ? $(htmlResponse).find("#page") : $("#page"))[0];
+        var page = (htmlResponse ? $(htmlResponse).find(Settings.identifier) : $(Settings.identifier))[0];
         if (page === undefined) return false;
 
         var layout = page.dataset.layout;
@@ -332,10 +335,10 @@ $.fn.serializeObject = function() {
         // in case the page contains data transfered to the server
         if(method && !jQuery.isEmptyObject(data)) return true;
 
-        var page = $(htmlResponse).find("#page")[0] || undefined;
+        var page = $(htmlResponse).find(Settings.identifier)[0] || undefined;
         if (page === undefined) return false;
 
-        var currentPage = $("#page")[0] || undefined;
+        var currentPage = $(Settings.identifier)[0] || undefined;
         if (currentPage === undefined) return false;
 
         var layout = currentPage.dataset.layout;
@@ -347,13 +350,13 @@ $.fn.serializeObject = function() {
 
         if(delay == 0) {
 
-            $("#page").css("visibility", "visible");
-            $("#page").css("opacity", 1);
+            $(Settings.identifier).css("visibility", "visible");
+            $(Settings.identifier).css("opacity", 1);
             callback();
 
         } else {
 
-            $("#page").animate({opacity:1}, delay);
+            $(Settings.identifier).animate({opacity:1}, delay);
             setTimeout(callback, delay);
         }
     }
@@ -362,13 +365,13 @@ $.fn.serializeObject = function() {
 
         if(delay == 0) {
 
-            $("#page").css("visibility", "hidden");
-            $("#page").css("opacity", 0);
+            $(Settings.identifier).css("visibility", "hidden");
+            $(Settings.identifier).css("opacity", 0);
             callback();
 
         } else {
 
-            $("#page").animate({opacity:0}, delay);
+            $(Settings.identifier).animate({opacity:0}, delay);
             setTimeout(callback, delay);
         }
     }
@@ -404,7 +407,44 @@ $.fn.serializeObject = function() {
     }
 
 
-    Transparent.onLoad = function(htmlResponse, callback = null, scrollTo = true) {
+    Transparent.rescue = function(htmlResponse)
+    {
+        console.error("Rescue mode.. called");
+        function nodeScriptReplace(node) {
+            if ( nodeScriptIs(node) === true ) {
+                    node.parentNode.replaceChild( nodeScriptClone(node) , node );
+            }
+            else {
+                    var i = -1, children = node.childNodes;
+                    while ( ++i < children.length ) {
+                          nodeScriptReplace( children[i] );
+                    }
+            }
+    
+            return node;
+        }
+        function nodeScriptClone(node){
+                var script  = document.createElement("script");
+                script.text = node.innerHTML;
+        
+                var i = -1, attrs = node.attributes, attr;
+                while ( ++i < attrs.length ) {                                    
+                    script.setAttribute( (attr = attrs[i]).name, attr.value );
+                }
+                return script;
+        }
+        
+        function nodeScriptIs(node) {
+                return node.tagName === 'SCRIPT';
+        }
+        
+        document.head.innerHTML = $(htmlResponse).find("head").html();
+        document.body.innerHTML = $(htmlResponse).find("body").html();
+        nodeScriptReplace($("head")[0]);
+        nodeScriptReplace($("body")[0]);
+    }
+
+    Transparent.onLoad = function(identifier, htmlResponse, callback = null, scrollTo = true) {
 
         if(callback === null) callback = function() {};
 
@@ -440,10 +480,9 @@ $.fn.serializeObject = function() {
             if(!found) $("head").append(this);
         });
 
-
         // Extract page block to be loaded
-        var page = $(htmlResponse).find("#page");
-        var oldPage = $("#page");
+        var page = $(htmlResponse).find(identifier);
+        var oldPage = $(identifier);
 
         // Make sure name keeps the same, after a page change when POST or GET called
         if  (page.data.layout == oldPage.data.layout) delete page.data.prevLayout;
@@ -463,9 +502,9 @@ $.fn.serializeObject = function() {
 
         var currentScroll = window.scrollY;
         $('head').append(function() {
-            $('#page').append(function() {
+            $(identifier).append(function() {
 
-                    // Callback if needed, or any other action (e.g. call for showPage..)
+                // Callback if needed, or any other action (e.g. call for showPage..)
                 callback();
 
                 // Trigger onload event
@@ -505,11 +544,14 @@ $.fn.serializeObject = function() {
         // Wait for transparent window event to be triggered
         if (!isReady) return;
 
-        if(e.type != "popstate" && ! $(this).find('#page').length) return;
+        if(e.type != "popstate" && ! $(this).find(Settings.identifier).length) return;
 
         // Symfony defaults rejected
-        if (url.pathname.startsWith("/_profiler")) return;
-        if (url.pathname.startsWith("/_wdt")) return;
+        for(i = 0; i < Settings.linkExceptions.length; i++) {
+
+            linkException = Settings.linkExceptions[i];
+            if (url.pathname.startsWith(linkException)) return;
+        }
 
         // Ressources files rejected
         if (url.pathname.startsWith("/css")) return;
@@ -535,18 +577,31 @@ $.fn.serializeObject = function() {
             var htmlResponse = document.createElement("html");
             var responseText = Transparent.getResponseText(uuid);
             if(!responseText) {
-            
-                if(!request || !request.responseText) {
-                    console.error("Unexpected XHR response from "+uuid);
+
+                if(!request) {
+
+                    console.error("No XHR response from "+uuid+" : missing request.");
                     console.error(sessionStorage);
-                    return window.location.href = url.href;
+
+                    setTimeout(function() { window.location.href = url.href; }, Settings["throttle"]);
+                    return;
                 }
 
                 responseText = request.responseText;
-                Transparent.setResponseText(uuid, request.responseText);
+                if(request.state >= 500) {
+
+                    console.error("Unexpected XHR response from "+uuid);
+                    console.error(sessionStorage);
+                }
+
+                Transparent.setResponseText(uuid, responseText);
             }
 
             $(htmlResponse)[0].innerHTML = responseText;
+
+            // Error detected..
+            if(request.state >= 500) 
+                return Transparent.rescue(htmlResponse);
 
             // Page not recognized..
             if(!Transparent.isPage(htmlResponse))
@@ -556,14 +611,14 @@ $.fn.serializeObject = function() {
             if(!Transparent.isCompatibleLayout(htmlResponse, method, data))
                 return window.location.href = url.href;
 
-            // Load new page..
+            // Add new page to history..
             if(xhr) history.pushState({uuid: uuid, type: type, data: data, href: xhr.responseURL}, '', xhr.responseURL);
 
             if (Transparent.isKnownLayout(htmlResponse))
-                return Transparent.onLoad(htmlResponse, null, addNewState && method != "POST");
+                return Transparent.onLoad(Settings.identifier, htmlResponse, null, addNewState && method != "POST");
 
-            Transparent.hidePage(function() {
-                 Transparent.onLoad(htmlResponse, Transparent.showPage, addNewState && method != "POST");
+            return Transparent.hidePage(function() {
+                Transparent.onLoad(Settings.identifier, htmlResponse, Transparent.showPage, addNewState && method != "POST");
             });
         }
 
