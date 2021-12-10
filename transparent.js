@@ -32,6 +32,7 @@ $.fn.serializeObject = function() {
     var Settings = Transparent.settings = {
         "headers": {},
         "data": {},
+        "debug": false,
         "response_text": {},
         "response_limit": 25,
         "throttle": 1000,
@@ -39,7 +40,8 @@ $.fn.serializeObject = function() {
         "linkExceptions": ["/_wdt", "/_profiler"]
     };
 
-    var isReady = false;
+    var isReady    = false;
+    var rescueMode = false;
 
     Transparent.getData = function(uuid)
     {
@@ -101,7 +103,7 @@ $.fn.serializeObject = function() {
         Transparent.configure(options);
 
         if(Transparent.addLayout()) // Return true if layout is added
-            Transparent.showPage();
+            Transparent.transitionIn();
 
         isReady = true;
         dispatchEvent(new Event('transparent:ready'));
@@ -332,8 +334,8 @@ $.fn.serializeObject = function() {
         if(!htmlResponse) return false;
 
         // An exception applies here..
-        // in case the page contains data transfered to the server
-        if(method && !jQuery.isEmptyObject(data)) return true;
+        // in case the page contains data transferred to the server
+        if(method == "POST" && !jQuery.isEmptyObject(data)) return true;
 
         var page = $(htmlResponse).find(Settings.identifier)[0] || undefined;
         if (page === undefined) return false;
@@ -346,7 +348,7 @@ $.fn.serializeObject = function() {
         return layout == prevLayout;
     }
 
-    Transparent.showPage = function(callback = function() {}, delay = 250) {
+    Transparent.transitionIn = function(callback = function() {}, delay = 250) {
 
         if(delay == 0) {
 
@@ -361,7 +363,7 @@ $.fn.serializeObject = function() {
         }
     }
 
-    Transparent.hidePage = function(callback = function() {}, delay = 250) {
+    Transparent.transitionOut = function(callback = function() {}, delay = 250) {
 
         if(delay == 0) {
 
@@ -406,10 +408,11 @@ $.fn.serializeObject = function() {
         });
     }
 
-
     Transparent.rescue = function(htmlResponse)
     {
         console.error("Rescue mode.. called");
+        rescueMode = true;
+
         function nodeScriptReplace(node) {
             if ( nodeScriptIs(node) === true ) {
                     node.parentNode.replaceChild( nodeScriptClone(node) , node );
@@ -504,7 +507,7 @@ $.fn.serializeObject = function() {
         $('head').append(function() {
             $(identifier).append(function() {
 
-                // Callback if needed, or any other action (e.g. call for showPage..)
+                // Callback if needed, or any other action (e.g. call for transitionIn..)
                 callback();
 
                 // Trigger onload event
@@ -533,7 +536,7 @@ $.fn.serializeObject = function() {
         window.popStateNew = document.location.pathname;
         const link = Transparent.findLink(e);
         window.popStateOld = document.location.pathname;
-        if (link == null) return;
+        if (link == null || Settings.debug) return;
         
         const uuid = uuidv4();
         const type = link[0];
@@ -572,7 +575,7 @@ $.fn.serializeObject = function() {
 
         dispatchEvent(new Event('onbeforeunload'));
 
-        function handleResponse(uuid, request = null, method = null, data = null, xhr = null) {
+        function handleResponse(uuid, status = 200, method = null, data = null, xhr = null, request = null) {
 
             var htmlResponse = document.createElement("html");
             var responseText = Transparent.getResponseText(uuid);
@@ -588,9 +591,9 @@ $.fn.serializeObject = function() {
                 }
 
                 responseText = request.responseText;
-                if(request.state >= 500) {
+                if(status >= 500) {
 
-                    console.error("Unexpected XHR response from "+uuid);
+                    console.error("Unexpected XHR response from "+uuid+": error code "+request.status);
                     console.error(sessionStorage);
                 }
 
@@ -600,25 +603,32 @@ $.fn.serializeObject = function() {
             $(htmlResponse)[0].innerHTML = responseText;
 
             // Error detected..
-            if(request.state >= 500) 
-                return Transparent.rescue(htmlResponse);
+            if(status >= 500) {
+                
+                // Add new page to history..
+                if(xhr) history.pushState({uuid: uuid, status:status, method: method, data: data, href: xhr.responseURL}, '', xhr.responseURL);
 
-            // Page not recognized..
+                // Call rescue..
+                return Transparent.rescue(htmlResponse);
+            }
+
+            // Page not recognized.. just go there.. no POST information transmitted.. 
             if(!Transparent.isPage(htmlResponse))
                 return window.location.href = url.href;
 
-            // Layout not compatible.. needs to be reloaded
+            // Layout not compatible.. needs to be reloaded (exception when POST is detected..)
             if(!Transparent.isCompatibleLayout(htmlResponse, method, data))
                 return window.location.href = url.href;
 
-            // Add new page to history..
-            if(xhr) history.pushState({uuid: uuid, type: type, data: data, href: xhr.responseURL}, '', xhr.responseURL);
+            // From here the page is valid.. 
+            // so new page added to history..
+            if(xhr) history.pushState({uuid: uuid, status:status, method: method, data: data, href: xhr.responseURL}, '', xhr.responseURL);
 
             if (Transparent.isKnownLayout(htmlResponse))
                 return Transparent.onLoad(Settings.identifier, htmlResponse, null, addNewState && method != "POST");
 
-            return Transparent.hidePage(function() {
-                Transparent.onLoad(Settings.identifier, htmlResponse, Transparent.showPage, addNewState && method != "POST");
+            return Transparent.transitionOut(function() {
+                Transparent.onLoad(Settings.identifier, htmlResponse, Transparent.transitionIn, addNewState && method != "POST");
             });
         }
 
@@ -640,27 +650,30 @@ $.fn.serializeObject = function() {
                 headers: Settings["headers"] || {},
                 xhr: function () { return xhr; }, 
                 success: function (html, status, request) {
-                    return handleResponse(uuid, request, type, data, xhr);
+                    return handleResponse(uuid, request.status, type, data, xhr, request);
                 },
                 error:   function (request, ajaxOptions, thrownError) { 
-                    return handleResponse(uuid, request, type, data, xhr);
+                    return handleResponse(uuid, request.status, type, data, xhr, request);
                 }
             });
         }
 
-        return handleResponse(history.state.uuid);
+        return handleResponse(history.state.uuid, history.state.status, history.state.method, history.state.data);
     }
 
     // Update history if not refreshing page or different page (avoid double pushState)
     var href = history.state ? history.state.href : null;
     if (href != location.pathname+location.hash)
-        history.replaceState({uuid: uuidv4(), type: "GET", href: location.pathname+location.hash}, '', location.pathname+location.hash);
+        history.replaceState({uuid: uuidv4(), status: history.state ? history.state.status : 200, data:{}, method: history.state ? history.state.method : "GET", href: location.pathname+location.hash}, '', location.pathname+location.hash);
 
     // Overload onpopstate
-    window.onpopstate = __main__;
-    document.addEventListener('click', __main__, false);
-    
-    $("form").submit(__main__);
+    if(!Settings.debug) {
+
+        window.onpopstate = __main__;
+        document.addEventListener('click', __main__, false);
+        
+        $("form").submit(__main__);
+    }
 
     return Transparent;
 });
