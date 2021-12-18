@@ -129,11 +129,11 @@ $.fn.serializeObject = function() {
         switch (el.tagName) {
             case "FORM":
                 var form = $(el);
-                return (form ? form.serializeObject() : {});
+                return (form ? form.serialize() : {});
             case "INPUT":
             case "BUTTON":
                 var form = $(el).closest("form");
-                return (form ? form.serializeObject() : {});
+                return (form ? form.serialize() : {});
         }
 
         // Try to detect target element
@@ -149,7 +149,7 @@ $.fn.serializeObject = function() {
                 return Transparent.findNearestForm(el.target);
 
             var form = $(el.target).closest("form");
-            return (form ? form.serializeObject() : {});
+            return (form ? form.serialize() : {});
         }
 
         return {};
