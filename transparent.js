@@ -72,7 +72,7 @@ $.fn.serializeObject = function() {
     Transparent.setResponseText = function(uuid, responseText)
     {
         // Remove older uuid response in the limit of the response buffer..
-        var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
+        var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
         if(!array.length)
             Object.keys(sessionStorage) .filter(function(k) { return /transparent\[.*\]/.test(k); })
                   .forEach(function(k) { sessionStorage.removeItem(k); });
@@ -81,8 +81,10 @@ $.fn.serializeObject = function() {
         while(array.length > Settings["response_limit"])
             sessionStorage.removeItem('transparent['+array.shift()+']');
 
-        sessionStorage.setItem('transparent', JSON.stringify(array));
-        sessionStorage.setItem('transparent['+uuid+']', responseText);
+        if(isLocalStorageNameSupported()) {
+            sessionStorage.setItem('transparent', JSON.stringify(array));
+            sessionStorage.setItem('transparent['+uuid+']', responseText);
+        }
         return this;
     }
     
@@ -530,6 +532,21 @@ $.fn.serializeObject = function() {
         });
     }
 
+    function isLocalStorageNameSupported() 
+    {
+        var testKey = 'test', storage = window.sessionStorage;
+        try 
+        {
+            storage.setItem(testKey, '1');
+            storage.removeItem(testKey);
+            return localStorageName in win && win[localStorageName];
+        } 
+        catch (error) 
+        {
+            return false;
+        }
+    }
+
     function __main__(e) {
 
         // Determine link and popState
@@ -579,6 +596,7 @@ $.fn.serializeObject = function() {
 
             var htmlResponse = document.createElement("html");
             var responseText = Transparent.getResponseText(uuid);
+
             if(!responseText) {
 
                 if(!request) {
@@ -586,7 +604,7 @@ $.fn.serializeObject = function() {
                     console.error("No XHR response from "+uuid+" : missing request.");
                     console.error(sessionStorage);
 
-                    setTimeout(function() { window.location.href = url.href; }, Settings["throttle"]);
+                    setTimeout(function() { window.location.href = url.href; }, Settings["throttle"]);
                     return;
                 }
 
@@ -604,7 +622,7 @@ $.fn.serializeObject = function() {
 
             // Error detected..
             if(status >= 500) {
-                
+
                 // Add new page to history..
                 if(xhr) history.pushState({uuid: uuid, status:status, method: method, data: data, href: xhr.responseURL}, '', xhr.responseURL);
 
