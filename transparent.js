@@ -56,7 +56,7 @@ $.fn.serializeObject = function() {
 
     Transparent.getResponseText = function(uuid)
     {
-        var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
+        var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
 
         // Bubble up the most recent uuid
         var index = array.indexOf(uuid);
@@ -596,7 +596,7 @@ $.fn.serializeObject = function() {
 
             var htmlResponse = document.createElement("html");
             var responseText = Transparent.getResponseText(uuid);
-
+            var responseURL  = xhr.responseURL || url.href;
             if(!responseText) {
 
                 if(!request) {
@@ -604,7 +604,7 @@ $.fn.serializeObject = function() {
                     console.error("No XHR response from "+uuid+" : missing request.");
                     console.error(sessionStorage);
 
-                    setTimeout(function() { window.location.href = url.href; }, Settings["throttle"]);
+                    setTimeout(function() { window.location.href = responseURL; }, Settings["throttle"]);
                     return;
                 }
 
@@ -624,29 +624,29 @@ $.fn.serializeObject = function() {
             if(status >= 500) {
 
                 // Add new page to history..
-                if(xhr) history.pushState({uuid: uuid, status:status, method: method, data: data, href: xhr.responseURL}, '', xhr.responseURL);
+                if(xhr) history.pushState({uuid: uuid, status:status, method: method, data: data, href: responseURL}, '', responseURL);
 
                 // Call rescue..
                 return Transparent.rescue(htmlResponse);
             }
 
-            // Page not recognized.. just go there.. no POST information transmitted.. 
+            // Page not recognized.. just go there.. no POST information transmitted..
             if(!Transparent.isPage(htmlResponse))
-                return window.location.href = url.href;
+                return window.location.href = responseURL;
 
             // Layout not compatible.. needs to be reloaded (exception when POST is detected..)
             if(!Transparent.isCompatibleLayout(htmlResponse, method, data))
-                return window.location.href = url.href;
+                return window.location.href = responseURL;
 
             // From here the page is valid.. 
             // so new page added to history..
-            if(xhr) history.pushState({uuid: uuid, status:status, method: method, data: data, href: xhr.responseURL}, '', xhr.responseURL);
+            if(xhr) history.pushState({uuid: uuid, status:status, method: method, data: data, href: responseURL}, '', responseURL);
 
             if (Transparent.isKnownLayout(htmlResponse))
-                return Transparent.onLoad(Settings.identifier, htmlResponse, null, addNewState && method != "POST");
+                return Transparent.onLoad(Settings.identifier, htmlResponse, null, addNewState && method != "POST");
 
             return Transparent.transitionOut(function() {
-                Transparent.onLoad(Settings.identifier, htmlResponse, Transparent.transitionIn, addNewState && method != "POST");
+                Transparent.onLoad(Settings.identifier, htmlResponse, Transparent.transitionIn, addNewState && method != "POST");
             });
         }
 
