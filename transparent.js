@@ -596,7 +596,8 @@ $.fn.serializeObject = function() {
 
             var htmlResponse = document.createElement("html");
             var responseText = Transparent.getResponseText(uuid);
-            var responseURL  = xhr.responseURL || url.href;
+            var responseURL  = (xhr ? xhr.responseURL : null) || url.href;
+
             if(!responseText) {
 
                 if(!request) {
