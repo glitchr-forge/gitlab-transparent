@@ -37,7 +37,7 @@ $.fn.serializeObject = function() {
         "response_limit": 25,
         "throttle": 1000,
         "identifier": "#page",
-        "linkExceptions": ["/_wdt", "/_profiler"]
+        "exceptions": []
     };
 
     var isReady    = false;
@@ -566,11 +566,11 @@ $.fn.serializeObject = function() {
 
         if(e.type != "popstate" && ! $(this).find(Settings.identifier).length) return;
 
-        // Symfony defaults rejected
-        for(i = 0; i < Settings.linkExceptions.length; i++) {
+        // Specific page exception
+        for(i = 0; i < Settings.exceptions.length; i++) {
 
-            linkException = Settings.linkExceptions[i];
-            if (url.pathname.startsWith(linkException)) return;
+            exception = Settings.exceptions[i];
+            if (url.pathname.startsWith(exception)) return;
         }
 
         // Ressources files rejected
