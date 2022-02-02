@@ -43,6 +43,12 @@ $.fn.serializeObject = function() {
     var isReady    = false;
     var rescueMode = false;
 
+    Transparent.isRescueMode = function()
+    {
+        return rescueMode;
+    }
+
+
     Transparent.getData = function(uuid)
     {
         return (Settings["data"][uuid] ? Settings["data"][uuid] : {});
