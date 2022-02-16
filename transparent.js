@@ -608,8 +608,8 @@ $.fn.serializeObject = function() {
 
                 if(!request) {
 
-                    console.error("No XHR response from "+uuid+" : missing request.");
-                    console.error(sessionStorage);
+                    // console.error("No XHR response from "+uuid+" : missing request.");
+                    // console.error(sessionStorage);
 
                     setTimeout(function() { window.location.href = responseURL; }, Settings["throttle"]);
                     return;
