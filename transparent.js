@@ -37,18 +37,25 @@ $.fn.serializeObject = function() {
         "response_limit": 25,
         "throttle": 1000,
         "identifier": "#page",
+        "loader": "#loader",
+        
+        "smoothscroll": 500,
+
         "exceptions": []
     };
 
     var isReady    = false;
     var rescueMode = false;
 
-    Transparent.isRescueMode = function()
+    Transparent.html = $($(document).find("html")[0]);
+    Transparent.html.addClass("transparent loading");
+
+    window.addEventListener("DOMContentLoaded", function()
     {
-        return rescueMode;
-    }
+        Transparent.loader = $($(document).find(Settings.loader)[0] ?? Transparent.html);
+    });
 
-
+    Transparent.isRescueMode = function() { return rescueMode; }
     Transparent.getData = function(uuid)
     {
         return (Settings["data"][uuid] ? Settings["data"][uuid] : {});
@@ -77,23 +84,29 @@ $.fn.serializeObject = function() {
 
     Transparent.setResponseText = function(uuid, responseText)
     {
-        // Remove older uuid response in the limit of the response buffer..
         var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
-        if(!array.length)
-            Object.keys(sessionStorage) .filter(function(k) { return /transparent\[.*\]/.test(k); })
-                  .forEach(function(k) { sessionStorage.removeItem(k); });
+            array.push(uuid);
 
-        array.push(uuid);
         while(array.length > Settings["response_limit"])
             sessionStorage.removeItem('transparent['+array.shift()+']');
 
         if(isLocalStorageNameSupported()) {
+
             sessionStorage.setItem('transparent', JSON.stringify(array));
             sessionStorage.setItem('transparent['+uuid+']', responseText);
         }
+
         return this;
     }
-    
+
+    Transparent.hasResponseText = function(uuid)
+    {
+        if(isLocalStorageNameSupported())
+            return 'transparent['+uuid+']' in sessionStorage;
+
+        return false;
+    }
+
     Transparent.configure = function (options) {
 
         var key, value;
@@ -110,8 +123,10 @@ $.fn.serializeObject = function() {
         Transparent.configure({'x-ajax-request': true});
         Transparent.configure(options);
 
-        if(Transparent.addLayout()) // Return true if layout is added
-            Transparent.transitionIn();
+        Transparent.html.addClass("ready").removeClass("loading");
+        
+        Transparent.addLayout();
+        Transparent.transitionOut();
 
         isReady = true;
         dispatchEvent(new Event('transparent:ready'));
@@ -176,8 +191,12 @@ $.fn.serializeObject = function() {
             var type = el.state.type;
             var data = Transparent.getData(el.state.uuid);
 
-            var pat  = /^https?:\/\//i;
-            if (pat.test(href)) return [type, new URL(href), data];
+            var https  = /^https?:\/\//i;
+            if (https.test(href)) return [type, new URL(href), data];
+
+            var hash  = /^\#\w*/i;
+            if (hash.test(href)) return [type, new URL(location.origin+location.pathname+href), data];
+
             return [type, new URL(href, location.origin), data];
 
         } else if(el.type == "submit") {
@@ -356,34 +375,101 @@ $.fn.serializeObject = function() {
         return layout == prevLayout;
     }
 
-    Transparent.transitionIn = function(callback = function() {}, delay = 250) {
+    Transparent.parseDuration = function(str) { 
 
-        if(delay == 0) {
-
-            $(Settings.identifier).css("visibility", "visible");
-            $(Settings.identifier).css("opacity", 1);
-            callback();
-
-        } else {
-
-            $(Settings.identifier).animate({opacity:1}, delay);
-            setTimeout(callback, delay);
-        }
+        if(String(str).endsWith("ms")) return parseFloat(String(str))/1000;
+        return parseFloat(String(str));
     }
 
-    Transparent.transitionOut = function(callback = function() {}, delay = 250) {
+    Transparent.transitionIn = function(callback = function() {}) {
 
-        if(delay == 0) {
+        Transparent.transition(function() {
 
-            $(Settings.identifier).css("visibility", "hidden");
-            $(Settings.identifier).css("opacity", 0);
+            Transparent.html.addClass("transition transition-in");
+
+        }, function() {
+
             callback();
+            Transparent.html.removeClass("transition-in");
+        });
+    }
 
-        } else {
+    Transparent.transitionOut = function(callback = function() {}) {
 
-            $(Settings.identifier).animate({opacity:0}, delay);
-            setTimeout(callback, delay);
-        }
+        Transparent.transition(function() {
+        
+            Transparent.html.addClass("transition-out");
+
+        }, function() {
+
+            callback();
+            Transparent.html.removeClass("transition transition-out");
+        });
+    }
+    
+    Transparent.transition = function(callbackIn = function() {}, callbackOut = function() {})
+    {
+        var delay = 0, duration = 0;
+
+        var style = window.getComputedStyle(Transparent.loader[0]);
+        delay     = Math.max(delay, 1000*Math.max(Transparent.parseDuration(style["animation-delay"]),    Transparent.parseDuration(style["transition-delay"])));
+        duration  = Math.max(duration, 1000*Math.max(Transparent.parseDuration(style["animation-duration"]), Transparent.parseDuration(style["transition-duration"])));
+        
+        var style = window.getComputedStyle(Transparent.loader[0], ":before");
+        delay     = Math.max(delay, 1000*Math.max(Transparent.parseDuration(style["animation-delay"]),    Transparent.parseDuration(style["transition-delay"])));
+        duration  = Math.max(duration, 1000*Math.max(Transparent.parseDuration(style["animation-duration"]), Transparent.parseDuration(style["transition-duration"])));
+        
+        var style = window.getComputedStyle(Transparent.loader[0], ":after");
+        delay     = Math.max(delay, 1000*Math.max(Transparent.parseDuration(style["animation-delay"]),    Transparent.parseDuration(style["transition-delay"])));
+        duration  = Math.max(duration, 1000*Math.max(Transparent.parseDuration(style["animation-duration"]), Transparent.parseDuration(style["transition-duration"])));
+
+        var transitionStart = false, transitionEnd = false;
+        var transitionCallback = function() { 
+
+            dispatchEvent(new CustomEvent('transparent:active'));
+            if(!transitionStart)
+                $(Transparent.loader).trigger('transitionstart.transparent');
+
+            var fn = function() { 
+
+                if (!transitionEnd)
+                     $(Transparent.loader).trigger('transitionend.transparent');
+ 
+             }.bind(this);
+
+            if(duration == 0) fn();
+            else setTimeout(fn, duration);
+        
+        }.bind(this);
+
+        $(Transparent.loader).off('animationstart.transparent transitionstart.transparent');
+        $(Transparent.loader).on ('animationstart.transparent transitionstart.transparent', function() { 
+
+            if(!transitionStart) {
+
+                transitionStart = true;
+                callbackIn();
+                transitionCallback();
+            }
+
+        }.bind(this));
+
+        $(Transparent.loader).off('animationend.transparent transitionend.transparent animationcancel.transparent transitioncancel.transparent');
+        $(Transparent.loader).on ('animationend.transparent transitionend.transparent animationcancel.transparent transitioncancel.transparent', function() {
+
+            if(!transitionEnd) {
+                
+                transitionEnd = true;
+                callbackOut();
+
+                Transparent.html.removeClass("transition transition-out");
+            }
+
+        }.bind(this));
+
+        if(delay == 0) transitionCallback();
+        else setTimeout(transitionCallback, delay);
+        return this;
     }
 
     Transparent.replaceCanvases = function(htmlResponse) {
@@ -403,7 +489,7 @@ $.fn.serializeObject = function() {
             } else {
 
                 if(htmlResponse === undefined)
-                    console.alert("htmlResponse missing..");
+                    console.alert("Response missing..");
 
                 var parent = Transparent.findElementFromParents(htmlResponse, $(this).parents(), 3);
                 if (parent === undefined) {
@@ -453,6 +539,20 @@ $.fn.serializeObject = function() {
         document.body.innerHTML = $(htmlResponse).find("body").html();
         nodeScriptReplace($("head")[0]);
         nodeScriptReplace($("body")[0]);
+    }
+
+    Transparent.scrollTo = function(dict, callback = function() {})
+    {
+        scrollTop = dict["top"] ?? window.scrollY;
+        scrollLeft = dict["left"] ?? window.scrollX;
+        speed = dict["speed"] ?? 0;
+
+        $("html, body").animate({scrollTop: scrollTop, scrollLeft:scrollLeft}, speed, function() {
+            
+            callback();
+            if(speed > 0)
+                dispatchEvent(new Event('scroll'));
+        });
     }
 
     Transparent.onLoad = function(identifier, htmlResponse, callback = null, scrollTo = true) {
@@ -511,8 +611,8 @@ $.fn.serializeObject = function() {
             $(page).css("opacity", 1);
         }
 
-        var currentScroll = window.scrollY;
         $('head').append(function() {
+
             $(identifier).append(function() {
 
                 // Callback if needed, or any other action (e.g. call for transitionIn..)
@@ -522,11 +622,7 @@ $.fn.serializeObject = function() {
                 dispatchEvent(new Event('load'));
 
                 // Go back to top of the page..
-                if(scrollTo && window.location.hash === "") {
-
-                    if(currentScroll == window.scrollY)
-                        window.scrollTo({top: 0, behavior: 'auto'});
-                }
+                if(scrollTo) Transparent.scrollTo({top: 0, left:0});
             });
         });
     }
@@ -538,29 +634,69 @@ $.fn.serializeObject = function() {
         });
     }
 
-    function isLocalStorageNameSupported() 
-    {
-        var testKey = 'test', storage = window.sessionStorage;
-        try 
-        {
+    function isLocalStorageNameSupported() {
+        
+        var testKey = 'test', storage = window.localStorage;
+        try {
+
             storage.setItem(testKey, '1');
             storage.removeItem(testKey);
-            return localStorageName in win && win[localStorageName];
-        } 
-        catch (error) 
-        {
-            return false;
+            return true;
+
+        } catch (error) { return false; }
+    }
+
+    function getElementOffset(el) {
+        
+        const rect = el.getBoundingClientRect();
+        return {left: rect.left + window.scrollX, top: rect.top + window.scrollY};
+    }
+
+    function getScrollPadding() {
+
+        var style  = window.getComputedStyle($("html")[0]);
+
+        var dict = {};
+            dict["top"] = parseInt(style["scroll-padding-top"]);
+            dict["left"] = parseInt(style["scroll-padding-left"]);
+        
+        if(isNaN(dict["top"])) dict["top"] = 0;
+        if(isNaN(dict["left"])) dict["left"] = 0;
+
+        return dict;
+    }
+
+    Transparent.scrollToHash = function(hash = window.location.hash)
+    {
+        if (hash !== undefined && (''+hash).charAt(0) !== '#') 
+            hash = '#' + hash;
+
+        if (hash && $(hash)[0] !== undefined) {
+
+            var scrollTop = getElementOffset($(hash)[0]).top - getScrollPadding().top;
+            var scrollLeft = getElementOffset($(hash)[0]).left - getScrollPadding().left;
+
+            Transparent.scrollTo(
+                {top:Math.ceil(scrollTop), left:Math.ceil(scrollLeft), speed: Settings["smoothscroll"]}, 
+                function() { window.location.hash = hash; }
+            );
         }
+
+        return this;
     }
 
     function __main__(e) {
 
+        // Disable transparent JS for development..
+        if(Settings.debug) return;
+
         // Determine link and popState
         window.popStateNew = document.location.pathname;
         const link = Transparent.findLink(e);
+
         window.popStateOld = document.location.pathname;
-        if (link == null || Settings.debug) return;
-        
+        if (link == null) return;
+
         const uuid = uuidv4();
         const type = link[0];
         const url  = link[1];
@@ -570,7 +706,7 @@ $.fn.serializeObject = function() {
         // Wait for transparent window event to be triggered
         if (!isReady) return;
 
-        if(e.type != "popstate" && ! $(this).find(Settings.identifier).length) return;
+        if(e.type != "popstate" && !$(this).find(Settings.identifier).length) return;
 
         // Specific page exception
         for(i = 0; i < Settings.exceptions.length; i++) {
@@ -589,10 +725,10 @@ $.fn.serializeObject = function() {
         if (url.origin != location.origin) return;
         e.preventDefault();
 
-        if(url.pathname == location.pathname && (url.hash || window.location.hash) && e.type != "popstate" && type != "POST") {
-            
+        if(url.pathname == location.pathname && (url.hash || window.location.hash) && /*e.type != "popstate" &&*/ type != "POST") {
+
             history.replaceState(history.state, ' ');
-            if (url.hash) window.location.hash = url.hash;
+            Transparent.scrollToHash(url.hash);
             return;
         }
 
@@ -602,27 +738,25 @@ $.fn.serializeObject = function() {
 
             var htmlResponse = document.createElement("html");
             var responseText = Transparent.getResponseText(uuid);
-            var responseURL  = (xhr ? xhr.responseURL : null) || url.href;
 
+            var responseURL  = (xhr ? xhr.responseURL : null) || url.href;
             if(!responseText) {
 
-                if(!request) {
-
-                    // console.error("No XHR response from "+uuid+" : missing request.");
-                    // console.error(sessionStorage);
+                if(!request && responseText === null) {
 
                     setTimeout(function() { window.location.href = responseURL; }, Settings["throttle"]);
                     return;
                 }
-
+                
                 responseText = request.responseText;
                 if(status >= 500) {
-
+                
                     console.error("Unexpected XHR response from "+uuid+": error code "+request.status);
                     console.error(sessionStorage);
                 }
 
-                Transparent.setResponseText(uuid, responseText);
+                if(!Transparent.hasResponseText(uuid))
+                    Transparent.setResponseText(uuid, responseText);
             }
 
             $(htmlResponse)[0].innerHTML = responseText;
@@ -649,15 +783,30 @@ $.fn.serializeObject = function() {
             // so new page added to history..
             if(xhr) history.pushState({uuid: uuid, status:status, method: method, data: data, href: responseURL}, '', responseURL);
 
-            if (Transparent.isKnownLayout(htmlResponse))
-                return Transparent.onLoad(Settings.identifier, htmlResponse, null, addNewState && method != "POST");
+            // Mark layout as known 
+            if (Transparent.isKnownLayout(htmlResponse)) 
+                Transparent.html.addClass("transparent-knownlayout");
 
+            // Mark transition as popstate or submit
+            if(e.type == "popstate") Transparent.html.addClass("transparent-popstate");
+            else if(e.type == "submit") Transparent.html.addClass("transparent-submit");
+
+            // Callback transition
             return Transparent.transitionOut(function() {
-                Transparent.onLoad(Settings.identifier, htmlResponse, Transparent.transitionIn, addNewState && method != "POST");
+
+                Transparent.onLoad(Settings.identifier, htmlResponse, function() {
+
+                    Transparent.transitionIn(function() {
+
+                        Transparent.html.removeClass("transparent-popstate transparent-submit");
+                        Transparent.html.removeClass("transparent-knownlayout");
+                    });
+
+                }, addNewState && method != "POST");
             });
         }
 
-        if(history.state && !Transparent.getResponseText(history.state.uuid))
+        if(history.state && !Transparent.hasResponseText(history.state.uuid))
             Transparent.setResponseText(history.state.uuid, $("html")[0].innerHTML);
 
         // This append on user click (e.g. when user push a link)
@@ -695,8 +844,7 @@ $.fn.serializeObject = function() {
     if(!Settings.debug) {
 
         window.onpopstate = __main__;
-        document.addEventListener('click', __main__, false);
-        
+        document.addEventListener('click', __main__, false);        
         $("form").submit(__main__);
     }
 
