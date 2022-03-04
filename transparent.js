@@ -82,8 +82,21 @@ $.fn.serializeObject = function() {
         return sessionStorage.getItem('transparent['+uuid+']') || null;
     }
 
+
+    function isDomEntity(entity) {
+        if(typeof entity  === 'object' && entity.nodeType !== undefined){
+           return true;
+        }
+        else{
+           return false;
+        }
+    }
+
     Transparent.setResponseText = function(uuid, responseText)
     {
+        if(isDomEntity(responseText))
+            responseText = responseText.outerHTML;
+
         var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
             array.push(uuid);
 
@@ -98,6 +111,7 @@ $.fn.serializeObject = function() {
 
         return this;
     }
+
 
     Transparent.hasResponseText = function(uuid)
     {
@@ -136,15 +150,21 @@ $.fn.serializeObject = function() {
 
     Transparent.addLayout = function() {
 
-        var layout = $(Settings.identifier);
-        if(!layout.length) return false;
+        var id = Transparent.getLayout();
+        if(id === undefined) return false;
 
-        var id = layout.data("layout");
-        
         var isKnown = knownLayout.indexOf(id) !== -1;
         if(!isKnown) knownLayout.push(id);
 
         return !isKnown;
+    }
+
+    Transparent.getLayout = function(htmlResponse = null) {
+
+        var layout = htmlResponse !== null ? $(htmlResponse).find(Settings.identifier) : $(Settings.identifier);
+        if(!layout.length) return undefined;
+
+        return layout.data("layout");
     }
 
     Transparent.findNearestForm = function (el) {
@@ -382,28 +402,33 @@ $.fn.serializeObject = function() {
     }
 
     Transparent.transitionIn = function(callback = function() {}) {
-
+        
+        Transparent.html.addClass("active");
         Transparent.transition(function() {
 
             Transparent.html.addClass("transition transition-in");
 
         }, function() {
 
-            callback();
             Transparent.html.removeClass("transition-in");
+            callback();
+
         });
     }
 
     Transparent.transitionOut = function(callback = function() {}) {
 
+        Transparent.html.addClass("active");
         Transparent.transition(function() {
-        
-            Transparent.html.addClass("transition-out");
+            
+            Transparent.html.addClass("transition transition-out");
 
         }, function() {
 
             callback();
             Transparent.html.removeClass("transition transition-out");
+            Transparent.html.removeClass("active");
+
         });
     }
     
@@ -430,40 +455,35 @@ $.fn.serializeObject = function() {
             if(!transitionStart)
                 $(Transparent.loader).trigger('transitionstart.transparent');
 
-            var fn = function() { 
-
-                if (!transitionEnd)
-                     $(Transparent.loader).trigger('transitionend.transparent');
- 
-             }.bind(this);
-
-            if(duration == 0) fn();
-            else setTimeout(fn, duration);
-        
         }.bind(this);
 
         $(Transparent.loader).off('animationstart.transparent transitionstart.transparent');
         $(Transparent.loader).on ('animationstart.transparent transitionstart.transparent', function() { 
 
-            if(!transitionStart) {
+            if(transitionStart) return;
 
-                transitionStart = true;
-                callbackIn();
-                transitionCallback();
-            }
+            transitionStart = true;
+            callbackIn();
+
+            var fn = function() { 
+
+                if (!transitionEnd)
+                     $(Transparent.loader).trigger('transitionend.transparent');
+
+             }.bind(this);
+
+            if(duration == 0) fn();
+            else setTimeout(fn, duration);
 
         }.bind(this));
 
         $(Transparent.loader).off('animationend.transparent transitionend.transparent animationcancel.transparent transitioncancel.transparent');
         $(Transparent.loader).on ('animationend.transparent transitionend.transparent animationcancel.transparent transitioncancel.transparent', function() {
 
-            if(!transitionEnd) {
-                
-                transitionEnd = true;
-                callbackOut();
+            if(transitionEnd) return;
 
-                Transparent.html.removeClass("transition transition-out");
-            }
+            transitionEnd = true;
+            callbackOut();
 
         }.bind(this));
 
@@ -559,7 +579,7 @@ $.fn.serializeObject = function() {
 
         if(callback === null) callback = function() {};
 
-        // Replace canvases
+        // Replace canvases..
         Transparent.replaceCanvases(htmlResponse);
 
         // Replace head..
@@ -596,20 +616,14 @@ $.fn.serializeObject = function() {
         var oldPage = $(identifier);
 
         // Make sure name keeps the same, after a page change when POST or GET called
-        if  (page.data.layout == oldPage.data.layout) delete page.data.prevLayout;
-        else page.data.prevLayout  = oldPage.data.layout;
+        if  (page.data("layout") == oldPage.data("layout")) delete page.removeData("prevLayout");
+        else page.data("prevLayout", oldPage.data("layout"));
 
         // Apply changes
         $(page).insertBefore(oldPage);
         oldPage.remove();
 
-        if(Transparent.addLayout()) {
-            $(page).css("visibility", "hidden");
-            $(page).css("opacity", 0);
-        } else {
-            $(page).css("visibility", "visible");
-            $(page).css("opacity", 1);
-        }
+        Transparent.addLayout();
 
         $('head').append(function() {
 
@@ -668,7 +682,8 @@ $.fn.serializeObject = function() {
 
     Transparent.scrollToHash = function(hash = window.location.hash)
     {
-        if (hash !== undefined && (''+hash).charAt(0) !== '#') 
+        if (hash === "") return this;
+        if ((''+hash).charAt(0) !== '#') 
             hash = '#' + hash;
 
         if (hash && $(hash)[0] !== undefined) {
@@ -737,8 +752,8 @@ $.fn.serializeObject = function() {
         function handleResponse(uuid, status = 200, method = null, data = null, xhr = null, request = null) {
 
             var htmlResponse = document.createElement("html");
-            var responseText = Transparent.getResponseText(uuid);
 
+            var responseText = Transparent.getResponseText(uuid);
             var responseURL  = (xhr ? xhr.responseURL : null) || url.href;
             if(!responseText) {
 
@@ -759,8 +774,19 @@ $.fn.serializeObject = function() {
                     Transparent.setResponseText(uuid, responseText);
             }
 
+            var matches = responseText.match(/<html (.*)>/);
+            if (matches === null) $("html").removeClass($("html").attr("class"));
+            else {
+                var objectResponse = document.createElement("html");
+                $(objectResponse)[0].innerHTML = "<object " + matches[1] + "></object>";
+
+                var htmlClass = $(objectResponse).find("object").attr("class");
+                $("html").removeClass($("html").attr("class")).addClass(htmlClass);
+            }
+
             $(htmlResponse)[0].innerHTML = responseText;
 
+            
             // Error detected..
             if(status >= 500) {
 
@@ -792,14 +818,21 @@ $.fn.serializeObject = function() {
             else if(e.type == "submit") Transparent.html.addClass("transparent-submit");
 
             // Callback transition
-            return Transparent.transitionOut(function() {
+            var prevLayout = Transparent.getLayout();
+            var newLayout = Transparent.getLayout(htmlResponse);
+            Transparent.html.addClass(prevLayout+"-to-"+newLayout);
 
+            return Transparent.transitionIn(function() {
+
+                var prevLayout = Transparent.getLayout();
                 Transparent.onLoad(Settings.identifier, htmlResponse, function() {
 
-                    Transparent.transitionIn(function() {
+                    var newLayout = Transparent.getLayout();
+                    Transparent.transitionOut(function() {
 
                         Transparent.html.removeClass("transparent-popstate transparent-submit");
                         Transparent.html.removeClass("transparent-knownlayout");
+                        Transparent.html.removeClass(prevLayout+"-to-"+newLayout);
                     });
 
                 }, addNewState && method != "POST");
@@ -807,7 +840,7 @@ $.fn.serializeObject = function() {
         }
 
         if(history.state && !Transparent.hasResponseText(history.state.uuid))
-            Transparent.setResponseText(history.state.uuid, $("html")[0].innerHTML);
+            Transparent.setResponseText(history.state.uuid, $("html")[0]);
 
         // This append on user click (e.g. when user push a link)
         // It is null when dev is pushing or replacing state
