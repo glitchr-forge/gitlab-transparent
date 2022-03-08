@@ -44,11 +44,32 @@ $.fn.serializeObject = function() {
         "exceptions": []
     };
 
+    const State = Transparent.state = {
+
+        READY      : "ready",
+        LOADING    : "loading",
+        NEW        : "new",
+        FIRST      : "first",
+        SUBMIT     : "submit",
+        POPSTATE   : "popstate",
+
+        PREACTIVE  : "pre-active",
+        ACTIVEIN   : "active-in",
+        ACTIVE     : "active",
+        ACTIVEOUT  : "active-out",
+        POSTACTIVE : "post-active",
+    };
+
     var isReady    = false;
     var rescueMode = false;
 
     Transparent.html = $($(document).find("html")[0]);
-    Transparent.html.addClass("transparent loading");
+    Transparent.html.addClass("transparent " + Transparent.state.LOADING + " " + Transparent.state.FIRST);
+
+    if(!Transparent.html.hasClass(Transparent.state.ACTIVE)) {
+        Transparent.html.addClass(Transparent.state.ACTIVE);
+        dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVE));
+    }
 
     window.addEventListener("DOMContentLoaded", function()
     {
@@ -137,13 +158,15 @@ $.fn.serializeObject = function() {
         Transparent.configure({'x-ajax-request': true});
         Transparent.configure(options);
 
-        Transparent.html.addClass("ready").removeClass("loading");
-        
-        Transparent.addLayout();
-        Transparent.transitionOut();
-
         isReady = true;
-        dispatchEvent(new Event('transparent:ready'));
+        dispatchEvent(new Event('transparent:'+Transparent.state.READY));
+        Transparent.html.addClass(Transparent.state.READY);
+
+        Transparent.addLayout();
+
+        Transparent.activeOut(function() {
+            Transparent.html.removeClass(Transparent.state.FIRST);
+        });
 
         return this;
     };
@@ -201,7 +224,7 @@ $.fn.serializeObject = function() {
     window.popStateOld = document.location.pathname;
     Transparent.findLink = function (el) {
 
-        if (el.type == "popstate") {
+        if (el.type == Transparent.state.POPSTATE) {
             
             // Custom action when manipulating user history
             if(!el.state)
@@ -401,97 +424,110 @@ $.fn.serializeObject = function() {
         return parseFloat(String(str));
     }
 
-    Transparent.transitionIn = function(callback = function() {}) {
-        
-        Transparent.html.addClass("active");
-        Transparent.transition(function() {
+    Transparent.callback = function(fn = function() {}, delay = 0) {
 
-            Transparent.html.addClass("transition transition-in");
-
-        }, function() {
-
-            Transparent.html.removeClass("transition-in");
-            callback();
-
-        });
-    }
-
-    Transparent.transitionOut = function(callback = function() {}) {
-
-        Transparent.html.addClass("active");
-        Transparent.transition(function() {
-            
-            Transparent.html.addClass("transition transition-out");
-
-        }, function() {
-
-            callback();
-            Transparent.html.removeClass("transition transition-out");
-            Transparent.html.removeClass("active");
-
-        });
+        if(delay == 0) fn();
+        else setTimeout(fn, delay);
     }
     
-    Transparent.transition = function(callbackIn = function() {}, callbackOut = function() {})
-    {
+    Transparent.activeTime = function(el = undefined) {
+
         var delay = 0, duration = 0;
+        if(el === undefined)
+            el = Transparent.loader[0];
 
-        var style = window.getComputedStyle(Transparent.loader[0]);
+        var style = window.getComputedStyle(el);
         delay     = Math.max(delay, 1000*Math.max(Transparent.parseDuration(style["animation-delay"]),    Transparent.parseDuration(style["transition-delay"])));
         duration  = Math.max(duration, 1000*Math.max(Transparent.parseDuration(style["animation-duration"]), Transparent.parseDuration(style["transition-duration"])));
         
-        var style = window.getComputedStyle(Transparent.loader[0], ":before");
+        var style = window.getComputedStyle(el, ":before");
         delay     = Math.max(delay, 1000*Math.max(Transparent.parseDuration(style["animation-delay"]),    Transparent.parseDuration(style["transition-delay"])));
         duration  = Math.max(duration, 1000*Math.max(Transparent.parseDuration(style["animation-duration"]), Transparent.parseDuration(style["transition-duration"])));
         
-        var style = window.getComputedStyle(Transparent.loader[0], ":after");
+        var style = window.getComputedStyle(el, ":after");
         delay     = Math.max(delay, 1000*Math.max(Transparent.parseDuration(style["animation-delay"]),    Transparent.parseDuration(style["transition-delay"])));
         duration  = Math.max(duration, 1000*Math.max(Transparent.parseDuration(style["animation-duration"]), Transparent.parseDuration(style["transition-duration"])));
 
-        var transitionStart = false, transitionEnd = false;
-        var transitionCallback = function() { 
-
-            dispatchEvent(new CustomEvent('transparent:active'));
-            if(!transitionStart)
-                $(Transparent.loader).trigger('transitionstart.transparent');
-
-        }.bind(this);
-
-        $(Transparent.loader).off('animationstart.transparent transitionstart.transparent');
-        $(Transparent.loader).on ('animationstart.transparent transitionstart.transparent', function() { 
-
-            if(transitionStart) return;
-
-            transitionStart = true;
-            callbackIn();
-
-            var fn = function() { 
-
-                if (!transitionEnd)
-                     $(Transparent.loader).trigger('transitionend.transparent');
-
-             }.bind(this);
-
-            if(duration == 0) fn();
-            else setTimeout(fn, duration);
-
-        }.bind(this));
-
-        $(Transparent.loader).off('animationend.transparent transitionend.transparent animationcancel.transparent transitioncancel.transparent');
-        $(Transparent.loader).on ('animationend.transparent transitionend.transparent animationcancel.transparent transitioncancel.transparent', function() {
-
-            if(transitionEnd) return;
-
-            transitionEnd = true;
-            callbackOut();
-
-        }.bind(this));
-
-        if(delay == 0) transitionCallback();
-        else setTimeout(transitionCallback, delay);
-        return this;
+        return {delay:delay, duration:duration};
     }
 
+    Transparent.activeIn = function(activeCallback = function() {}) {
+
+        if(!Transparent.html.hasClass(Transparent.state.PREACTIVE)) {
+            Transparent.html.addClass(Transparent.state.PREACTIVE);
+            dispatchEvent(new Event('transparent:'+Transparent.state.PREACTIVE));
+        }
+
+        var active = Transparent.activeTime();
+        Transparent.callback(function() { 
+
+            Transparent.html.removeClass(Transparent.state.PREACTIVE);
+            if(!Transparent.html.hasClass(Transparent.state.ACTIVEIN)) {
+                Transparent.html.addClass(Transparent.state.ACTIVEIN);
+                dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVEIN));
+            }
+    
+            var active = Transparent.activeTime();
+            Transparent.callback(function() { 
+
+                activeCallback(); 
+                Transparent.html.removeClass(Transparent.state.ACTIVEIN);
+                if(!Transparent.html.hasClass(Transparent.state.ACTIVE)) {
+                    Transparent.html.addClass(Transparent.state.ACTIVE);
+                    dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVE));
+                }
+        
+        
+            }, active.duration);
+
+        }.bind(this), active.delay);
+    }
+
+    Transparent.activeOut = function(activeCallback = function() {}) {
+
+        if(!Transparent.html.hasClass(Transparent.state.ACTIVE)) {
+            Transparent.html.addClass(Transparent.state.ACTIVE);
+            dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVE));
+        }
+
+        if(!Transparent.html.hasClass(Transparent.state.ACTIVEOUT)) {
+            Transparent.html.addClass(Transparent.state.ACTIVEOUT);
+            dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVEOUT));
+        }
+
+        var active = Transparent.activeTime();
+        Transparent.callback(function() { 
+
+            activeCallback();
+            Transparent.html.removeClass(Transparent.state.ACTIVE);
+
+            var active = Transparent.activeTime();
+            Transparent.callback(function() { 
+
+                Transparent.html.removeClass(Transparent.state.ACTIVEOUT);
+                if(!Transparent.html.hasClass(Transparent.state.POSTACTIVE)){
+
+                    Transparent.html.removeClass(Transparent.state.POSTACTIVE);
+                    dispatchEvent(new Event('transparent:'+Transparent.state.POSTACTIVE));
+                }
+
+                if(Transparent.html.hasClass(Transparent.state.LOADING)) {
+
+                    dispatchEvent(new Event('transparent:load'));
+
+                    Object.values(Transparent.state).forEach(e => Transparent.html.removeClass(e));
+                    Transparent.html.addClass(Transparent.state.READY);
+    
+                } else {
+
+                    Transparent.html.removeClass(Transparent.state.POSTACTIVE);
+                }
+
+            }, active.duration);
+
+        }.bind(this), active.delay);
+    }
+    
     Transparent.replaceCanvases = function(htmlResponse) {
 
         // Extract existing canvas to avoid redrawing them.. (time consuming)
@@ -629,10 +665,11 @@ $.fn.serializeObject = function() {
 
             $(identifier).append(function() {
 
-                // Callback if needed, or any other action (e.g. call for transitionIn..)
+                // Callback if needed, or any other actions
                 callback();
 
                 // Trigger onload event
+                dispatchEvent(new Event('transparent:load'));
                 dispatchEvent(new Event('load'));
 
                 // Go back to top of the page..
@@ -705,9 +742,15 @@ $.fn.serializeObject = function() {
         // Disable transparent JS for development..
         if(Settings.debug) return;
 
+        // Prevent double transitions..
+        if(Transparent.html.hasClass(Transparent.state.LOADING))
+            return e.preventDefault();
+
         // Determine link and popState
         window.popStateNew = document.location.pathname;
+
         const link = Transparent.findLink(e);
+        dispatchEvent(new Event('transparent:link', {link:link}));
 
         window.popStateOld = document.location.pathname;
         if (link == null) return;
@@ -721,7 +764,7 @@ $.fn.serializeObject = function() {
         // Wait for transparent window event to be triggered
         if (!isReady) return;
 
-        if(e.type != "popstate" && !$(this).find(Settings.identifier).length) return;
+        if(e.type != Transparent.state.POPSTATE && !$(this).find(Settings.identifier).length) return;
 
         // Specific page exception
         for(i = 0; i < Settings.exceptions.length; i++) {
@@ -740,19 +783,20 @@ $.fn.serializeObject = function() {
         if (url.origin != location.origin) return;
         e.preventDefault();
 
-        if(url.pathname == location.pathname && (url.hash || window.location.hash) && /*e.type != "popstate" &&*/ type != "POST") {
+        if(url.pathname == location.pathname && (url.hash || window.location.hash) && type != "POST") {
 
             history.replaceState(history.state, ' ');
             Transparent.scrollToHash(url.hash);
             return;
         }
 
+        dispatchEvent(new Event('transparent:onbeforeunload'));
         dispatchEvent(new Event('onbeforeunload'));
-
+    
         function handleResponse(uuid, status = 200, method = null, data = null, xhr = null, request = null) {
 
             var htmlResponse = document.createElement("html");
-
+            
             var responseText = Transparent.getResponseText(uuid);
             var responseURL  = (xhr ? xhr.responseURL : null) || url.href;
             if(!responseText) {
@@ -775,18 +819,25 @@ $.fn.serializeObject = function() {
             }
 
             var matches = responseText.match(/<html (.*)>/);
-            if (matches === null) $("html").removeClass($("html").attr("class"));
-            else {
+            if (matches !== null) {
+                
                 var objectResponse = document.createElement("html");
                 $(objectResponse)[0].innerHTML = "<object " + matches[1] + "></object>";
 
-                var htmlClass = $(objectResponse).find("object").attr("class");
-                $("html").removeClass($("html").attr("class")).addClass(htmlClass);
+                Object.values(Transparent.state).forEach(e => Transparent.html.removeClass(e));
+
+                var addClass = $(objectResponse).find("object").attr("class");
+                var removeClass = $("html").attr("class").replace(/transparent.*/i, "");
+                Object.values(Transparent.state).forEach(e => removeClass.replace(e, ""));
+
+                Transparent.html
+                    .removeClass(removeClass)
+                    .addClass(addClass)
+                    .addClass(Transparent.state.READY);
             }
 
             $(htmlResponse)[0].innerHTML = responseText;
 
-            
             // Error detected..
             if(status >= 500) {
 
@@ -810,29 +861,42 @@ $.fn.serializeObject = function() {
             if(xhr) history.pushState({uuid: uuid, status:status, method: method, data: data, href: responseURL}, '', responseURL);
 
             // Mark layout as known 
-            if (Transparent.isKnownLayout(htmlResponse)) 
-                Transparent.html.addClass("transparent-knownlayout");
+            if (!Transparent.isKnownLayout(htmlResponse)) {
+                Transparent.html.addClass(Transparent.state.NEW);
 
-            // Mark transition as popstate or submit
-            if(e.type == "popstate") Transparent.html.addClass("transparent-popstate");
-            else if(e.type == "submit") Transparent.html.addClass("transparent-submit");
+                dispatchEvent(new Event('transparent:'+Transparent.state.NEW));
+            }
 
-            // Callback transition
+            // Mark active as popstate or submit
+            if(e.type == Transparent.state.POPSTATE) {
+                
+                Transparent.html.addClass(Transparent.state.POPSTATE);
+                dispatchEvent(new Event('transparent:'+Transparent.state.POPSTATE));
+
+            } else if(e.type == Transparent.state.SUBMIT) {
+
+                Transparent.html.addClass(Transparent.state.SUBMIT);
+                dispatchEvent(new Event('transparent:'+Transparent.state.SUBMIT));
+            }
+
+            // Callback active
             var prevLayout = Transparent.getLayout();
             var newLayout = Transparent.getLayout(htmlResponse);
             Transparent.html.addClass(prevLayout+"-to-"+newLayout);
+            dispatchEvent(new Event('transparent:'+prevLayout+'-to-'+newLayout));
 
-            return Transparent.transitionIn(function() {
+            Transparent.html.addClass(Transparent.state.LOADING);
+            return Transparent.activeIn(function() {
 
-                var prevLayout = Transparent.getLayout();
                 Transparent.onLoad(Settings.identifier, htmlResponse, function() {
 
-                    var newLayout = Transparent.getLayout();
-                    Transparent.transitionOut(function() {
+                    Transparent.activeOut(function() {
 
-                        Transparent.html.removeClass("transparent-popstate transparent-submit");
-                        Transparent.html.removeClass("transparent-knownlayout");
-                        Transparent.html.removeClass(prevLayout+"-to-"+newLayout);
+                        Transparent.html
+                            .removeClass(prevLayout+"-to-"+newLayout)
+                            .removeClass(Transparent.state.SUBMIT)
+                            .removeClass(Transparent.state.POPSTATE)
+                            .removeClass(Transparent.state.NEW);
                     });
 
                 }, addNewState && method != "POST");
