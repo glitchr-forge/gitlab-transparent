@@ -224,6 +224,7 @@ $.fn.serializeObject = function() {
     window.popStateOld = document.location.pathname;
     Transparent.findLink = function (el) {
 
+        console.log(el);
         if (el.type == Transparent.state.POPSTATE) {
             
             // Custom action when manipulating user history
@@ -242,7 +243,7 @@ $.fn.serializeObject = function() {
 
             return [type, new URL(href, location.origin), data];
 
-        } else if(el.type == "submit") {
+        } else if(el.type == Transparent.state.SUBMIT) {
 
             if(el.target && el.target.tagName == "FORM") {
 
@@ -265,6 +266,10 @@ $.fn.serializeObject = function() {
             }
         }
 
+        closestEl = $(el).closest("a");
+        if(!closestEl.length) closestEl = $(el).closest("button");
+        if(!closestEl.length) closestEl = $(el).closest("input");
+        if (closestEl.length) el = closestEl[0];
         switch (el.tagName) {
 
             case "A":
@@ -751,7 +756,7 @@ $.fn.serializeObject = function() {
 
         const link = Transparent.findLink(e);
         dispatchEvent(new Event('transparent:link', {link:link}));
-
+        e.preventDefault();
         window.popStateOld = document.location.pathname;
         if (link == null) return;
 
