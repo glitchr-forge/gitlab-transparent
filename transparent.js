@@ -892,6 +892,7 @@ $.fn.serializeObject = function() {
 
                     Transparent.activeOut(function() {
 
+                        console.log("prevLayout", prevLayout, newLayout);
                         Transparent.html
                             .removeClass(prevLayout+"-to-"+newLayout)
                             .removeClass(Transparent.state.SUBMIT)
