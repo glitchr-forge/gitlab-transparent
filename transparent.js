@@ -224,7 +224,6 @@ $.fn.serializeObject = function() {
     window.popStateOld = document.location.pathname;
     Transparent.findLink = function (el) {
 
-        console.log(el);
         if (el.type == Transparent.state.POPSTATE) {
             
             // Custom action when manipulating user history
