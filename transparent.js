@@ -424,8 +424,14 @@ $.fn.serializeObject = function() {
 
     Transparent.parseDuration = function(str) { 
 
-        if(String(str).endsWith("ms")) return parseFloat(String(str))/1000;
-        return parseFloat(String(str));
+        var array = String(str).split(", ");
+            array = array.map(function(t) {
+
+                if(String(t).endsWith("ms")) return parseFloat(String(t))/1000;
+                return parseFloat(String(t));    
+            });
+
+        return Math.max(...array);
     }
 
     Transparent.callback = function(fn = function() {}, delay = 0) {
@@ -482,7 +488,7 @@ $.fn.serializeObject = function() {
                 }
         
         
-            }, active.duration);
+            }.bind(this), active.duration);
 
         }.bind(this), active.delay);
     }
@@ -896,7 +902,6 @@ $.fn.serializeObject = function() {
 
                     Transparent.activeOut(function() {
 
-                        console.log("prevLayout", prevLayout, newLayout);
                         Transparent.html
                             .removeClass(prevLayout+"-to-"+newLayout)
                             .removeClass(Transparent.state.SUBMIT)
