@@ -761,7 +761,7 @@ $.fn.serializeObject = function() {
 
         const link = Transparent.findLink(e);
         dispatchEvent(new Event('transparent:link', {link:link}));
-        e.preventDefault();
+
         window.popStateOld = document.location.pathname;
         if (link == null) return;
 
