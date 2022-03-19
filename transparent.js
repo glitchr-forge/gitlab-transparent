@@ -40,6 +40,7 @@ $.fn.serializeObject = function() {
         "loader": "#loader",
         
         "smoothscroll": 500,
+        "smoothscroll_speed": 0,
 
         "exceptions": []
     };
@@ -52,6 +53,8 @@ $.fn.serializeObject = function() {
         FIRST      : "first",
         SUBMIT     : "submit",
         POPSTATE   : "popstate",
+        HASHCHANGE : "hashchange",
+        CLICK      : "click",
 
         PREACTIVE  : "pre-active",
         ACTIVEIN   : "active-in",
@@ -231,6 +234,8 @@ $.fn.serializeObject = function() {
                 return (window.popStateNew != window.popStateOld ? history.go(-1) : null);
 
             var href = el.state.href;
+            if (href.startsWith("#")) href = location.pathname + href;
+            
             var type = el.state.type;
             var data = Transparent.getData(el.state.uuid);
 
@@ -251,8 +256,8 @@ $.fn.serializeObject = function() {
                 el.preventDefault();
 
                 var href = el.target.getAttribute("action");
-                if(href == null) href = location.pathname;
-                if(href.startsWith("#")) href = location.pathname + href;
+                if (href == null) href = location.pathname;
+                if (href.startsWith("#")) href = location.pathname + href;
 
                 var method = el.target.getAttribute("method") || "GET";
                     method = method.toUpperCase();
@@ -273,8 +278,8 @@ $.fn.serializeObject = function() {
 
             case "A":
                 var href = el.getAttribute("href");
-                if(href == null) return null;
-                if(href.startsWith("#")) href = location.pathname + href;
+                if (href == null) return null;
+                if (href.startsWith("#")) href = location.pathname + href;
 
                 var pat  = /^https?:\/\//i;
                 if (pat.test(href)) return ["GET", new URL(href), Transparent.findNearestForm(el)];
@@ -310,9 +315,9 @@ $.fn.serializeObject = function() {
         }
 
         // Try to catch a custom href attribute without "A" tag
-        if (el.target && el.target.getAttribute("href")) {
+        if (el.target && $(el.target).attr("href")) {
 
-            var href = el.target.getAttribute("href");
+            var href = $(el.target).attr("href");
             if(href == null) return null;
             if(href.startsWith("#")) href = location.pathname + href;
 
@@ -469,25 +474,26 @@ $.fn.serializeObject = function() {
         }
 
         var active = Transparent.activeTime();
+
+        Transparent.html.removeClass(Transparent.state.PREACTIVE);
+        if(!Transparent.html.hasClass(Transparent.state.ACTIVEIN)) {
+            Transparent.html.addClass(Transparent.state.ACTIVEIN);
+            dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVEIN));
+        }
+
         Transparent.callback(function() { 
 
-            Transparent.html.removeClass(Transparent.state.PREACTIVE);
-            if(!Transparent.html.hasClass(Transparent.state.ACTIVEIN)) {
-                Transparent.html.addClass(Transparent.state.ACTIVEIN);
-                dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVEIN));
+            Transparent.html.removeClass(Transparent.state.ACTIVEIN);
+            if(!Transparent.html.hasClass(Transparent.state.ACTIVE)) {
+                Transparent.html.addClass(Transparent.state.ACTIVE);
+                dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVE));
             }
-    
+
             var active = Transparent.activeTime();
             Transparent.callback(function() { 
 
-                activeCallback(); 
-                Transparent.html.removeClass(Transparent.state.ACTIVEIN);
-                if(!Transparent.html.hasClass(Transparent.state.ACTIVE)) {
-                    Transparent.html.addClass(Transparent.state.ACTIVE);
-                    dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVE));
-                }
-        
-        
+                activeCallback();
+
             }.bind(this), active.duration);
 
         }.bind(this), active.delay);
@@ -611,10 +617,17 @@ $.fn.serializeObject = function() {
     {
         scrollTop = dict["top"] ?? window.scrollY;
         scrollLeft = dict["left"] ?? window.scrollX;
-        speed = dict["speed"] ?? 0;
 
-        $("html, body").animate({scrollTop: scrollTop, scrollLeft:scrollLeft}, speed, function() {
-            
+        duration = dict["duration"] ?? 0;
+        speed = dict["speed"] ?? 0;
+        if(speed) {
+
+            var distance = scrollTop - Transparent.html.offsetTop - window.scrollY;
+            duration = speed ? distance/speed : duration;
+        }
+
+        $("html, body").animate({scrollTop: scrollTop, scrollLeft:scrollLeft}, duration, 'swing', function() {
+
             callback();
             if(speed > 0)
                 dispatchEvent(new Event('scroll'));
@@ -677,13 +690,10 @@ $.fn.serializeObject = function() {
 
                 // Callback if needed, or any other actions
                 callback();
-
+                    
                 // Trigger onload event
                 dispatchEvent(new Event('transparent:load'));
                 dispatchEvent(new Event('load'));
-
-                // Go back to top of the page..
-                if(scrollTo) Transparent.scrollTo({top: 0, left:0});
             });
         });
     }
@@ -707,12 +717,6 @@ $.fn.serializeObject = function() {
         } catch (error) { return false; }
     }
 
-    function getElementOffset(el) {
-        
-        const rect = el.getBoundingClientRect();
-        return {left: rect.left + window.scrollX, top: rect.top + window.scrollY};
-    }
-
     function getScrollPadding() {
 
         var style  = window.getComputedStyle($("html")[0]);
@@ -727,23 +731,29 @@ $.fn.serializeObject = function() {
         return dict;
     }
 
-    Transparent.scrollToHash = function(hash = window.location.hash)
+    Transparent.scrollToHash = function(hash = window.location.hash, options = {}, callback = function() {})
     {
-        if (hash === "") return this;
-        if ((''+hash).charAt(0) !== '#') 
-            hash = '#' + hash;
+        if (hash === "") {
 
-        if (hash && $(hash)[0] !== undefined) {
+            options = Object.assign({duration: Settings["smoothscroll"], speed: Settings["smoothscroll_speed"]}, options, {left:0, top:0});
+            Transparent.scrollTo(options, callback);
+            return this;
+        
+        } else {
+        
+            if ((''+hash).charAt(0) !== '#')
+                hash = '#' + hash;
 
-            var scrollTop = getElementOffset($(hash)[0]).top - getScrollPadding().top;
-            var scrollLeft = getElementOffset($(hash)[0]).left - getScrollPadding().left;
+            var hashElement = $(hash)[0] ?? undefined;
+            if (hash && hashElement !== undefined) {
 
-            Transparent.scrollTo(
-                {top:Math.ceil(scrollTop), left:Math.ceil(scrollLeft), speed: Settings["smoothscroll"]}, 
-                function() { window.location.hash = hash; }
-            );
+                var scrollTop = hashElement.offsetTop - getScrollPadding().top;
+                var scrollLeft = hashElement.offsetLeft - getScrollPadding().left;
+                options = Object.assign({duration: Settings["smoothscroll"], speed: Settings["smoothscroll_speed"]}, options, {left:scrollLeft, top:scrollTop});
+            }
         }
 
+        Transparent.scrollTo(options, callback);
         return this;
     }
 
@@ -751,10 +761,6 @@ $.fn.serializeObject = function() {
 
         // Disable transparent JS for development..
         if(Settings.debug) return;
-
-        // Prevent double transitions..
-        if(Transparent.html.hasClass(Transparent.state.LOADING))
-            return e.preventDefault();
 
         // Determine link and popState
         window.popStateNew = document.location.pathname;
@@ -769,6 +775,7 @@ $.fn.serializeObject = function() {
         const type = link[0];
         const url  = link[1];
         const data = link[2];
+        
         if  (!url) return;
 
         // Wait for transparent window event to be triggered
@@ -793,10 +800,9 @@ $.fn.serializeObject = function() {
         if (url.origin != location.origin) return;
         e.preventDefault();
 
-        if(url.pathname == location.pathname && (url.hash || window.location.hash) && type != "POST") {
+        if((e.type == Transparent.state.CLICK || e.type == Transparent.state.HASHCHANGE) && url.pathname == location.pathname && type != "POST") {
 
-            history.replaceState(history.state, ' ');
-            Transparent.scrollToHash(url.hash);
+            Transparent.scrollToHash(url.hash ?? "", {}, () => history.replaceState(history.state, '', url));
             return;
         }
 
@@ -826,6 +832,11 @@ $.fn.serializeObject = function() {
 
                 if(!Transparent.hasResponseText(uuid))
                     Transparent.setResponseText(uuid, responseText);
+            }
+
+            if(!responseText) {
+                console.error("No response found.");
+                return window.location.href = responseURL;
             }
 
             var matches = responseText.match(/<html (.*)>/);
@@ -900,6 +911,10 @@ $.fn.serializeObject = function() {
 
                 Transparent.onLoad(Settings.identifier, htmlResponse, function() {
 
+                    // Go back to top of the page..
+                    if(scrollTo)
+                        Transparent.scrollToHash(location.hash, {duration: 0});
+
                     Transparent.activeOut(function() {
 
                         Transparent.html
@@ -909,7 +924,7 @@ $.fn.serializeObject = function() {
                             .removeClass(Transparent.state.NEW);
                     });
 
-                }, addNewState && method != "POST");
+                }, method != "POST" /* avoid to return to top of page when submitting form */);
             });
         }
 
@@ -944,14 +959,15 @@ $.fn.serializeObject = function() {
 
     // Update history if not refreshing page or different page (avoid double pushState)
     var href = history.state ? history.state.href : null;
-    if (href != location.pathname+location.hash)
-        history.replaceState({uuid: uuidv4(), status: history.state ? history.state.status : 200, data:{}, method: history.state ? history.state.method : "GET", href: location.pathname+location.hash}, '', location.pathname+location.hash);
+    if (href != location.origin + location.pathname + location.hash)
+        history.replaceState({uuid: uuidv4(), status: history.state ? history.state.status : 200, data:{}, method: history.state ? history.state.method : "GET", href: location.origin + location.pathname + location.hash}, '', location.origin + location.pathname + location.hash);
 
     // Overload onpopstate
     if(!Settings.debug) {
 
-        window.onpopstate = __main__;
-        document.addEventListener('click', __main__, false);        
+        window.onpopstate   = __main__;
+        window.onhashchange = __main__;
+        document.addEventListener('click', __main__, false);
         $("form").submit(__main__);
     }
 
