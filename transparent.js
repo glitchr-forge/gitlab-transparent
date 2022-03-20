@@ -116,7 +116,7 @@ $.fn.serializeObject = function() {
         }
     }
 
-    Transparent.setResponseText = function(uuid, responseText)
+    Transparent.setResponseText = function(uuid, responseText, exceptionRaised = false)
     {
         if(isDomEntity(responseText))
             responseText = responseText.outerHTML;
@@ -127,10 +127,20 @@ $.fn.serializeObject = function() {
         while(array.length > Settings["response_limit"])
             sessionStorage.removeItem('transparent['+array.shift()+']');
 
-        if(isLocalStorageNameSupported()) {
+        try {
 
-            sessionStorage.setItem('transparent', JSON.stringify(array));
-            sessionStorage.setItem('transparent['+uuid+']', responseText);
+            if(isLocalStorageNameSupported()) {
+
+                sessionStorage.setItem('transparent', JSON.stringify(array));
+                sessionStorage.setItem('transparent['+uuid+']', responseText);
+            }
+
+        } catch(e) {
+
+            if (e.name === 'QuotaExceededError')
+                sessionStorage.clear();
+
+            return exceptionRaised === false ? Transparent.setResponseText(uuid, responseText, true) : this;
         }
 
         return this;
