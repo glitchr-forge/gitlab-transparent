@@ -630,7 +630,7 @@ $.fn.serializeObject = function() {
         easing = dict["easing"] ?? "swing";
         if(speed) {
 
-            var distance = scrollTop - Transparent.html.offsetTop - window.scrollY;
+            var distance = scrollTop - window.offsetTop - window.scrollY;
             duration = speed ? 1000*distance/speed : duration;
         }
 
