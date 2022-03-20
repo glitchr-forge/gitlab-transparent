@@ -39,9 +39,9 @@ $.fn.serializeObject = function() {
         "identifier": "#page",
         "loader": "#loader",
         
-        "smoothscroll": 500,
+        "smoothscroll": 200,
         "smoothscroll_speed": 0,
-
+        "smoothscroll_easing": "swing",
         "exceptions": []
     };
 
@@ -162,14 +162,14 @@ $.fn.serializeObject = function() {
         Transparent.configure(options);
 
         isReady = true;
+
         dispatchEvent(new Event('transparent:'+Transparent.state.READY));
         Transparent.html.addClass(Transparent.state.READY);
 
         Transparent.addLayout();
 
-        Transparent.activeOut(function() {
-            Transparent.html.removeClass(Transparent.state.FIRST);
-        });
+        Transparent.scrollToHash(location.hash, {duration: 0});
+        Transparent.activeOut(() => Transparent.html.removeClass(Transparent.state.FIRST));
 
         return this;
     };
@@ -224,14 +224,10 @@ $.fn.serializeObject = function() {
         return {};
     }
 
-    window.popStateOld = document.location.pathname;
+    window.previousLocation = window.location.toString();
     Transparent.findLink = function (el) {
 
         if (el.type == Transparent.state.POPSTATE) {
-            
-            // Custom action when manipulating user history
-            if(!el.state)
-                return (window.popStateNew != window.popStateOld ? history.go(-1) : null);
 
             var href = el.state.href;
             if (href.startsWith("#")) href = location.pathname + href;
@@ -618,24 +614,26 @@ $.fn.serializeObject = function() {
         scrollTop = dict["top"] ?? window.scrollY;
         scrollLeft = dict["left"] ?? window.scrollX;
 
-        duration = dict["duration"] ?? 0;
-        speed = dict["speed"] ?? 0;
+        duration = 1000*Transparent.parseDuration(dict["duration"]) ?? 200;
+        speed = parseFloat(dict["speed"]) ?? 0;
+        easing = dict["easing"] ?? "swing";
         if(speed) {
 
             var distance = scrollTop - Transparent.html.offsetTop - window.scrollY;
-            duration = speed ? distance/speed : duration;
+            duration = speed ? 1000*distance/speed : duration;
         }
 
-        $("html, body").animate({scrollTop: scrollTop, scrollLeft:scrollLeft}, duration, 'swing', function() {
+        $("html, body").animate({scrollTop: scrollTop, scrollLeft:scrollLeft}, duration, easing, function() {
 
             callback();
-            if(speed > 0)
+            if(duration > 0)
                 dispatchEvent(new Event('scroll'));
         });
     }
 
-    Transparent.onLoad = function(identifier, htmlResponse, callback = null, scrollTo = true) {
+    Transparent.onLoad = function(identifier, htmlResponse, callback = null) {
 
+        window.previousLocation = window.location.toString();
         if(callback === null) callback = function() {};
 
         // Replace canvases..
@@ -733,13 +731,8 @@ $.fn.serializeObject = function() {
 
     Transparent.scrollToHash = function(hash = window.location.hash, options = {}, callback = function() {})
     {
-        if (hash === "") {
-
-            options = Object.assign({duration: Settings["smoothscroll"], speed: Settings["smoothscroll_speed"]}, options, {left:0, top:0});
-            Transparent.scrollTo(options, callback);
-            return this;
-        
-        } else {
+        if (hash === "") options = Object.assign({duration: Settings["smoothscroll"], speed: Settings["smoothscroll_speed"]}, options, {left:0, top:0});
+        else {
         
             if ((''+hash).charAt(0) !== '#')
                 hash = '#' + hash;
@@ -762,20 +755,16 @@ $.fn.serializeObject = function() {
         // Disable transparent JS for development..
         if(Settings.debug) return;
 
-        // Determine link and popState
-        window.popStateNew = document.location.pathname;
-
+        // Determine link
         const link = Transparent.findLink(e);
-        dispatchEvent(new Event('transparent:link', {link:link}));
-
-        window.popStateOld = document.location.pathname;
         if (link == null) return;
+        
+        dispatchEvent(new Event('transparent:link', {link:link}));
 
         const uuid = uuidv4();
         const type = link[0];
         const url  = link[1];
         const data = link[2];
-        
         if  (!url) return;
 
         // Wait for transparent window event to be triggered
@@ -798,17 +787,23 @@ $.fn.serializeObject = function() {
 
         // Unsecure url
         if (url.origin != location.origin) return;
+
         e.preventDefault();
 
         if((e.type == Transparent.state.CLICK || e.type == Transparent.state.HASHCHANGE) && url.pathname == location.pathname && type != "POST") {
 
-            Transparent.scrollToHash(url.hash ?? "", {}, () => history.replaceState(history.state, '', url));
+            Transparent.scrollToHash(url.hash ?? "", {easing:Settings["smoothscroll_easing"], duration:Settings["smoothscroll_duration"], speed:Settings["smoothscroll_speed"]}, function() {
+
+                if(!$(url.hash).length || !$(url.hash).data("skip-hash"))
+                    return history.replaceState(history.state, '', url);
+            });
+
             return;
         }
 
         dispatchEvent(new Event('transparent:onbeforeunload'));
         dispatchEvent(new Event('onbeforeunload'));
-    
+
         function handleResponse(uuid, status = 200, method = null, data = null, xhr = null, request = null) {
 
             var htmlResponse = document.createElement("html");
@@ -882,15 +877,15 @@ $.fn.serializeObject = function() {
             if(xhr) history.pushState({uuid: uuid, status:status, method: method, data: data, href: responseURL}, '', responseURL);
 
             // Mark layout as known 
-            if (!Transparent.isKnownLayout(htmlResponse)) {
-                Transparent.html.addClass(Transparent.state.NEW);
+            if(!Transparent.isKnownLayout(htmlResponse)) {
 
+                Transparent.html.addClass(Transparent.state.NEW);
                 dispatchEvent(new Event('transparent:'+Transparent.state.NEW));
             }
 
             // Mark active as popstate or submit
             if(e.type == Transparent.state.POPSTATE) {
-                
+
                 Transparent.html.addClass(Transparent.state.POPSTATE);
                 dispatchEvent(new Event('transparent:'+Transparent.state.POPSTATE));
 
@@ -907,14 +902,13 @@ $.fn.serializeObject = function() {
             dispatchEvent(new Event('transparent:'+prevLayout+'-to-'+newLayout));
 
             Transparent.html.addClass(Transparent.state.LOADING);
+
             return Transparent.activeIn(function() {
 
                 Transparent.onLoad(Settings.identifier, htmlResponse, function() {
 
                     // Go back to top of the page..
-                    if(scrollTo)
-                        Transparent.scrollToHash(location.hash, {duration: 0});
-
+                    Transparent.scrollToHash(location.hash, {duration: 0});
                     Transparent.activeOut(function() {
 
                         Transparent.html
@@ -945,12 +939,8 @@ $.fn.serializeObject = function() {
                 dataType: 'html',
                 headers: Settings["headers"] || {},
                 xhr: function () { return xhr; }, 
-                success: function (html, status, request) {
-                    return handleResponse(uuid, request.status, type, data, xhr, request);
-                },
-                error:   function (request, ajaxOptions, thrownError) { 
-                    return handleResponse(uuid, request.status, type, data, xhr, request);
-                }
+                success: function (html, status, request) { return handleResponse(uuid, request.status, type, data, xhr, request); },
+                error:   function (request, ajaxOptions, thrownError) { return handleResponse(uuid, request.status, type, data, xhr, request); }
             });
         }
 
@@ -965,7 +955,7 @@ $.fn.serializeObject = function() {
     // Overload onpopstate
     if(!Settings.debug) {
 
-        window.onpopstate   = __main__;
+        window.onpopstate   = __main__; // Onpopstate pop out straight to previous page.. this creates a jump while changing pages with hash..
         window.onhashchange = __main__;
         document.addEventListener('click', __main__, false);
         $("form").submit(__main__);
