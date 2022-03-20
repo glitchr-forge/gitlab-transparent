@@ -614,8 +614,9 @@ $.fn.serializeObject = function() {
         scrollTop = dict["top"] ?? window.scrollY;
         scrollLeft = dict["left"] ?? window.scrollX;
 
-        duration = 1000*Transparent.parseDuration(dict["duration"]) ?? 200;
-        speed = parseFloat(dict["speed"]) ?? 0;
+        duration = 1000*Transparent.parseDuration(dict["duration"] ?? 0.2);
+        speed = parseFloat(dict["speed"] ?? 0);
+
         easing = dict["easing"] ?? "swing";
         if(speed) {
 
