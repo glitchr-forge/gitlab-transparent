@@ -14,6 +14,31 @@ $.fn.serializeObject = function() {
     return o;
 };
 
+$.fn.repaint = function(duration = 1000, reiteration=5) {
+
+    var time = 0;
+    var interval = undefined;
+    var fn = function () {
+
+        $(this).each(function (_, el) {
+
+            var displayBak = el.style.display;
+
+            el.style.display = "none";
+            el.style.display = displayBak;
+            el.offsetHeight;
+        });
+
+        if (time > duration) clearInterval(interval);
+            time += duration/reiteration;
+
+    }.bind(this);
+
+    fn();
+    if(reiteration > 0)
+        interval = setInterval(fn, duration/reiteration);
+};
+
 ;(function (root, factory) {
 
     if (typeof define === 'function' && define.amd) {
@@ -39,9 +64,9 @@ $.fn.serializeObject = function() {
         "identifier": "#page",
         "loader": "#loader",
         
-        "smoothscroll": 200,
-        "smoothscroll_speed": 0,
-        "smoothscroll_easing": "swing",
+        "smoothscroll_duration": "200ms",
+        "smoothscroll_speed"   : 0,
+        "smoothscroll_easing"  : "swing",
         "exceptions": []
     };
 
@@ -178,7 +203,7 @@ $.fn.serializeObject = function() {
 
         Transparent.addLayout();
 
-        Transparent.scrollToHash(location.hash, {duration: 0});
+        Transparent.scrollToHash(location.hash);
         Transparent.activeOut(() => Transparent.html.removeClass(Transparent.state.FIRST));
 
         return this;
@@ -624,7 +649,7 @@ $.fn.serializeObject = function() {
         scrollTop = dict["top"] ?? window.scrollY;
         scrollLeft = dict["left"] ?? window.scrollX;
 
-        duration = 1000*Transparent.parseDuration(dict["duration"] ?? 0.2);
+        duration = 1000*Sticky.parseDuration(dict["duration"] ?? 0);
         speed = parseFloat(dict["speed"] ?? 0);
 
         easing = dict["easing"] ?? "swing";
@@ -634,12 +659,22 @@ $.fn.serializeObject = function() {
             duration = speed ? 1000*distance/speed : duration;
         }
 
-        $("html, body").animate({scrollTop: scrollTop, scrollLeft:scrollLeft}, duration, easing, function() {
+        if(duration == 0) {
 
+            document.documentElement.scrollTop = scrollTop;
+            document.documentElement.scrollLeft = scrollLeft;
+
+            dispatchEvent(new Event('scroll'));
             callback();
-            if(duration > 0)
+
+        } else {
+
+            $("html, body").animate({scrollTop: scrollTop, scrollLeft:scrollLeft}, duration, easing, function() {
+
                 dispatchEvent(new Event('scroll'));
-        });
+                callback();
+            });
+        }
     }
 
     Transparent.onLoad = function(identifier, htmlResponse, callback = null) {
@@ -742,7 +777,7 @@ $.fn.serializeObject = function() {
 
     Transparent.scrollToHash = function(hash = window.location.hash, options = {}, callback = function() {})
     {
-        if (hash === "") options = Object.assign({duration: Settings["smoothscroll"], speed: Settings["smoothscroll_speed"]}, options, {left:0, top:0});
+        if (hash === "") options = Object.assign({duration: Settings["smoothscroll_duration"], speed: Settings["smoothscroll_speed"]}, options, {left:0, top:0});
         else {
         
             if ((''+hash).charAt(0) !== '#')
@@ -753,7 +788,7 @@ $.fn.serializeObject = function() {
 
                 var scrollTop = hashElement.offsetTop - getScrollPadding().top;
                 var scrollLeft = hashElement.offsetLeft - getScrollPadding().left;
-                options = Object.assign({duration: Settings["smoothscroll"], speed: Settings["smoothscroll_speed"]}, options, {left:scrollLeft, top:scrollTop});
+                options = Object.assign({duration: Settings["smoothscroll_duration"], speed: Settings["smoothscroll_speed"]}, options, {left:scrollLeft, top:scrollTop});
             }
         }
 
@@ -919,7 +954,7 @@ $.fn.serializeObject = function() {
                 Transparent.onLoad(Settings.identifier, htmlResponse, function() {
 
                     // Go back to top of the page..
-                    Transparent.scrollToHash(location.hash, {duration: 0});
+                    Transparent.scrollToHash(location.hash);
                     Transparent.activeOut(function() {
 
                         Transparent.html
