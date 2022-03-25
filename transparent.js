@@ -623,6 +623,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     
             return node;
         }
+        
         function nodeScriptClone(node){
                 var script  = document.createElement("script");
                 script.text = node.innerHTML;
@@ -644,35 +645,44 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         nodeScriptReplace($("body")[0]);
     }
 
-    Transparent.scrollTo = function(dict, callback = function() {})
+    Transparent.autoScroll = function() { return $(el).data("autoscroll"); }
+    Transparent.scrollTo = function(dict, callback = function() {}, el = window)
     {
-        scrollTop = dict["top"] ?? window.scrollY;
-        scrollLeft = dict["left"] ?? window.scrollX;
+        $(el).data("autoscroll", true);
+        $(el).on("scroll.autoscroll mousedown.autoscroll wheel.autoscroll DOMMouseScroll.autoscroll mousewheel.autoscroll touchmove.autoscroll", () => $(window).data("autoscroll", false));
 
-        duration = 1000*Sticky.parseDuration(dict["duration"] ?? 0);
-        speed = parseFloat(dict["speed"] ?? 0);
-
-        easing = dict["easing"] ?? "swing";
+        scrollTop  = dict["top"] ?? el.scrollY;
+        scrollLeft = dict["left"] ?? el.scrollX;
+        
+        speed    = parseFloat(dict["speed"] ?? 0);
+        easing   = dict["easing"] ?? "swing";
+        duration = 1000*Transparent.parseDuration(dict["duration"] ?? 0);
         if(speed) {
 
-            var distance = scrollTop - window.offsetTop - window.scrollY;
+            var distance = scrollTop - el.offsetTop - el.scrollY;
             duration = speed ? 1000*distance/speed : duration;
         }
 
         if(duration == 0) {
 
-            document.documentElement.scrollTop = scrollTop;
-            document.documentElement.scrollLeft = scrollLeft;
+            (el === window ? document.documentElement : el).scrollTop = scrollTop;
+            (el === window ? document.documentElement : el).scrollLeft = scrollLeft;
 
-            dispatchEvent(new Event('scroll'));
+            el.dispatchEvent(new Event('scroll'));
             callback();
+
+            $(el).data("autoscroll", false);
 
         } else {
 
-            $("html, body").animate({scrollTop: scrollTop, scrollLeft:scrollLeft}, duration, easing, function() {
+            $(el === window ? "html" : el).animate({scrollTop: scrollTop, scrollLeft:scrollLeft}, duration, easing, function() {
 
-                dispatchEvent(new Event('scroll'));
+                $(el).off("scroll.autoscroll mousedown.autoscroll wheel.autoscroll DOMMouseScroll.autoscroll mousewheel.autoscroll touchmove.autoscroll", () => null);
+
+                el.dispatchEvent(new Event('scroll'));
                 callback();
+
+                $(el).data("autoscroll", false);
             });
         }
     }
@@ -761,7 +771,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         } catch (error) { return false; }
     }
 
-    function getScrollPadding() {
+    Transparent.getScrollPadding = function() {
 
         var style  = window.getComputedStyle($("html")[0]);
 
@@ -786,8 +796,8 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             var hashElement = $(hash)[0] ?? undefined;
             if (hash && hashElement !== undefined) {
 
-                var scrollTop = hashElement.offsetTop - getScrollPadding().top;
-                var scrollLeft = hashElement.offsetLeft - getScrollPadding().left;
+                var scrollTop = hashElement.offsetTop - Transparent.getScrollPadding().top;
+                var scrollLeft = hashElement.offsetLeft - Transparent.getScrollPadding().left;
                 options = Object.assign({duration: Settings["smoothscroll_duration"], speed: Settings["smoothscroll_speed"]}, options, {left:scrollLeft, top:scrollTop});
             }
         }
