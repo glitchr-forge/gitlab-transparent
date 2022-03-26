@@ -771,17 +771,39 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         } catch (error) { return false; }
     }
 
-    Transparent.getScrollPadding = function() {
+    Transparent.remToPixel     = function(rem)     { return parseFloat(rem) * parseFloat(getComputedStyle(document.documentElement).fontSize); }
+    Transparent.emToPixel      = function(em, el)  { return parseFloat(em ) * parseFloat(getComputedStyle(el.parentElement).fontSize); }
+    Transparent.percentToPixel = function(p , el)  { return parseFloat(p  ) * el.outerWidth(); }
+    Transparent.parseToPixel   = function(str, el) { 
 
-        var style  = window.getComputedStyle($("html")[0]);
+        if(str === undefined) return undefined;
 
+        var array = String(str).split(", ");
+            array = array.map(function(s) {
+
+                     if(s.endsWith("rem")) return Transparent.remToPixel    (s);
+                else if(s.endsWith("em") ) return Transparent.emToPixel     (s, el);
+                else if(s.endsWith("%")  ) return Transparent.percentToPixel(s, el);
+                return parseFloat(s);
+            });
+
+        return Math.max(...array);
+    }
+
+    Transparent.getScrollPadding = function(el = undefined) {
+
+        var style  = window.getComputedStyle(el == undefined ? $("html")[0] : el);
         var dict = {};
-            dict["top"] = parseInt(style["scroll-padding-top"]);
-            dict["left"] = parseInt(style["scroll-padding-left"]);
+            dict["top"   ] = Transparent.parseToPixel(style["scroll-padding-top"   ] || 0, el);
+            dict["left"  ] = Transparent.parseToPixel(style["scroll-padding-left"  ] || 0, el);
+            dict["right" ] = Transparent.parseToPixel(style["scroll-padding-right" ] || 0, el);
+            dict["bottom"] = Transparent.parseToPixel(style["scroll-padding-bottom"] || 0, el);
         
-        if(isNaN(dict["top"])) dict["top"] = 0;
-        if(isNaN(dict["left"])) dict["left"] = 0;
-
+        if(isNaN(dict["top"   ])) dict["top"]    = 0;
+        if(isNaN(dict["left"  ])) dict["left"]   = 0;
+        if(isNaN(dict["right" ])) dict["right"]  = 0;
+        if(isNaN(dict["bottom"])) dict["bottom"] = 0;
+        
         return dict;
     }
 
