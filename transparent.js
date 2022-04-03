@@ -14,6 +14,41 @@ $.fn.serializeObject = function() {
     return o;
 };
 
+(function(namespace) {
+    
+    namespace.replaceHash = function(newhash, triggerHashChange = true, skipIfNoIdentifier = true) {
+
+        console.log("OK ! ", newhash);
+
+        if (!newhash) newhash = "";
+        if (newhash !== "" && (''+newhash).charAt(0) !== '#') 
+            newhash = '#' + newhash;
+
+        var oldURL = location.origin+location.pathname+location.hash;
+        var newURL = location.origin+location.pathname+newhash;
+        if(oldURL == newURL) return false;
+
+        if(skipIfNoIdentifier && $(newhash).length === 0){
+
+            dispatchEvent(new HashChangeEvent("hashfallback", {oldURL:oldURL, newURL:newURL}));
+            newHash = "";
+        
+            oldURL = location.origin+location.pathname+location.hash;
+            newURL = location.origin+location.pathname+newhash;
+            return oldURL != newURL;
+        }
+
+        var state = Object.assign({}, history.state, {href: newURL});
+        history.replaceState(state, '', newURL);
+
+        if(triggerHashChange)
+            dispatchEvent(new HashChangeEvent("hashchange", {oldURL:oldURL, newURL:newURL}));
+
+        return true;
+    }
+
+})(window);
+
 $.fn.repaint = function(duration = 1000, reiteration=5) {
 
     var time = 0;
@@ -131,14 +166,9 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         return sessionStorage.getItem('transparent['+uuid+']') || null;
     }
 
-
-    function isDomEntity(entity) {
-        if(typeof entity  === 'object' && entity.nodeType !== undefined){
-           return true;
-        }
-        else{
-           return false;
-        }
+    function isDomEntity(entity) 
+    { 
+        return typeof entity  === 'object' && entity.nodeType !== undefined; 
     }
 
     Transparent.setResponseText = function(uuid, responseText, exceptionRaised = false)
@@ -233,11 +263,11 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         switch (el.tagName) {
             case "FORM":
                 var form = $(el);
-                return (form ? form.serialize() : {});
+                return (form.length ? form.serialize() : null);
             case "INPUT":
             case "BUTTON":
                 var form = $(el).closest("form");
-                return (form ? form.serialize() : {});
+                return (form.length ? form.serialize() : null);
         }
 
         // Try to detect target element
@@ -253,20 +283,33 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                 return Transparent.findNearestForm(el.target);
 
             var form = $(el.target).closest("form");
-            return (form ? form.serialize() : {});
+            return (form.length ? form.serialize() : null);
         }
 
-        return {};
+        return null;
     }
 
     window.previousLocation = window.location.toString();
     Transparent.findLink = function (el) {
 
-        if (el.type == Transparent.state.POPSTATE) {
+        if (el.type == Transparent.state.HASHCHANGE) {
+
+            var href = el.newURL;
+            if (href.startsWith("#")) href = location.pathname + href;
+            if (href.endsWith  ("#")) href = href.slice(0, -1);
+
+            var data = history.state ? Transparent.getData(history.state.uuid) : {};
+
+            return ["GET", new URL(el.newURL), data];
+        
+        } else if (el.type == Transparent.state.POPSTATE) {
+
+            if(!el.state) return;
 
             var href = el.state.href;
             if (href.startsWith("#")) href = location.pathname + href;
-            
+            if (href.endsWith  ("#")) href = href.slice(0, -1);
+
             var type = el.state.type;
             var data = Transparent.getData(el.state.uuid);
 
@@ -287,13 +330,16 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                 el.preventDefault();
 
                 var href = el.target.getAttribute("action");
-                if (href == null) href = location.pathname;
+                if(!href) href = location.pathname + href;
+
                 if (href.startsWith("#")) href = location.pathname + href;
+                if (href.endsWith  ("#")) href = href.slice(0, -1);
 
                 var method = el.target.getAttribute("method") || "GET";
                     method = method.toUpperCase();
 
                 var data = Transparent.findNearestForm(el);
+                if (data == null) return null;
 
                 var pat  = /^https?:\/\//i;
                 if (pat.test(href)) return [method, new URL(href), data];
@@ -308,34 +354,44 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         switch (el.tagName) {
 
             case "A":
-                var href = el.getAttribute("href");
-                if (href == null) return null;
+                var href = el.href;
+                if(!href) return null;
+
                 if (href.startsWith("#")) href = location.pathname + href;
+                if (href.endsWith  ("#")) href = href.slice(0, -1);
 
+                var data = Transparent.findNearestForm(el);
                 var pat  = /^https?:\/\//i;
-                if (pat.test(href)) return ["GET", new URL(href), Transparent.findNearestForm(el)];
+                if (pat.test(href)) return ["GET", new URL(href),];
 
-                return ["GET", new URL(href, location.origin), Transparent.findNearestForm(el)];
+                return ["GET", new URL(href, location.origin), data];
 
             case "INPUT":
             case "BUTTON":
                 var domainBaseURI = el.baseURI.split('/').slice(0, 3).join('/');
                 var domainFormAction = el.formAction.split('/').slice(0, 3).join('/');
                 var pathname = el.formAction.replace(domainFormAction, "");
-                if(pathname == null) return null;
+                if(!pathname) return null;
 
                 if (domainBaseURI == domainFormAction && el.getAttribute("type") == "submit") {
+                    
+                    var data = Transparent.findNearestForm(el);
+                    if (data == null) {
+                        console.error("No form found upstream of ", el);
+                        return null;
+                    }
 
                     var pat  = /^https?:\/\//i;
-                    if (pat.test(href)) return ["POST", new URL(pathname), Transparent.findNearestForm(el)];
-                    return ["POST", new URL(pathname, location.origin), Transparent.findNearestForm(el)];
+                    if (pat.test(href)) return ["POST", new URL(pathname), data];
+                    
+                    return ["POST", new URL(pathname, location.origin), data];
                 }
         }
 
         // Try to detect target element
         if (el.target) {
 
-            if (el.target.tagName == "A" && el.target.getAttribute("href"))
+            if (el.target.tagName == "A" && el.target.href)
                 return Transparent.findLink(el.target);
 
             if (el.target.tagName == "BUTTON" && el.target.getAttribute("type") == "submit")
@@ -349,8 +405,10 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         if (el.target && $(el.target).attr("href")) {
 
             var href = $(el.target).attr("href");
-            if(href == null) return null;
-            if(href.startsWith("#")) href = location.pathname + href;
+            if(!href) return null;
+
+            if (href.startsWith("#")) href = location.pathname + href;
+            if (href.endsWith  ("#")) href = href.slice(0, -1);
 
             var pat  = /^https?:\/\//i;
             if (pat.test(href)) return ["GET", new URL(href), Transparent.findNearestForm(el)];
@@ -645,46 +703,53 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         nodeScriptReplace($("body")[0]);
     }
 
-    Transparent.autoScroll = function() { return $(el).data("autoscroll"); }
+    Transparent.userScroll = function(el = window) { return $(el).prop("userscroll"); }
     Transparent.scrollTo = function(dict, callback = function() {}, el = window)
     {
-        $(el).data("autoscroll", true);
-        $(el).on("scroll.autoscroll mousedown.autoscroll wheel.autoscroll DOMMouseScroll.autoscroll mousewheel.autoscroll touchmove.autoscroll", () => $(window).data("autoscroll", false));
+        if (el === window  ) 
+            el = document.documentElement;
+        if (el === document) 
+            el = document.documentElement;
+
+        $(el).prop("userscroll", false);
+        $(el).on("scroll.userscroll mousedown.userscroll wheel.userscroll DOMMouseScroll.userscroll mousewheel.userscroll touchmove.userscroll", () => $(window).prop("userscroll", true));
 
         scrollTop  = dict["top"] ?? el.scrollY;
         scrollLeft = dict["left"] ?? el.scrollX;
-        
+
         speed    = parseFloat(dict["speed"] ?? 0);
         easing   = dict["easing"] ?? "swing";
         duration = 1000*Transparent.parseDuration(dict["duration"] ?? 0);
         if(speed) {
 
-            var distance = scrollTop - el.offsetTop - el.scrollY;
+            var distance = scrollTop - window.offsetTop - window.scrollY;
             duration = speed ? 1000*distance/speed : duration;
         }
 
         if(duration == 0) {
 
-            (el === window ? document.documentElement : el).scrollTop = scrollTop;
-            (el === window ? document.documentElement : el).scrollLeft = scrollLeft;
+            $(el).scrollTop = scrollTop;
+            $(el).scrollLeft = scrollLeft;
 
             el.dispatchEvent(new Event('scroll'));
             callback();
 
-            $(el).data("autoscroll", false);
+            $(el).prop("userscroll", true);
 
         } else {
 
-            $(el === window ? "html" : el).animate({scrollTop: scrollTop, scrollLeft:scrollLeft}, duration, easing, function() {
+            $(el).animate({scrollTop: scrollTop, scrollLeft:scrollLeft}, duration, easing, function() {
 
-                $(el).off("scroll.autoscroll mousedown.autoscroll wheel.autoscroll DOMMouseScroll.autoscroll mousewheel.autoscroll touchmove.autoscroll", () => null);
-
+                $(el).off("scroll.user mousedown.user wheel.user DOMMouseScroll.user mousewheel.user touchmove.user", () => null);
+                
                 el.dispatchEvent(new Event('scroll'));
                 callback();
 
-                $(el).data("autoscroll", false);
+                $(el).prop("userscroll", true);
             });
         }
+
+        return this;
     }
 
     Transparent.onLoad = function(identifier, htmlResponse, callback = null) {
@@ -790,9 +855,9 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         return Math.max(...array);
     }
 
-    Transparent.getScrollPadding = function(el = undefined) {
+    Transparent.getScrollPadding = function(el = document.documentElement) {
 
-        var style  = window.getComputedStyle(el == undefined ? $("html")[0] : el);
+        var style  = window.getComputedStyle(el);
         var dict = {};
             dict["top"   ] = Transparent.parseToPixel(style["scroll-padding-top"   ] || 0, el);
             dict["left"  ] = Transparent.parseToPixel(style["scroll-padding-left"  ] || 0, el);
@@ -835,9 +900,9 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         // Determine link
         const link = Transparent.findLink(e);
-        if (link == null) return;
-        
-        dispatchEvent(new Event('transparent:link', {link:link}));
+        if   (link == null) return;
+
+        dispatchEvent(new CustomEvent('transparent:link', {link:link}));
 
         const uuid = uuidv4();
         const type = link[0];
@@ -848,7 +913,8 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         // Wait for transparent window event to be triggered
         if (!isReady) return;
 
-        if(e.type != Transparent.state.POPSTATE && !$(this).find(Settings.identifier).length) return;
+        if (e.type != Transparent.state.POPSTATE   && 
+            e.type != Transparent.state.HASHCHANGE && !$(this).find(Settings.identifier).length) return;
 
         // Specific page exception
         for(i = 0; i < Settings.exceptions.length; i++) {
@@ -871,9 +937,9 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         if((e.type == Transparent.state.CLICK || e.type == Transparent.state.HASHCHANGE) && url.pathname == location.pathname && type != "POST") {
 
             Transparent.scrollToHash(url.hash ?? "", {easing:Settings["smoothscroll_easing"], duration:Settings["smoothscroll_duration"], speed:Settings["smoothscroll_speed"]}, function() {
-
-                if(!$(url.hash).length || !$(url.hash).data("skip-hash"))
-                    return history.replaceState(history.state, '', url);
+                
+                if (e.target !== undefined && $(e.target).data("skip-hash") !== true)
+                    window.replaceHash(url.hash);
             });
 
             return;
