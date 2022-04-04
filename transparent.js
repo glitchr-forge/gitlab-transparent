@@ -295,11 +295,13 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         if (el.type == Transparent.state.HASHCHANGE) {
 
             var href = el.newURL;
+            if(!href) return null;
+
             if (href.startsWith("#")) href = location.pathname + href;
             if (href.endsWith  ("#")) href = href.slice(0, -1);
 
             var data = history.state ? Transparent.getData(history.state.uuid) : {};
-
+            
             return ["GET", new URL(el.newURL), data];
         
         } else if (el.type == Transparent.state.POPSTATE) {
