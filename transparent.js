@@ -708,19 +708,35 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     Transparent.userScroll = function(el = window) { return $(el).prop("userscroll"); }
     Transparent.scrollTo = function(dict, callback = function() {}, el = window)
     {
+        var origin = el;
         if (el === window  ) 
             el = document.documentElement;
         if (el === document) 
             el = document.documentElement;
 
-        $(el).prop("userscroll", false);
-        $(el).on("scroll.userscroll mousedown.userscroll wheel.userscroll DOMMouseScroll.userscroll mousewheel.userscroll touchmove.userscroll", () => $(window).prop("userscroll", true));
+        var cancelable = dict["cancelable"] ?? false;
+        
+        if(!Transparent.userScroll(el)) {
+            
+            if($(el).prop("cancelable")) $(el).stop();
+            return;
+        }
 
-        scrollTop  = dict["top"] ?? el.scrollY;
-        scrollLeft = dict["left"] ?? el.scrollX;
+        $(el).prop("user-scroll", false);
+        if(cancelable) {
+
+            $(el).prop("cancelable", true);
+            $(el).on("scroll.userscroll mousedown.userscroll wheel.userscroll DOMMouseScroll.userscroll mousewheel.userscroll touchmove.userscroll", function(e) {
+                $(this).prop("user-scroll", true);
+            });
+        }
+
+        scrollTop  = dict["top"] ?? el.scrollTop;
+        scrollLeft = dict["left"] ?? el.scrollLeft;
 
         speed    = parseFloat(dict["speed"] ?? 0);
         easing   = dict["easing"] ?? "swing";
+        debounce = dict["debounce"] ?? 0;
         duration = 1000*Transparent.parseDuration(dict["duration"] ?? 0);
         if(speed) {
 
@@ -733,26 +749,29 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             $(el).scrollTop = scrollTop;
             $(el).scrollLeft = scrollLeft;
 
-            el.dispatchEvent(new Event('scroll'));
+            origin.dispatchEvent(new Event('scroll'));
             callback();
 
-            $(el).prop("userscroll", true);
+            $(el).prop("user-scroll", true);
 
         } else {
 
-            $(el).animate({scrollTop: scrollTop, scrollLeft:scrollLeft}, duration, easing, function() {
+            $(el).animate({scrollTop: scrollTop, scrollLeft:scrollLeft}, duration, easing, Transparent.debounce(function() {
 
-                $(el).off("scroll.user mousedown.user wheel.user DOMMouseScroll.user mousewheel.user touchmove.user", () => null);
-                
-                el.dispatchEvent(new Event('scroll'));
+                if(cancelable)
+                    $(el).off("scroll.user mousedown.user wheel.user DOMMouseScroll.user mousewheel.user touchmove.user", () => null);
+
+                origin.dispatchEvent(new Event('scroll'));
                 callback();
 
-                $(el).prop("userscroll", true);
-            });
+                $(el).prop("user-scroll", true);
+
+            }, debounce));
         }
 
         return this;
     }
+
 
     Transparent.onLoad = function(identifier, htmlResponse, callback = null) {
 
@@ -890,7 +909,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                 options = Object.assign({duration: Settings["smoothscroll_duration"], speed: Settings["smoothscroll_speed"]}, options, {left:scrollLeft, top:scrollTop});
             }
         }
-
+        
         Transparent.scrollTo(options, callback);
         return this;
     }
