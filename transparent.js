@@ -14,6 +14,66 @@ $.fn.serializeObject = function() {
     return o;
 };
 
+(function(namespace) {
+
+    namespace.replaceHash = function(newhash, triggerHashChange = true, skipIfNoIdentifier = true) {
+
+        console.log("OK ! ", newhash);
+
+        if (!newhash) newhash = "";
+        if (newhash !== "" && (''+newhash).charAt(0) !== '#')
+            newhash = '#' + newhash;
+
+        var oldURL = location.origin+location.pathname+location.hash;
+        var newURL = location.origin+location.pathname+newhash;
+        if(oldURL == newURL) return false;
+
+        if(skipIfNoIdentifier && $(newhash).length === 0){
+
+            dispatchEvent(new HashChangeEvent("hashfallback", {oldURL:oldURL, newURL:newURL}));
+            newHash = "";
+
+            oldURL = location.origin+location.pathname+location.hash;
+            newURL = location.origin+location.pathname+newhash;
+            return oldURL != newURL;
+        }
+
+        var state = Object.assign({}, history.state, {href: newURL});
+        history.replaceState(state, '', newURL);
+
+        if(triggerHashChange)
+            dispatchEvent(new HashChangeEvent("hashchange", {oldURL:oldURL, newURL:newURL}));
+
+        return true;
+    }
+
+})(window);
+
+$.fn.repaint = function(duration = 1000, reiteration=5) {
+
+    var time = 0;
+    var interval = undefined;
+    var fn = function () {
+
+        $(this).each(function (_, el) {
+
+            var displayBak = el.style.display;
+
+            el.style.display = "none";
+            el.style.display = displayBak;
+            el.offsetHeight;
+        });
+
+        if (time > duration) clearInterval(interval);
+            time += duration/reiteration;
+
+    }.bind(this);
+
+    fn();
+    if(reiteration > 0)
+        interval = setInterval(fn, duration/reiteration);
+};
+
 ;(function (root, factory) {
 
     if (typeof define === 'function' && define.amd) {
@@ -37,12 +97,49 @@ $.fn.serializeObject = function() {
         "response_limit": 25,
         "throttle": 1000,
         "identifier": "#page",
-        "linkExceptions": ["/_wdt", "/_profiler"]
+        "loader": "#loader",
+
+        "smoothscroll_duration": "200ms",
+        "smoothscroll_speed"   : 0,
+        "smoothscroll_easing"  : "swing",
+        "exceptions": []
+    };
+
+    const State = Transparent.state = {
+
+        READY      : "ready",
+        LOADING    : "loading",
+        NEW        : "new",
+        FIRST      : "first",
+        SUBMIT     : "submit",
+        POPSTATE   : "popstate",
+        HASHCHANGE : "hashchange",
+        CLICK      : "click",
+
+        PREACTIVE  : "pre-active",
+        ACTIVEIN   : "active-in",
+        ACTIVE     : "active",
+        ACTIVEOUT  : "active-out",
+        POSTACTIVE : "post-active",
     };
 
     var isReady    = false;
     var rescueMode = false;
 
+    Transparent.html = $($(document).find("html")[0]);
+    Transparent.html.addClass("transparent " + Transparent.state.LOADING + " " + Transparent.state.FIRST);
+
+    if(!Transparent.html.hasClass(Transparent.state.ACTIVE)) {
+        Transparent.html.addClass(Transparent.state.ACTIVE);
+        dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVE));
+    }
+
+    window.addEventListener("DOMContentLoaded", function()
+    {
+        Transparent.loader = $($(document).find(Settings.loader)[0] ?? Transparent.html);
+    });
+
+    Transparent.isRescueMode = function() { return rescueMode; }
     Transparent.getData = function(uuid)
     {
         return (Settings["data"][uuid] ? Settings["data"][uuid] : {});
@@ -56,7 +153,7 @@ $.fn.serializeObject = function() {
 
     Transparent.getResponseText = function(uuid)
     {
-        var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
+        var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
 
         // Bubble up the most recent uuid
         var index = array.indexOf(uuid);
@@ -69,23 +166,50 @@ $.fn.serializeObject = function() {
         return sessionStorage.getItem('transparent['+uuid+']') || null;
     }
 
-    Transparent.setResponseText = function(uuid, responseText)
+    function isDomEntity(entity)
     {
-        // Remove older uuid response in the limit of the response buffer..
-        var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
-        if(!array.length)
-            Object.keys(sessionStorage) .filter(function(k) { return /transparent\[.*\]/.test(k); })
-                  .forEach(function(k) { sessionStorage.removeItem(k); });
+        return typeof entity  === 'object' && entity.nodeType !== undefined;
+    }
 
-        array.push(uuid);
+    Transparent.setResponseText = function(uuid, responseText, exceptionRaised = false)
+    {
+        if(isDomEntity(responseText))
+            responseText = responseText.outerHTML;
+
+        var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
+            array.push(uuid);
+
         while(array.length > Settings["response_limit"])
             sessionStorage.removeItem('transparent['+array.shift()+']');
 
-        sessionStorage.setItem('transparent', JSON.stringify(array));
-        sessionStorage.setItem('transparent['+uuid+']', responseText);
+        try {
+
+            if(isLocalStorageNameSupported()) {
+
+                sessionStorage.setItem('transparent', JSON.stringify(array));
+                sessionStorage.setItem('transparent['+uuid+']', responseText);
+            }
+
+        } catch(e) {
+
+            if (e.name === 'QuotaExceededError')
+                sessionStorage.clear();
+
+            return exceptionRaised === false ? Transparent.setResponseText(uuid, responseText, true) : this;
+        }
+
         return this;
     }
-    
+
+
+    Transparent.hasResponseText = function(uuid)
+    {
+        if(isLocalStorageNameSupported())
+            return 'transparent['+uuid+']' in sessionStorage;
+
+        return false;
+    }
+
     Transparent.configure = function (options) {
 
         var key, value;
@@ -102,26 +226,36 @@ $.fn.serializeObject = function() {
         Transparent.configure({'x-ajax-request': true});
         Transparent.configure(options);
 
-        if(Transparent.addLayout()) // Return true if layout is added
-            Transparent.transitionIn();
-
         isReady = true;
-        dispatchEvent(new Event('transparent:ready'));
+
+        dispatchEvent(new Event('transparent:'+Transparent.state.READY));
+        Transparent.html.addClass(Transparent.state.READY);
+
+        Transparent.addLayout();
+
+        Transparent.scrollToHash(location.hash);
+        Transparent.activeOut(() => Transparent.html.removeClass(Transparent.state.FIRST));
 
         return this;
     };
 
     Transparent.addLayout = function() {
 
-        var layout = $(Settings.identifier);
-        if(!layout.length) return false;
+        var id = Transparent.getLayout();
+        if(id === undefined) return false;
 
-        var id = layout.data("layout");
-        
         var isKnown = knownLayout.indexOf(id) !== -1;
         if(!isKnown) knownLayout.push(id);
 
         return !isKnown;
+    }
+
+    Transparent.getLayout = function(htmlResponse = null) {
+
+        var layout = htmlResponse !== null ? $(htmlResponse).find(Settings.identifier) : $(Settings.identifier);
+        if(!layout.length) return undefined;
+
+        return layout.data("layout");
     }
 
     Transparent.findNearestForm = function (el) {
@@ -129,11 +263,11 @@ $.fn.serializeObject = function() {
         switch (el.tagName) {
             case "FORM":
                 var form = $(el);
-                return (form ? form.serialize() : {});
+                return (form.length ? form.serialize() : null);
             case "INPUT":
             case "BUTTON":
                 var form = $(el).closest("form");
-                return (form ? form.serialize() : {});
+                return (form.length ? form.serialize() : null);
         }
 
         // Try to detect target element
@@ -149,30 +283,47 @@ $.fn.serializeObject = function() {
                 return Transparent.findNearestForm(el.target);
 
             var form = $(el.target).closest("form");
-            return (form ? form.serialize() : {});
+            return (form.length ? form.serialize() : null);
         }
 
-        return {};
+        return null;
     }
 
-    window.popStateOld = document.location.pathname;
+    window.previousLocation = window.location.toString();
     Transparent.findLink = function (el) {
 
-        if (el.type == "popstate") {
-            
-            // Custom action when manipulating user history
-            if(!el.state)
-                return (window.popStateNew != window.popStateOld ? history.go(-1) : null);
+        if (el.type == Transparent.state.HASHCHANGE) {
+
+            var href = el.newURL;
+            if(!href) return null;
+
+            if (href.startsWith("#")) href = location.pathname + href;
+            if (href.endsWith  ("#")) href = href.slice(0, -1);
+
+            var data = history.state ? Transparent.getData(history.state.uuid) : {};
+
+            return ["GET", new URL(el.newURL), data];
+
+        } else if (el.type == Transparent.state.POPSTATE) {
+
+            if(!el.state) return;
 
             var href = el.state.href;
+            if (href.startsWith("#")) href = location.pathname + href;
+            if (href.endsWith  ("#")) href = href.slice(0, -1);
+
             var type = el.state.type;
             var data = Transparent.getData(el.state.uuid);
 
-            var pat  = /^https?:\/\//i;
-            if (pat.test(href)) return [type, new URL(href), data];
+            var https  = /^https?:\/\//i;
+            if (https.test(href)) return [type, new URL(href), data];
+
+            var hash  = /^\#\w*/i;
+            if (hash.test(href)) return [type, new URL(location.origin+location.pathname+href), data];
+
             return [type, new URL(href, location.origin), data];
 
-        } else if(el.type == "submit") {
+        } else if(el.type == Transparent.state.SUBMIT) {
 
             if(el.target && el.target.tagName == "FORM") {
 
@@ -181,13 +332,16 @@ $.fn.serializeObject = function() {
                 el.preventDefault();
 
                 var href = el.target.getAttribute("action");
-                if(href == null) href = location.pathname;
-                if(href.startsWith("#")) href = location.pathname + href;
+                if(!href) href = location.pathname + href;
+
+                if (href.startsWith("#")) href = location.pathname + href;
+                if (href.endsWith  ("#")) href = href.slice(0, -1);
 
                 var method = el.target.getAttribute("method") || "GET";
                     method = method.toUpperCase();
 
                 var data = Transparent.findNearestForm(el);
+                if (data == null) return null;
 
                 var pat  = /^https?:\/\//i;
                 if (pat.test(href)) return [method, new URL(href), data];
@@ -195,37 +349,51 @@ $.fn.serializeObject = function() {
             }
         }
 
+        closestEl = $(el).closest("a");
+        if(!closestEl.length) closestEl = $(el).closest("button");
+        if(!closestEl.length) closestEl = $(el).closest("input");
+        if (closestEl.length) el = closestEl[0];
         switch (el.tagName) {
 
             case "A":
-                var href = el.getAttribute("href");
-                if(href == null) return null;
-                if(href.startsWith("#")) href = location.pathname + href;
+                var href = el.href;
+                if(!href) return null;
 
+                if (href.startsWith("#")) href = location.pathname + href;
+                if (href.endsWith  ("#")) href = href.slice(0, -1);
+
+                var data = Transparent.findNearestForm(el);
                 var pat  = /^https?:\/\//i;
-                if (pat.test(href)) return ["GET", new URL(href), Transparent.findNearestForm(el)];
+                if (pat.test(href)) return ["GET", new URL(href),];
 
-                return ["GET", new URL(href, location.origin), Transparent.findNearestForm(el)];
+                return ["GET", new URL(href, location.origin), data];
 
             case "INPUT":
             case "BUTTON":
                 var domainBaseURI = el.baseURI.split('/').slice(0, 3).join('/');
                 var domainFormAction = el.formAction.split('/').slice(0, 3).join('/');
                 var pathname = el.formAction.replace(domainFormAction, "");
-                if(pathname == null) return null;
+                if(!pathname) return null;
 
                 if (domainBaseURI == domainFormAction && el.getAttribute("type") == "submit") {
 
+                    var data = Transparent.findNearestForm(el);
+                    if (data == null) {
+                        console.error("No form found upstream of ", el);
+                        return null;
+                    }
+
                     var pat  = /^https?:\/\//i;
-                    if (pat.test(href)) return ["POST", new URL(pathname), Transparent.findNearestForm(el)];
-                    return ["POST", new URL(pathname, location.origin), Transparent.findNearestForm(el)];
+                    if (pat.test(href)) return ["POST", new URL(pathname), data];
+
+                    return ["POST", new URL(pathname, location.origin), data];
                 }
         }
 
         // Try to detect target element
         if (el.target) {
 
-            if (el.target.tagName == "A" && el.target.getAttribute("href"))
+            if (el.target.tagName == "A" && el.target.href)
                 return Transparent.findLink(el.target);
 
             if (el.target.tagName == "BUTTON" && el.target.getAttribute("type") == "submit")
@@ -236,11 +404,13 @@ $.fn.serializeObject = function() {
         }
 
         // Try to catch a custom href attribute without "A" tag
-        if (el.target && el.target.getAttribute("href")) {
+        if (el.target && $(el.target).attr("href")) {
 
-            var href = el.target.getAttribute("href");
-            if(href == null) return null;
-            if(href.startsWith("#")) href = location.pathname + href;
+            var href = $(el.target).attr("href");
+            if(!href) return null;
+
+            if (href.startsWith("#")) href = location.pathname + href;
+            if (href.endsWith  ("#")) href = href.slice(0, -1);
 
             var pat  = /^https?:\/\//i;
             if (pat.test(href)) return ["GET", new URL(href), Transparent.findNearestForm(el)];
@@ -313,7 +483,7 @@ $.fn.serializeObject = function() {
         // Check if page block found
         var page = $(htmlResponse).find(Settings.identifier)[0] || undefined;
         if (page === undefined) return false;
-        
+
         return true;
     }
 
@@ -343,39 +513,130 @@ $.fn.serializeObject = function() {
         var currentPage = $(Settings.identifier)[0] || undefined;
         if (currentPage === undefined) return false;
 
+        var name  = currentPage.dataset.name || "default";
+        var prevName = page.dataset.prevName || name;
+
         var layout = currentPage.dataset.layout;
         var prevLayout = page.dataset.prevLayout || layout;
-        return layout == prevLayout;
+
+        return name == prevName && layout == prevLayout;
     }
 
-    Transparent.transitionIn = function(callback = function() {}, delay = 250) {
+    Transparent.parseDuration = function(str) {
 
-        if(delay == 0) {
+        var array = String(str).split(", ");
+            array = array.map(function(t) {
 
-            $(Settings.identifier).css("visibility", "visible");
-            $(Settings.identifier).css("opacity", 1);
-            callback();
+                if(String(t).endsWith("ms")) return parseFloat(String(t))/1000;
+                return parseFloat(String(t));
+            });
 
-        } else {
-
-            $(Settings.identifier).animate({opacity:1}, delay);
-            setTimeout(callback, delay);
-        }
+        return Math.max(...array);
     }
 
-    Transparent.transitionOut = function(callback = function() {}, delay = 250) {
+    Transparent.callback = function(fn = function() {}, delay = 0) {
 
-        if(delay == 0) {
+        if(delay == 0) fn();
+        else setTimeout(fn, delay);
+    }
 
-            $(Settings.identifier).css("visibility", "hidden");
-            $(Settings.identifier).css("opacity", 0);
-            callback();
+    Transparent.activeTime = function(el = undefined) {
 
-        } else {
+        var delay = 0, duration = 0;
+        if(el === undefined)
+            el = Transparent.loader[0];
 
-            $(Settings.identifier).animate({opacity:0}, delay);
-            setTimeout(callback, delay);
+        var style = window.getComputedStyle(el);
+        delay     = Math.max(delay, 1000*Math.max(Transparent.parseDuration(style["animation-delay"]),    Transparent.parseDuration(style["transition-delay"])));
+        duration  = Math.max(duration, 1000*Math.max(Transparent.parseDuration(style["animation-duration"]), Transparent.parseDuration(style["transition-duration"])));
+
+        var style = window.getComputedStyle(el, ":before");
+        delay     = Math.max(delay, 1000*Math.max(Transparent.parseDuration(style["animation-delay"]),    Transparent.parseDuration(style["transition-delay"])));
+        duration  = Math.max(duration, 1000*Math.max(Transparent.parseDuration(style["animation-duration"]), Transparent.parseDuration(style["transition-duration"])));
+
+        var style = window.getComputedStyle(el, ":after");
+        delay     = Math.max(delay, 1000*Math.max(Transparent.parseDuration(style["animation-delay"]),    Transparent.parseDuration(style["transition-delay"])));
+        duration  = Math.max(duration, 1000*Math.max(Transparent.parseDuration(style["animation-duration"]), Transparent.parseDuration(style["transition-duration"])));
+
+        return {delay:delay, duration:duration};
+    }
+
+    Transparent.activeIn = function(activeCallback = function() {}) {
+
+        if(!Transparent.html.hasClass(Transparent.state.PREACTIVE)) {
+            Transparent.html.addClass(Transparent.state.PREACTIVE);
+            dispatchEvent(new Event('transparent:'+Transparent.state.PREACTIVE));
         }
+
+        var active = Transparent.activeTime();
+
+        Transparent.html.removeClass(Transparent.state.PREACTIVE);
+        if(!Transparent.html.hasClass(Transparent.state.ACTIVEIN)) {
+            Transparent.html.addClass(Transparent.state.ACTIVEIN);
+            dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVEIN));
+        }
+
+        Transparent.callback(function() {
+
+            Transparent.html.removeClass(Transparent.state.ACTIVEIN);
+            if(!Transparent.html.hasClass(Transparent.state.ACTIVE)) {
+                Transparent.html.addClass(Transparent.state.ACTIVE);
+                dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVE));
+            }
+
+            var active = Transparent.activeTime();
+            Transparent.callback(function() {
+
+                activeCallback();
+
+            }.bind(this), active.duration);
+
+        }.bind(this), active.delay);
+    }
+
+    Transparent.activeOut = function(activeCallback = function() {}) {
+
+        if(!Transparent.html.hasClass(Transparent.state.ACTIVE)) {
+            Transparent.html.addClass(Transparent.state.ACTIVE);
+            dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVE));
+        }
+
+        if(!Transparent.html.hasClass(Transparent.state.ACTIVEOUT)) {
+            Transparent.html.addClass(Transparent.state.ACTIVEOUT);
+            dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVEOUT));
+        }
+
+        var active = Transparent.activeTime();
+        Transparent.callback(function() {
+
+            activeCallback();
+            Transparent.html.removeClass(Transparent.state.ACTIVE);
+
+            var active = Transparent.activeTime();
+            Transparent.callback(function() {
+
+                Transparent.html.removeClass(Transparent.state.ACTIVEOUT);
+                if(!Transparent.html.hasClass(Transparent.state.POSTACTIVE)){
+
+                    Transparent.html.removeClass(Transparent.state.POSTACTIVE);
+                    dispatchEvent(new Event('transparent:'+Transparent.state.POSTACTIVE));
+                }
+
+                if(Transparent.html.hasClass(Transparent.state.LOADING)) {
+
+                    dispatchEvent(new Event('transparent:load'));
+
+                    Object.values(Transparent.state).forEach(e => Transparent.html.removeClass(e));
+                    Transparent.html.addClass(Transparent.state.READY);
+
+                } else {
+
+                    Transparent.html.removeClass(Transparent.state.POSTACTIVE);
+                }
+
+            }, active.duration);
+
+        }.bind(this), active.delay);
     }
 
     Transparent.replaceCanvases = function(htmlResponse) {
@@ -395,7 +656,7 @@ $.fn.serializeObject = function() {
             } else {
 
                 if(htmlResponse === undefined)
-                    console.alert("htmlResponse missing..");
+                    console.alert("Response missing..");
 
                 var parent = Transparent.findElementFromParents(htmlResponse, $(this).parents(), 3);
                 if (parent === undefined) {
@@ -423,35 +684,105 @@ $.fn.serializeObject = function() {
                           nodeScriptReplace( children[i] );
                     }
             }
-    
+
             return node;
         }
+
         function nodeScriptClone(node){
                 var script  = document.createElement("script");
                 script.text = node.innerHTML;
-        
+
                 var i = -1, attrs = node.attributes, attr;
-                while ( ++i < attrs.length ) {                                    
+                while ( ++i < attrs.length ) {
                     script.setAttribute( (attr = attrs[i]).name, attr.value );
                 }
                 return script;
         }
-        
+
         function nodeScriptIs(node) {
                 return node.tagName === 'SCRIPT';
         }
-        
+
         document.head.innerHTML = $(htmlResponse).find("head").html();
         document.body.innerHTML = $(htmlResponse).find("body").html();
         nodeScriptReplace($("head")[0]);
         nodeScriptReplace($("body")[0]);
     }
 
-    Transparent.onLoad = function(identifier, htmlResponse, callback = null, scrollTo = true) {
+    Transparent.userScroll = function(el = window) { return $(el).prop("userscroll"); }
+    Transparent.scrollTo = function(dict, callback = function() {}, el = window)
+    {
+        var origin = el;
+        if (el === window  )
+            el = document.documentElement;
+        if (el === document)
+            el = document.documentElement;
 
+        var cancelable = dict["cancelable"] ?? false;
+
+        if(!Transparent.userScroll(el)) {
+
+            if($(el).prop("cancelable")) $(el).stop();
+            return;
+        }
+
+        $(el).prop("user-scroll", false);
+        if(cancelable) {
+
+            $(el).prop("cancelable", true);
+            $(el).on("scroll.userscroll mousedown.userscroll wheel.userscroll DOMMouseScroll.userscroll mousewheel.userscroll touchmove.userscroll", function(e) {
+                $(this).prop("user-scroll", true);
+            });
+        }
+
+        scrollTop  = dict["top"] ?? el.scrollTop;
+        scrollLeft = dict["left"] ?? el.scrollLeft;
+
+        speed    = parseFloat(dict["speed"] ?? 0);
+        easing   = dict["easing"] ?? "swing";
+        debounce = dict["debounce"] ?? 0;
+        duration = 1000*Transparent.parseDuration(dict["duration"] ?? 0);
+        if(speed) {
+
+            var distance = scrollTop - window.offsetTop - window.scrollY;
+            duration = speed ? 1000*distance/speed : duration;
+        }
+
+        if(duration == 0) {
+
+            $(el).scrollTop = scrollTop;
+            $(el).scrollLeft = scrollLeft;
+
+            origin.dispatchEvent(new Event('scroll'));
+            callback();
+
+            $(el).prop("user-scroll", true);
+
+        } else {
+
+            $(el).animate({scrollTop: scrollTop, scrollLeft:scrollLeft}, duration, easing, Transparent.debounce(function() {
+
+                if(cancelable)
+                    $(el).off("scroll.user mousedown.user wheel.user DOMMouseScroll.user mousewheel.user touchmove.user", () => null);
+
+                origin.dispatchEvent(new Event('scroll'));
+                callback();
+
+                $(el).prop("user-scroll", true);
+
+            }, debounce));
+        }
+
+        return this;
+    }
+
+
+    Transparent.onLoad = function(identifier, htmlResponse, callback = null) {
+
+        window.previousLocation = window.location.toString();
         if(callback === null) callback = function() {};
 
-        // Replace canvases
+        // Replace canvases..
         Transparent.replaceCanvases(htmlResponse);
 
         // Replace head..
@@ -474,7 +805,7 @@ $.fn.serializeObject = function() {
 
             var el   = this;
             var found = false;
-            
+
             $("head").children().each(function() {
                 found = this.isEqualNode(el);
                 return !found;
@@ -487,38 +818,29 @@ $.fn.serializeObject = function() {
         var page = $(htmlResponse).find(identifier);
         var oldPage = $(identifier);
 
-        // Make sure name keeps the same, after a page change when POST or GET called
-        if  (page.data.layout == oldPage.data.layout) delete page.data.prevLayout;
-        else page.data.prevLayout  = oldPage.data.layout;
+        // Make sure name/layout keep the same after a page change (tolerance for POST or GET requests)
+        if  (page.data("name") == oldPage.data("name")) delete page.removeData("prevName");
+        else page.data("prevName", oldPage.data("name"));
+
+        if  (page.data("layout") == oldPage.data("layout")) delete page.removeData("prevLayout");
+        else page.data("prevLayout", oldPage.data("layout"));
 
         // Apply changes
         $(page).insertBefore(oldPage);
         oldPage.remove();
 
-        if(Transparent.addLayout()) {
-            $(page).css("visibility", "hidden");
-            $(page).css("opacity", 0);
-        } else {
-            $(page).css("visibility", "visible");
-            $(page).css("opacity", 1);
-        }
+        Transparent.addLayout();
 
-        var currentScroll = window.scrollY;
         $('head').append(function() {
+
             $(identifier).append(function() {
 
-                // Callback if needed, or any other action (e.g. call for transitionIn..)
+                // Callback if needed, or any other actions
                 callback();
 
                 // Trigger onload event
+                dispatchEvent(new Event('transparent:load'));
                 dispatchEvent(new Event('load'));
-
-                // Go back to top of the page..
-                if(scrollTo && window.location.hash === "") {
-
-                    if(currentScroll == window.scrollY)
-                        window.scrollTo({top: 0, behavior: 'auto'});
-                }
             });
         });
     }
@@ -530,14 +852,86 @@ $.fn.serializeObject = function() {
         });
     }
 
+    function isLocalStorageNameSupported() {
+
+        var testKey = 'test', storage = window.localStorage;
+        try {
+
+            storage.setItem(testKey, '1');
+            storage.removeItem(testKey);
+            return true;
+
+        } catch (error) { return false; }
+    }
+
+    Transparent.remToPixel     = function(rem)     { return parseFloat(rem) * parseFloat(getComputedStyle(document.documentElement).fontSize); }
+    Transparent.emToPixel      = function(em, el)  { return parseFloat(em ) * parseFloat(getComputedStyle(el.parentElement).fontSize); }
+    Transparent.percentToPixel = function(p , el)  { return parseFloat(p  ) * el.outerWidth(); }
+    Transparent.parseToPixel   = function(str, el) {
+
+        if(str === undefined) return undefined;
+
+        var array = String(str).split(", ");
+            array = array.map(function(s) {
+
+                     if(s.endsWith("rem")) return Transparent.remToPixel    (s);
+                else if(s.endsWith("em") ) return Transparent.emToPixel     (s, el);
+                else if(s.endsWith("%")  ) return Transparent.percentToPixel(s, el);
+                return parseFloat(s);
+            });
+
+        return Math.max(...array);
+    }
+
+    Transparent.getScrollPadding = function(el = document.documentElement) {
+
+        var style  = window.getComputedStyle(el);
+        var dict = {};
+            dict["top"   ] = Transparent.parseToPixel(style["scroll-padding-top"   ] || 0, el);
+            dict["left"  ] = Transparent.parseToPixel(style["scroll-padding-left"  ] || 0, el);
+            dict["right" ] = Transparent.parseToPixel(style["scroll-padding-right" ] || 0, el);
+            dict["bottom"] = Transparent.parseToPixel(style["scroll-padding-bottom"] || 0, el);
+
+        if(isNaN(dict["top"   ])) dict["top"]    = 0;
+        if(isNaN(dict["left"  ])) dict["left"]   = 0;
+        if(isNaN(dict["right" ])) dict["right"]  = 0;
+        if(isNaN(dict["bottom"])) dict["bottom"] = 0;
+
+        return dict;
+    }
+
+    Transparent.scrollToHash = function(hash = window.location.hash, options = {}, callback = function() {})
+    {
+        if (hash === "") options = Object.assign({duration: Settings["smoothscroll_duration"], speed: Settings["smoothscroll_speed"]}, options, {left:0, top:0});
+        else {
+
+            if ((''+hash).charAt(0) !== '#')
+                hash = '#' + hash;
+
+            var hashElement = $(hash)[0] ?? undefined;
+            if (hash && hashElement !== undefined) {
+
+                var scrollTop = hashElement.offsetTop - Transparent.getScrollPadding().top;
+                var scrollLeft = hashElement.offsetLeft - Transparent.getScrollPadding().left;
+                options = Object.assign({duration: Settings["smoothscroll_duration"], speed: Settings["smoothscroll_speed"]}, options, {left:scrollLeft, top:scrollTop});
+            }
+        }
+
+        Transparent.scrollTo(options, callback);
+        return this;
+    }
+
     function __main__(e) {
 
-        // Determine link and popState
-        window.popStateNew = document.location.pathname;
+        // Disable transparent JS for development..
+        if(Settings.debug) return;
+
+        // Determine link
         const link = Transparent.findLink(e);
-        window.popStateOld = document.location.pathname;
-        if (link == null || Settings.debug) return;
-        
+        if   (link == null) return;
+
+        dispatchEvent(new CustomEvent('transparent:link', {link:link}));
+
         const uuid = uuidv4();
         const type = link[0];
         const url  = link[1];
@@ -547,13 +941,14 @@ $.fn.serializeObject = function() {
         // Wait for transparent window event to be triggered
         if (!isReady) return;
 
-        if(e.type != "popstate" && ! $(this).find(Settings.identifier).length) return;
+        if (e.type != Transparent.state.POPSTATE   &&
+            e.type != Transparent.state.HASHCHANGE && !$(this).find(Settings.identifier).length) return;
 
-        // Symfony defaults rejected
-        for(i = 0; i < Settings.linkExceptions.length; i++) {
+        // Specific page exception
+        for(i = 0; i < Settings.exceptions.length; i++) {
 
-            linkException = Settings.linkExceptions[i];
-            if (url.pathname.startsWith(linkException)) return;
+            exception = Settings.exceptions[i];
+            if (url.pathname.startsWith(exception)) return;
         }
 
         // Ressources files rejected
@@ -564,29 +959,34 @@ $.fn.serializeObject = function() {
 
         // Unsecure url
         if (url.origin != location.origin) return;
+
         e.preventDefault();
 
-        if(url.pathname == location.pathname && (url.hash || window.location.hash) && e.type != "popstate" && type != "POST") {
-            
-            history.replaceState(history.state, ' ');
-            if (url.hash) window.location.hash = url.hash;
+        if((e.type == Transparent.state.CLICK || e.type == Transparent.state.HASHCHANGE) && url.pathname == location.pathname && type != "POST") {
+
+            Transparent.scrollToHash(url.hash ?? "", {easing:Settings["smoothscroll_easing"], duration:Settings["smoothscroll_duration"], speed:Settings["smoothscroll_speed"]}, function() {
+
+                if (e.target !== undefined && $(e.target).data("skip-hash") !== true)
+                    window.replaceHash(url.hash);
+            });
+
             return;
         }
 
+        dispatchEvent(new Event('transparent:onbeforeunload'));
         dispatchEvent(new Event('onbeforeunload'));
 
         function handleResponse(uuid, status = 200, method = null, data = null, xhr = null, request = null) {
 
             var htmlResponse = document.createElement("html");
+
             var responseText = Transparent.getResponseText(uuid);
+            var responseURL  = (xhr ? xhr.responseURL : null) || url.href;
             if(!responseText) {
 
-                if(!request) {
+                if(!request && responseText === null) {
 
-                    console.error("No XHR response from "+uuid+" : missing request.");
-                    console.error(sessionStorage);
-
-                    setTimeout(function() { window.location.href = url.href; }, Settings["throttle"]);
+                    setTimeout(function() { window.location.href = responseURL; }, Settings["throttle"]);
                     return;
                 }
 
@@ -597,43 +997,105 @@ $.fn.serializeObject = function() {
                     console.error(sessionStorage);
                 }
 
-                Transparent.setResponseText(uuid, responseText);
+                if(!Transparent.hasResponseText(uuid))
+                    Transparent.setResponseText(uuid, responseText);
+            }
+
+            if(!responseText) {
+                console.error("No response found.");
+                return window.location.href = responseURL;
+            }
+
+            var matches = responseText.match(/<html (.*)>/);
+            if (matches !== null) {
+
+                var objectResponse = document.createElement("html");
+                $(objectResponse)[0].innerHTML = "<object " + matches[1] + "></object>";
+
+                Object.values(Transparent.state).forEach(e => Transparent.html.removeClass(e));
+
+                var addClass = $(objectResponse).find("object").attr("class");
+                var removeClass = $("html").attr("class").replace(/transparent.*/i, "");
+                Object.values(Transparent.state).forEach(e => removeClass.replace(e, ""));
+
+                Transparent.html
+                    .removeClass(removeClass)
+                    .addClass(addClass)
+                    .addClass(Transparent.state.READY);
             }
 
             $(htmlResponse)[0].innerHTML = responseText;
 
             // Error detected..
             if(status >= 500) {
-                
+
                 // Add new page to history..
-                if(xhr) history.pushState({uuid: uuid, status:status, method: method, data: data, href: xhr.responseURL}, '', xhr.responseURL);
+                if(xhr) history.pushState({uuid: uuid, status:status, method: method, data: data, href: responseURL}, '', responseURL);
 
                 // Call rescue..
                 return Transparent.rescue(htmlResponse);
             }
 
-            // Page not recognized.. just go there.. no POST information transmitted.. 
+            // Page not recognized.. just go there.. no POST information transmitted..
             if(!Transparent.isPage(htmlResponse))
-                return window.location.href = url.href;
+                return window.location.href = responseURL;
 
             // Layout not compatible.. needs to be reloaded (exception when POST is detected..)
             if(!Transparent.isCompatibleLayout(htmlResponse, method, data))
-                return window.location.href = url.href;
+                return window.location.href = responseURL;
 
-            // From here the page is valid.. 
+            // From here the page is valid..
             // so new page added to history..
-            if(xhr) history.pushState({uuid: uuid, status:status, method: method, data: data, href: xhr.responseURL}, '', xhr.responseURL);
+            if(xhr) history.pushState({uuid: uuid, status:status, method: method, data: data, href: responseURL}, '', responseURL);
 
-            if (Transparent.isKnownLayout(htmlResponse))
-                return Transparent.onLoad(Settings.identifier, htmlResponse, null, addNewState && method != "POST");
+            // Mark layout as known
+            if(!Transparent.isKnownLayout(htmlResponse)) {
 
-            return Transparent.transitionOut(function() {
-                Transparent.onLoad(Settings.identifier, htmlResponse, Transparent.transitionIn, addNewState && method != "POST");
+                Transparent.html.addClass(Transparent.state.NEW);
+                dispatchEvent(new Event('transparent:'+Transparent.state.NEW));
+            }
+
+            // Mark active as popstate or submit
+            if(e.type == Transparent.state.POPSTATE) {
+
+                Transparent.html.addClass(Transparent.state.POPSTATE);
+                dispatchEvent(new Event('transparent:'+Transparent.state.POPSTATE));
+
+            } else if(e.type == Transparent.state.SUBMIT) {
+
+                Transparent.html.addClass(Transparent.state.SUBMIT);
+                dispatchEvent(new Event('transparent:'+Transparent.state.SUBMIT));
+            }
+
+            // Callback active
+            var prevLayout = Transparent.getLayout();
+            var newLayout = Transparent.getLayout(htmlResponse);
+            Transparent.html.addClass(prevLayout+"-to-"+newLayout);
+            dispatchEvent(new Event('transparent:'+prevLayout+'-to-'+newLayout));
+
+            Transparent.html.addClass(Transparent.state.LOADING);
+
+            return Transparent.activeIn(function() {
+
+                Transparent.onLoad(Settings.identifier, htmlResponse, function() {
+
+                    // Go back to top of the page..
+                    Transparent.scrollToHash(location.hash);
+                    Transparent.activeOut(function() {
+
+                        Transparent.html
+                            .removeClass(prevLayout+"-to-"+newLayout)
+                            .removeClass(Transparent.state.SUBMIT)
+                            .removeClass(Transparent.state.POPSTATE)
+                            .removeClass(Transparent.state.NEW);
+                    });
+
+                }, method != "POST" /* avoid to return to top of page when submitting form */);
             });
         }
 
-        if(history.state && !Transparent.getResponseText(history.state.uuid))
-            Transparent.setResponseText(history.state.uuid, $("html")[0].innerHTML);
+        if(history.state && !Transparent.hasResponseText(history.state.uuid))
+            Transparent.setResponseText(history.state.uuid, $("html")[0]);
 
         // This append on user click (e.g. when user push a link)
         // It is null when dev is pushing or replacing state
@@ -648,13 +1110,9 @@ $.fn.serializeObject = function() {
                 data: data,
                 dataType: 'html',
                 headers: Settings["headers"] || {},
-                xhr: function () { return xhr; }, 
-                success: function (html, status, request) {
-                    return handleResponse(uuid, request.status, type, data, xhr, request);
-                },
-                error:   function (request, ajaxOptions, thrownError) { 
-                    return handleResponse(uuid, request.status, type, data, xhr, request);
-                }
+                xhr: function () { return xhr; },
+                success: function (html, status, request) { return handleResponse(uuid, request.status, type, data, xhr, request); },
+                error:   function (request, ajaxOptions, thrownError) { return handleResponse(uuid, request.status, type, data, xhr, request); }
             });
         }
 
@@ -663,15 +1121,15 @@ $.fn.serializeObject = function() {
 
     // Update history if not refreshing page or different page (avoid double pushState)
     var href = history.state ? history.state.href : null;
-    if (href != location.pathname+location.hash)
-        history.replaceState({uuid: uuidv4(), status: history.state ? history.state.status : 200, data:{}, method: history.state ? history.state.method : "GET", href: location.pathname+location.hash}, '', location.pathname+location.hash);
+    if (href != location.origin + location.pathname + location.hash)
+        history.replaceState({uuid: uuidv4(), status: history.state ? history.state.status : 200, data:{}, method: history.state ? history.state.method : "GET", href: location.origin + location.pathname + location.hash}, '', location.origin + location.pathname + location.hash);
 
     // Overload onpopstate
     if(!Settings.debug) {
 
-        window.onpopstate = __main__;
+        window.onpopstate   = __main__; // Onpopstate pop out straight to previous page.. this creates a jump while changing pages with hash..
+        window.onhashchange = __main__;
         document.addEventListener('click', __main__, false);
-        
         $("form").submit(__main__);
     }
 
