@@ -15,13 +15,11 @@ $.fn.serializeObject = function() {
 };
 
 (function(namespace) {
-    
+
     namespace.replaceHash = function(newhash, triggerHashChange = true, skipIfNoIdentifier = true) {
 
-        console.log("OK ! ", newhash);
-
         if (!newhash) newhash = "";
-        if (newhash !== "" && (''+newhash).charAt(0) !== '#') 
+        if (newhash !== "" && (''+newhash).charAt(0) !== '#')
             newhash = '#' + newhash;
 
         var oldURL = location.origin+location.pathname+location.hash;
@@ -32,7 +30,7 @@ $.fn.serializeObject = function() {
 
             dispatchEvent(new HashChangeEvent("hashfallback", {oldURL:oldURL, newURL:newURL}));
             newHash = "";
-        
+
             oldURL = location.origin+location.pathname+location.hash;
             newURL = location.origin+location.pathname+newhash;
             return oldURL != newURL;
@@ -98,7 +96,6 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         "throttle": 1000,
         "identifier": "#page",
         "loader": "#loader",
-        
         "smoothscroll_duration": "200ms",
         "smoothscroll_speed"   : 0,
         "smoothscroll_easing"  : "swing",
@@ -166,9 +163,9 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         return sessionStorage.getItem('transparent['+uuid+']') || null;
     }
 
-    function isDomEntity(entity) 
-    { 
-        return typeof entity  === 'object' && entity.nodeType !== undefined; 
+    function isDomEntity(entity)
+    {
+        return typeof entity  === 'object' && entity.nodeType !== undefined;
     }
 
     Transparent.setResponseText = function(uuid, responseText, exceptionRaised = false)
@@ -301,9 +298,9 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             if (href.endsWith  ("#")) href = href.slice(0, -1);
 
             var data = history.state ? Transparent.getData(history.state.uuid) : {};
-            
+
             return ["GET", new URL(el.newURL), data];
-        
+
         } else if (el.type == Transparent.state.POPSTATE) {
 
             if(!el.state) return;
@@ -383,9 +380,14 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                         return null;
                     }
 
+                    var data = Transparent.findNearestForm(el);
+                    if (data == null) {
+                        console.error("No form found upstream of ", el);
+                        return null;
+                    }
+
                     var pat  = /^https?:\/\//i;
                     if (pat.test(href)) return ["POST", new URL(pathname), data];
-                    
                     return ["POST", new URL(pathname, location.origin), data];
                 }
         }
@@ -483,7 +485,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         // Check if page block found
         var page = $(htmlResponse).find(Settings.identifier)[0] || undefined;
         if (page === undefined) return false;
-        
+
         return true;
     }
 
@@ -513,18 +515,22 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         var currentPage = $(Settings.identifier)[0] || undefined;
         if (currentPage === undefined) return false;
 
+        var name  = currentPage.dataset.name || "default";
+        var prevName = page.dataset.prevName || name;
+
         var layout = currentPage.dataset.layout;
         var prevLayout = page.dataset.prevLayout || layout;
-        return layout == prevLayout;
+
+        return name == prevName && layout == prevLayout;
     }
 
-    Transparent.parseDuration = function(str) { 
+    Transparent.parseDuration = function(str) {
 
         var array = String(str).split(", ");
             array = array.map(function(t) {
 
                 if(String(t).endsWith("ms")) return parseFloat(String(t))/1000;
-                return parseFloat(String(t));    
+                return parseFloat(String(t));
             });
 
         return Math.max(...array);
@@ -535,7 +541,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         if(delay == 0) fn();
         else setTimeout(fn, delay);
     }
-    
+
     Transparent.activeTime = function(el = undefined) {
 
         var delay = 0, duration = 0;
@@ -545,11 +551,11 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         var style = window.getComputedStyle(el);
         delay     = Math.max(delay, 1000*Math.max(Transparent.parseDuration(style["animation-delay"]),    Transparent.parseDuration(style["transition-delay"])));
         duration  = Math.max(duration, 1000*Math.max(Transparent.parseDuration(style["animation-duration"]), Transparent.parseDuration(style["transition-duration"])));
-        
+
         var style = window.getComputedStyle(el, ":before");
         delay     = Math.max(delay, 1000*Math.max(Transparent.parseDuration(style["animation-delay"]),    Transparent.parseDuration(style["transition-delay"])));
         duration  = Math.max(duration, 1000*Math.max(Transparent.parseDuration(style["animation-duration"]), Transparent.parseDuration(style["transition-duration"])));
-        
+
         var style = window.getComputedStyle(el, ":after");
         delay     = Math.max(delay, 1000*Math.max(Transparent.parseDuration(style["animation-delay"]),    Transparent.parseDuration(style["transition-delay"])));
         duration  = Math.max(duration, 1000*Math.max(Transparent.parseDuration(style["animation-duration"]), Transparent.parseDuration(style["transition-duration"])));
@@ -572,7 +578,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVEIN));
         }
 
-        Transparent.callback(function() { 
+        Transparent.callback(function() {
 
             Transparent.html.removeClass(Transparent.state.ACTIVEIN);
             if(!Transparent.html.hasClass(Transparent.state.ACTIVE)) {
@@ -581,7 +587,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             }
 
             var active = Transparent.activeTime();
-            Transparent.callback(function() { 
+            Transparent.callback(function() {
 
                 activeCallback();
 
@@ -603,13 +609,13 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         }
 
         var active = Transparent.activeTime();
-        Transparent.callback(function() { 
+        Transparent.callback(function() {
 
             activeCallback();
             Transparent.html.removeClass(Transparent.state.ACTIVE);
 
             var active = Transparent.activeTime();
-            Transparent.callback(function() { 
+            Transparent.callback(function() {
 
                 Transparent.html.removeClass(Transparent.state.ACTIVEOUT);
                 if(!Transparent.html.hasClass(Transparent.state.POSTACTIVE)){
@@ -624,7 +630,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
                     Object.values(Transparent.state).forEach(e => Transparent.html.removeClass(e));
                     Transparent.html.addClass(Transparent.state.READY);
-    
+
                 } else {
 
                     Transparent.html.removeClass(Transparent.state.POSTACTIVE);
@@ -634,7 +640,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         }.bind(this), active.delay);
     }
-    
+
     Transparent.replaceCanvases = function(htmlResponse) {
 
         // Extract existing canvas to avoid redrawing them.. (time consuming)
@@ -680,25 +686,25 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                           nodeScriptReplace( children[i] );
                     }
             }
-    
+
             return node;
         }
-        
+
         function nodeScriptClone(node){
                 var script  = document.createElement("script");
                 script.text = node.innerHTML;
-        
+
                 var i = -1, attrs = node.attributes, attr;
-                while ( ++i < attrs.length ) {                                    
+                while ( ++i < attrs.length ) {
                     script.setAttribute( (attr = attrs[i]).name, attr.value );
                 }
                 return script;
         }
-        
+
         function nodeScriptIs(node) {
                 return node.tagName === 'SCRIPT';
         }
-        
+
         document.head.innerHTML = $(htmlResponse).find("head").html();
         document.body.innerHTML = $(htmlResponse).find("body").html();
         nodeScriptReplace($("head")[0]);
@@ -709,15 +715,15 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     Transparent.scrollTo = function(dict, callback = function() {}, el = window)
     {
         var origin = el;
-        if (el === window  ) 
+        if (el === window  )
             el = document.documentElement;
-        if (el === document) 
+        if (el === document)
             el = document.documentElement;
 
         var cancelable = dict["cancelable"] ?? false;
-        
+
         if(!Transparent.userScroll(el)) {
-            
+
             if($(el).prop("cancelable")) $(el).stop();
             return;
         }
@@ -772,7 +778,6 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         return this;
     }
 
-
     Transparent.onLoad = function(identifier, htmlResponse, callback = null) {
 
         window.previousLocation = window.location.toString();
@@ -801,7 +806,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
             var el   = this;
             var found = false;
-            
+
             $("head").children().each(function() {
                 found = this.isEqualNode(el);
                 return !found;
@@ -814,7 +819,10 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         var page = $(htmlResponse).find(identifier);
         var oldPage = $(identifier);
 
-        // Make sure name keeps the same, after a page change when POST or GET called
+        // Make sure name/layout keep the same after a page change (tolerance for POST or GET requests)
+        if  (page.data("name") == oldPage.data("name")) delete page.removeData("prevName");
+        else page.data("prevName", oldPage.data("name"));
+
         if  (page.data("layout") == oldPage.data("layout")) delete page.removeData("prevLayout");
         else page.data("prevLayout", oldPage.data("layout"));
 
@@ -846,7 +854,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     }
 
     function isLocalStorageNameSupported() {
-        
+
         var testKey = 'test', storage = window.localStorage;
         try {
 
@@ -860,7 +868,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     Transparent.remToPixel     = function(rem)     { return parseFloat(rem) * parseFloat(getComputedStyle(document.documentElement).fontSize); }
     Transparent.emToPixel      = function(em, el)  { return parseFloat(em ) * parseFloat(getComputedStyle(el.parentElement).fontSize); }
     Transparent.percentToPixel = function(p , el)  { return parseFloat(p  ) * el.outerWidth(); }
-    Transparent.parseToPixel   = function(str, el) { 
+    Transparent.parseToPixel   = function(str, el) {
 
         if(str === undefined) return undefined;
 
@@ -884,12 +892,11 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             dict["left"  ] = Transparent.parseToPixel(style["scroll-padding-left"  ] || 0, el);
             dict["right" ] = Transparent.parseToPixel(style["scroll-padding-right" ] || 0, el);
             dict["bottom"] = Transparent.parseToPixel(style["scroll-padding-bottom"] || 0, el);
-        
+
         if(isNaN(dict["top"   ])) dict["top"]    = 0;
         if(isNaN(dict["left"  ])) dict["left"]   = 0;
         if(isNaN(dict["right" ])) dict["right"]  = 0;
         if(isNaN(dict["bottom"])) dict["bottom"] = 0;
-        
         return dict;
     }
 
@@ -897,7 +904,6 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     {
         if (hash === "") options = Object.assign({duration: Settings["smoothscroll_duration"], speed: Settings["smoothscroll_speed"]}, options, {left:0, top:0});
         else {
-        
             if ((''+hash).charAt(0) !== '#')
                 hash = '#' + hash;
 
@@ -909,7 +915,6 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                 options = Object.assign({duration: Settings["smoothscroll_duration"], speed: Settings["smoothscroll_speed"]}, options, {left:scrollLeft, top:scrollTop});
             }
         }
-        
         Transparent.scrollTo(options, callback);
         return this;
     }
@@ -934,7 +939,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         // Wait for transparent window event to be triggered
         if (!isReady) return;
 
-        if (e.type != Transparent.state.POPSTATE   && 
+        if (e.type != Transparent.state.POPSTATE   &&
             e.type != Transparent.state.HASHCHANGE && !$(this).find(Settings.identifier).length) return;
 
         // Specific page exception
@@ -958,7 +963,6 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         if((e.type == Transparent.state.CLICK || e.type == Transparent.state.HASHCHANGE) && url.pathname == location.pathname && type != "POST") {
 
             Transparent.scrollToHash(url.hash ?? "", {easing:Settings["smoothscroll_easing"], duration:Settings["smoothscroll_duration"], speed:Settings["smoothscroll_speed"]}, function() {
-                
                 if (e.target !== undefined && $(e.target).data("skip-hash") !== true)
                     window.replaceHash(url.hash);
             });
@@ -972,7 +976,6 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         function handleResponse(uuid, status = 200, method = null, data = null, xhr = null, request = null) {
 
             var htmlResponse = document.createElement("html");
-            
             var responseText = Transparent.getResponseText(uuid);
             var responseURL  = (xhr ? xhr.responseURL : null) || url.href;
             if(!responseText) {
@@ -1001,7 +1004,6 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
             var matches = responseText.match(/<html (.*)>/);
             if (matches !== null) {
-                
                 var objectResponse = document.createElement("html");
                 $(objectResponse)[0].innerHTML = "<object " + matches[1] + "></object>";
 
@@ -1037,11 +1039,11 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             if(!Transparent.isCompatibleLayout(htmlResponse, method, data))
                 return window.location.href = responseURL;
 
-            // From here the page is valid.. 
+            // From here the page is valid..
             // so new page added to history..
             if(xhr) history.pushState({uuid: uuid, status:status, method: method, data: data, href: responseURL}, '', responseURL);
 
-            // Mark layout as known 
+            // Mark layout as known
             if(!Transparent.isKnownLayout(htmlResponse)) {
 
                 Transparent.html.addClass(Transparent.state.NEW);
@@ -1103,7 +1105,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                 data: data,
                 dataType: 'html',
                 headers: Settings["headers"] || {},
-                xhr: function () { return xhr; }, 
+                xhr: function () { return xhr; },
                 success: function (html, status, request) { return handleResponse(uuid, request.status, type, data, xhr, request); },
                 error:   function (request, ajaxOptions, thrownError) { return handleResponse(uuid, request.status, type, data, xhr, request); }
             });
