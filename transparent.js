@@ -15,10 +15,8 @@ $.fn.serializeObject = function() {
 };
 
 (function(namespace) {
-    
-    namespace.replaceHash = function(newhash, triggerHashChange = true, skipIfNoIdentifier = true) {
 
-        console.log("OK ! ", newhash);
+    namespace.replaceHash = function(newhash, triggerHashChange = true, skipIfNoIdentifier = true) {
 
         if (!newhash) newhash = "";
         if (newhash !== "" && (''+newhash).charAt(0) !== '#') 
@@ -32,7 +30,7 @@ $.fn.serializeObject = function() {
 
             dispatchEvent(new HashChangeEvent("hashfallback", {oldURL:oldURL, newURL:newURL}));
             newHash = "";
-        
+
             oldURL = location.origin+location.pathname+location.hash;
             newURL = location.origin+location.pathname+newhash;
             return oldURL != newURL;
@@ -41,8 +39,9 @@ $.fn.serializeObject = function() {
         var state = Object.assign({}, history.state, {href: newURL});
         history.replaceState(state, '', newURL);
 
-        if(triggerHashChange)
+        if(triggerHashChange) 
             dispatchEvent(new HashChangeEvent("hashchange", {oldURL:oldURL, newURL:newURL}));
+
 
         return true;
     }
@@ -92,6 +91,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     var Settings = Transparent.settings = {
         "headers": {},
         "data": {},
+        "disable":false,
         "debug": false,
         "response_text": {},
         "response_limit": 25,
@@ -108,6 +108,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     const State = Transparent.state = {
 
         READY      : "ready",
+        DISABLE    : "disable",
         LOADING    : "loading",
         NEW        : "new",
         FIRST      : "first",
@@ -301,9 +302,9 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             if (href.endsWith  ("#")) href = href.slice(0, -1);
 
             var data = history.state ? Transparent.getData(history.state.uuid) : {};
-            
+
             return ["GET", new URL(el.newURL), data];
-        
+
         } else if (el.type == Transparent.state.POPSTATE) {
 
             if(!el.state) return;
@@ -680,25 +681,25 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                           nodeScriptReplace( children[i] );
                     }
             }
-    
+
             return node;
         }
-        
+
         function nodeScriptClone(node){
                 var script  = document.createElement("script");
                 script.text = node.innerHTML;
-        
+
                 var i = -1, attrs = node.attributes, attr;
-                while ( ++i < attrs.length ) {                                    
+                while ( ++i < attrs.length ) {
                     script.setAttribute( (attr = attrs[i]).name, attr.value );
                 }
                 return script;
         }
-        
+
         function nodeScriptIs(node) {
                 return node.tagName === 'SCRIPT';
         }
-        
+
         document.head.innerHTML = $(htmlResponse).find("head").html();
         document.body.innerHTML = $(htmlResponse).find("body").html();
         nodeScriptReplace($("head")[0]);
@@ -715,20 +716,21 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             el = document.documentElement;
 
         var cancelable = dict["cancelable"] ?? false;
-        
-        if(!Transparent.userScroll(el)) {
-            
-            if($(el).prop("cancelable")) $(el).stop();
-            return;
-        }
+        if(cancelable && $(el).prop("cancel")) $(el).stop();
 
-        $(el).prop("user-scroll", false);
-        if(cancelable) {
+        if(Transparent.userScroll(el)) {
 
-            $(el).prop("cancelable", true);
-            $(el).on("scroll.userscroll mousedown.userscroll wheel.userscroll DOMMouseScroll.userscroll mousewheel.userscroll touchmove.userscroll", function(e) {
-                $(this).prop("user-scroll", true);
-            });
+            if(cancelable) {
+
+                $(el).prop("cancel", true);
+                $(el).on("scroll.userscroll mousedown.userscroll wheel.userscroll DOMMouseScroll.userscroll mousewheel.userscroll touchmove.userscroll", function(e) {
+                    $(this).prop("user-scroll", true);
+                });
+            }
+
+        } else {
+
+            $(el).prop("user-scroll", false);
         }
 
         scrollTop  = dict["top"] ?? el.scrollTop;
@@ -772,6 +774,27 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         return this;
     }
 
+
+    Transparent.debounce = function(func, wait, immediate) {
+
+        var timeout;
+
+        return function() {
+
+            var context = this, args = arguments;
+            var later = function() {
+
+                timeout = null;
+                if (!immediate) func.apply(context, args);
+            };
+
+            var callNow = immediate && !timeout;
+            clearTimeout(timeout);
+
+            timeout = setTimeout(later, wait);
+            if (callNow) func.apply(context, args);
+        };
+    };
 
     Transparent.onLoad = function(identifier, htmlResponse, callback = null) {
 
@@ -830,7 +853,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
                 // Callback if needed, or any other actions
                 callback();
-                    
+
                 // Trigger onload event
                 dispatchEvent(new Event('transparent:load'));
                 dispatchEvent(new Event('load'));
@@ -884,12 +907,12 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             dict["left"  ] = Transparent.parseToPixel(style["scroll-padding-left"  ] || 0, el);
             dict["right" ] = Transparent.parseToPixel(style["scroll-padding-right" ] || 0, el);
             dict["bottom"] = Transparent.parseToPixel(style["scroll-padding-bottom"] || 0, el);
-        
+
         if(isNaN(dict["top"   ])) dict["top"]    = 0;
         if(isNaN(dict["left"  ])) dict["left"]   = 0;
         if(isNaN(dict["right" ])) dict["right"]  = 0;
         if(isNaN(dict["bottom"])) dict["bottom"] = 0;
-        
+
         return dict;
     }
 
@@ -897,27 +920,30 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     {
         if (hash === "") options = Object.assign({duration: Settings["smoothscroll_duration"], speed: Settings["smoothscroll_speed"]}, options, {left:0, top:0});
         else {
-        
+
             if ((''+hash).charAt(0) !== '#')
                 hash = '#' + hash;
 
             var hashElement = $(hash)[0] ?? undefined;
-            if (hash && hashElement !== undefined) {
+            if (hashElement !== undefined) {
 
-                var scrollTop = hashElement.offsetTop - Transparent.getScrollPadding().top;
+                var scrollTop  = hashElement.offsetTop - Transparent.getScrollPadding().top;
                 var scrollLeft = hashElement.offsetLeft - Transparent.getScrollPadding().left;
+
                 options = Object.assign({duration: Settings["smoothscroll_duration"], speed: Settings["smoothscroll_speed"]}, options, {left:scrollLeft, top:scrollTop});
             }
         }
-        
-        Transparent.scrollTo(options, callback);
+
+        if(document.body.scrollHeight - (window.scrollY + window.innerHeight) < 1) callback();
+        else Transparent.scrollTo(options, callback);
+
         return this;
     }
 
     function __main__(e) {
 
-        // Disable transparent JS for development..
-        if(Settings.debug) return;
+        // Disable transparent JS (e.g. during development..)
+        if(Settings.disable) return;
 
         // Determine link
         const link = Transparent.findLink(e);
@@ -958,7 +984,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         if((e.type == Transparent.state.CLICK || e.type == Transparent.state.HASHCHANGE) && url.pathname == location.pathname && type != "POST") {
 
             Transparent.scrollToHash(url.hash ?? "", {easing:Settings["smoothscroll_easing"], duration:Settings["smoothscroll_duration"], speed:Settings["smoothscroll_speed"]}, function() {
-                
+
                 if (e.target !== undefined && $(e.target).data("skip-hash") !== true)
                     window.replaceHash(url.hash);
             });
@@ -972,7 +998,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         function handleResponse(uuid, status = 200, method = null, data = null, xhr = null, request = null) {
 
             var htmlResponse = document.createElement("html");
-            
+
             var responseText = Transparent.getResponseText(uuid);
             var responseURL  = (xhr ? xhr.responseURL : null) || url.href;
             if(!responseText) {
@@ -982,10 +1008,10 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                     setTimeout(function() { window.location.href = responseURL; }, Settings["throttle"]);
                     return;
                 }
-                
+
                 responseText = request.responseText;
                 if(status >= 500) {
-                
+
                     console.error("Unexpected XHR response from "+uuid+": error code "+request.status);
                     console.error(sessionStorage);
                 }
@@ -1001,7 +1027,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
             var matches = responseText.match(/<html (.*)>/);
             if (matches !== null) {
-                
+
                 var objectResponse = document.createElement("html");
                 $(objectResponse)[0].innerHTML = "<object " + matches[1] + "></object>";
 
@@ -1118,7 +1144,12 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         history.replaceState({uuid: uuidv4(), status: history.state ? history.state.status : 200, data:{}, method: history.state ? history.state.method : "GET", href: location.origin + location.pathname + location.hash}, '', location.origin + location.pathname + location.hash);
 
     // Overload onpopstate
-    if(!Settings.debug) {
+    if(Settings.disable) {
+
+        var removeClass = $(Transparent.html).attr("class").replace(/transparent.*/i, "");
+        Transparent.html.removeClass(removeClass).addClass(Transparent.state.READY+" "+Transparent.state.DISABLE);
+     
+    } else {
 
         window.onpopstate   = __main__; // Onpopstate pop out straight to previous page.. this creates a jump while changing pages with hash..
         window.onhashchange = __main__;
