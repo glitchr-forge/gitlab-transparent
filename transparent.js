@@ -39,7 +39,7 @@ $.fn.serializeObject = function() {
         var state = Object.assign({}, history.state, {href: newURL});
         history.replaceState(state, '', newURL);
 
-        if(triggerHashChange) 
+        if(triggerHashChange)
             dispatchEvent(new HashChangeEvent("hashchange", {oldURL:oldURL, newURL:newURL}));
 
 
@@ -376,7 +376,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                 if(!pathname) return null;
 
                 if (domainBaseURI == domainFormAction && el.getAttribute("type") == "submit") {
-                    
+
                     var data = Transparent.findNearestForm(el);
                     if (data == null) {
                         console.error("No form found upstream of ", el);
@@ -803,6 +803,93 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         };
     };
 
+
+    Transparent.findImages = function () {
+
+        var doc = document.documentElement;
+        const srcChecker = /url\(\s*?['"]?\s*?(\S+?)\s*?["']?\s*?\)/i
+        return Array.from(doc.querySelectorAll('*'))
+            .reduce((collection, node) => {
+
+            let prop = window.getComputedStyle(node, null).getPropertyValue('background-image')
+            let match = srcChecker.exec(prop);
+            if (match) collection.add(match[1]);
+
+            if (/^img$/i.test(node.tagName)) collection.add(node.src)
+            else if (/^frame$/i.test(node.tagName)) {
+
+                try {
+                    searchDOM(node.contentDocument || node.contentWindow.document)
+                        .forEach(img => { if (img) collection.add(img); })
+                } catch (e) {}
+            }
+
+            return collection;
+
+        }, new Set());
+    }
+
+    var memory = [];
+    Transparent.fileLoaded =
+    Transparent.inMemory = function(el) {
+
+        if(element in memory) return true;
+
+        $(el).each(function() {
+
+            var isImage = this.tagName == "IMG";
+            console.log(isImage);
+
+            $(this).addClass('fadein');
+            $(this).on('load.transparent', function() {
+
+                $(this).removeClass('fadein');
+
+                iImages++;
+                console.log(this.src, iImages, nImages);
+                if(iImages >= nImages) {
+                    console.log("YAY !");
+                }
+            });
+        });
+    }
+
+    Transparent.loadImages = function()
+    {
+        function loadImg (src, timeout = 500) {
+            var imgPromise = new Promise((resolve, reject) => {
+
+                let img = new Image()
+                    img.onload = () => {
+                    resolve({
+                        src: src,
+                        width: img.naturalWidth,
+                        height: img.naturalHeight
+                    })
+                }
+
+                img.onerror = reject
+                img.src = src
+            })
+
+            var timer = new Promise((resolve, reject) => { setTimeout(reject, timeout) })
+            return Promise.race([imgPromise, timer])
+        }
+
+        function loadImgAll (imgList, timeout = 500) {
+            return new Promise((resolve, reject) => {
+                Promise.all(imgList
+                    .map(src => loadImg(src, timeout))
+                    .map(p => p.catch(e => false))
+                ).then(results => resolve(results.filter(r => r)))
+            })
+        }
+
+        return new Promise((resolve, reject) => {
+            loadImgAll(Array.from(Transparent.findImages(document.documentElement))).then(resolve, reject)
+        })
+    }
+
     Transparent.onLoad = function(identifier, htmlResponse, callback = null) {
 
         window.previousLocation = window.location.toString();
@@ -853,6 +940,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         // Apply changes
         $(page).insertBefore(oldPage);
+
         oldPage.remove();
 
         Transparent.addLayout();
@@ -944,7 +1032,10 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             }
         }
 
-        if(document.body.scrollHeight - (window.scrollY + window.innerHeight) < 1) callback();
+        var bottomReach = document.body.scrollHeight - (window.scrollY + window.innerHeight) < 1;
+        var bottomOverflow = scrollTop > window.scrollY + window.innerHeight;
+
+        if(bottomReach && bottomOverflow) callback();
         else Transparent.scrollTo(options, callback);
 
         return this;
@@ -1107,7 +1198,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                 Transparent.onLoad(Settings.identifier, htmlResponse, function() {
 
                     // Go back to top of the page..
-                    Transparent.scrollToHash(location.hash);
+                    Transparent.scrollToHash(location.hash, {duration:0});
                     Transparent.activeOut(function() {
 
                         Transparent.html
@@ -1156,7 +1247,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         var removeClass = $(Transparent.html).attr("class").replace(/transparent.*/i, "");
         Transparent.html.removeClass(removeClass).addClass(Transparent.state.READY+" "+Transparent.state.DISABLE);
-     
+
     } else {
 
         window.onpopstate   = __main__; // Onpopstate pop out straight to previous page.. this creates a jump while changing pages with hash..
