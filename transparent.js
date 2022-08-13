@@ -16,7 +16,7 @@ $.fn.serializeObject = function() {
 
 (function(namespace) {
 
-    namespace.replaceHash = function(newhash, triggerHashChange = true, skipIfNoIdentifier = true) {
+    namespace.replaceHash = function(newhash, triggerHashChange = true, skipIfEmptyIdentifier = true) {
 
         if (!newhash) newhash = "";
         if (newhash !== "" && (''+newhash).charAt(0) !== '#')
@@ -26,8 +26,8 @@ $.fn.serializeObject = function() {
         var newURL = location.origin+location.pathname+newhash;
         if(oldURL == newURL) return false;
 
-        if(skipIfNoIdentifier && $(newhash).length === 0){
-
+        if(skipIfEmptyIdentifier && $(newhash).length === 0)
+        {
             dispatchEvent(new HashChangeEvent("hashfallback", {oldURL:oldURL, newURL:newURL}));
             newHash = "";
 
@@ -833,6 +833,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     Transparent.fileLoaded =
     Transparent.inMemory = function(el) {
 
+        // TO BE DONE. (PRELOAD IMAGES ON PRIORITY)
         if(element in memory) return true;
 
         $(el).each(function() {
@@ -1091,6 +1092,10 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
             return;
         }
+
+        if(e.metaKey && e.altKey) return window.open(url).focus();
+        if(e.metaKey && e.shiftKey) return window.open(url, '_blank').focus(); // Safari not focusing..
+        if(e.metaKey) return window.open(url, '_blank');
 
         dispatchEvent(new Event('transparent:onbeforeunload'));
         dispatchEvent(new Event('onbeforeunload'));
