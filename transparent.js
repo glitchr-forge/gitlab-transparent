@@ -766,7 +766,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         } else {
 
-            $(el).animate({scrollTop: scrollTop, scrollLeft:scrollLeft}, duration, easing, Transparent.debounce(function() {
+            $(el).animate({scrollTop: scrollTop}, duration, easing, Transparent.debounce(function() {
 
                 if(cancelable)
                     $(el).off("scroll.user mousedown.user wheel.user DOMMouseScroll.user mousewheel.user touchmove.user", () => null);
@@ -1026,8 +1026,8 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             var hashElement = $(hash)[0] ?? undefined;
             if (hashElement !== undefined) {
 
-                var scrollTop  = hashElement.offsetTop - Transparent.getScrollPadding().top;
-                var scrollLeft = hashElement.offsetLeft - Transparent.getScrollPadding().left;
+                var scrollTop  = hashElement.getBoundingClientRect().top  + document.documentElement.scrollTop - Transparent.getScrollPadding().top;
+                var scrollLeft = hashElement.getBoundingClientRect().left + document.documentElement.scrollTop - Transparent.getScrollPadding().left;
 
                 options = Object.assign({duration: Settings["smoothscroll_duration"], speed: Settings["smoothscroll_speed"]}, options, {left:scrollLeft, top:scrollTop});
             }
@@ -1082,16 +1082,20 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         if (url.origin != location.origin) return;
 
         e.preventDefault();
+        if (url == location) return;
 
         if((e.type == Transparent.state.CLICK || e.type == Transparent.state.HASHCHANGE) && url.pathname == location.pathname && type != "POST") {
 
             Transparent.scrollToHash(url.hash ?? "", {easing:Settings["smoothscroll_easing"], duration:Settings["smoothscroll_duration"], speed:Settings["smoothscroll_speed"]}, function() {
+                
                 if (e.target !== undefined && $(e.target).data("skip-hash") !== true)
                     window.replaceHash(url.hash);
             });
 
             return;
         }
+        
+        console.log("OKKK", url);
 
         if(e.metaKey && e.altKey) return window.open(url).focus();
         if(e.metaKey && e.shiftKey) return window.open(url, '_blank').focus(); // Safari not focusing..
