@@ -714,7 +714,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         nodeScriptReplace($("body")[0]);
     }
 
-    Transparent.userScroll = function(el = window) { return $(el).prop("userscroll"); }
+    Transparent.userScroll = function(el = undefined) { return $(el === undefined ? document.documentElement : el).closestScrollable().prop("user-scroll") ?? true; }
     Transparent.scrollTo = function(dict, callback = function() {}, el = window)
     {
         var origin = el;
@@ -747,12 +747,28 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         speed    = parseFloat(dict["speed"] ?? 0);
         easing   = dict["easing"] ?? "swing";
         debounce = dict["debounce"] ?? 0;
+        combine  = dict["combine"] ?? true;
+
         duration = 1000*Transparent.parseDuration(dict["duration"] ?? 0);
+        durationX = 1000*Transparent.parseDuration(dict["durationX"] ?? dict["duration"] ?? 0);
+        durationY = 1000*Transparent.parseDuration(dict["durationY"] ?? dict["duration"] ?? 0);
+
         if(speed) {
 
             var distance = scrollTop - window.offsetTop - window.scrollY;
             duration = speed ? 1000*distance/speed : duration;
         }
+
+        var callbackWrapper = function() {
+
+            if(cancelable)
+                $(el).off("scroll.user mousedown.user wheel.user DOMMouseScroll.user mousewheel.user touchmove.user", () => null);
+
+            origin.dispatchEvent(new Event('scroll'));
+            callback();
+
+            $(el).prop("user-scroll", true);
+        };
 
         if(duration == 0) {
 
@@ -764,19 +780,15 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
             $(el).prop("user-scroll", true);
 
+        } else if (combine) {
+
+            $(el).animate({scrollTop: scrollTop, scrollLeft: scrollLeft}, duration, easing, Transparent.debounce(callbackWrapper, debounce));
+
         } else {
 
-            $(el).animate({scrollTop: scrollTop}, duration, easing, Transparent.debounce(function() {
-
-                if(cancelable)
-                    $(el).off("scroll.user mousedown.user wheel.user DOMMouseScroll.user mousewheel.user touchmove.user", () => null);
-
-                origin.dispatchEvent(new Event('scroll'));
-                callback();
-
-                $(el).prop("user-scroll", true);
-
-            }, debounce));
+            $(el).animate({scrollTop: scrollTop}, durationX, easing,
+                () => $(el).animate({scrollLeft: scrollLeft}, durationY, easing, Transparent.debounce(callbackWrapper, debounce))
+            );
         }
 
         return this;
@@ -1087,15 +1099,13 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         if((e.type == Transparent.state.CLICK || e.type == Transparent.state.HASHCHANGE) && url.pathname == location.pathname && type != "POST") {
 
             Transparent.scrollToHash(url.hash ?? "", {easing:Settings["smoothscroll_easing"], duration:Settings["smoothscroll_duration"], speed:Settings["smoothscroll_speed"]}, function() {
-                
+
                 if (e.target !== undefined && $(e.target).data("skip-hash") !== true)
                     window.replaceHash(url.hash);
             });
 
             return;
         }
-        
-        console.log("OKKK", url);
 
         if(e.metaKey && e.altKey) return window.open(url).focus();
         if(e.metaKey && e.shiftKey) return window.open(url, '_blank').focus(); // Safari not focusing..
