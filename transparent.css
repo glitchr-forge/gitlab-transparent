@@ -1,2 +1,2 @@
 img.fadein { opacity:0; }
-img { transition: all 0.25s ease; }
+img { transition: opacity 0.25s ease; }
