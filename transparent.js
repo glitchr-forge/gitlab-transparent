@@ -955,8 +955,8 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         var state = Array.from(Transparent.state);
 
-        var     htmlClass = Array.from($(dom).find("html").attr("class").split(" ") || []).filter(x => !state.includes(x));
-        var  oldHtmlClass = Array.from($(Transparent.html).attr("class").split(" ") || []);
+        var     htmlClass = Array.from(($(dom).find("html").attr("class") || "").split(" ")).filter(x => !state.includes(x));
+        var  oldHtmlClass = Array.from(($(Transparent.html).attr("class") || "").split(" "));
         var removeHtmlClass = oldHtmlClass.filter(x => !htmlClass.includes(x) && switchLayout != x && !state.includes(x));
 
         Transparent.html.removeClass(removeHtmlClass).addClass(htmlClass);
