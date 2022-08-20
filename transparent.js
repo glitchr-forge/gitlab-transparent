@@ -106,6 +106,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
     const State = Transparent.state = {
 
+        SWITCH     : "X-to-Y",
         READY      : "ready",
         DISABLE    : "disable",
         LOADING    : "loading",
@@ -250,9 +251,9 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         return !isKnown;
     }
 
-    Transparent.getLayout = function(htmlResponse = null) {
+    Transparent.getLayout = function(dom = null) {
 
-        var layout = htmlResponse !== null ? $(htmlResponse).find(Settings.identifier) : $(Settings.identifier);
+        var layout = dom !== null ? $(dom).find(Settings.identifier) : $(Settings.identifier);
         if(!layout.length) return undefined;
 
         return layout.data("layout");
@@ -483,19 +484,19 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         return that;
     }
 
-    Transparent.isPage = function(htmlResponse) {
+    Transparent.isPage = function(dom) {
 
         // Check if page block found
-        var page = $(htmlResponse).find(Settings.identifier)[0] || undefined;
+        var page = $(dom).find(Settings.identifier)[0] || undefined;
         if (page === undefined) return false;
 
         return true;
     }
 
     var knownLayout = [];
-    Transparent.isKnownLayout = function(htmlResponse)
+    Transparent.isKnownLayout = function(dom)
     {
-        var page = (htmlResponse ? $(htmlResponse).find(Settings.identifier) : $(Settings.identifier))[0];
+        var page = (dom ? $(dom).find(Settings.identifier) : $(Settings.identifier))[0];
         if (page === undefined) return false;
 
         var layout = page.dataset.layout;
@@ -503,16 +504,16 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         return knownLayout.indexOf(layout) !== -1;
     }
 
-    Transparent.isCompatibleLayout = function(htmlResponse, method = null, data = null)
+    Transparent.isCompatibleLayout = function(dom, method = null, data = null)
     {
         // If no html response.. skip
-        if(!htmlResponse) return false;
+        if(!dom) return false;
 
         // An exception applies here..
         // in case the page contains data transferred to the server
         if(method == "POST" && !jQuery.isEmptyObject(data)) return true;
 
-        var page = $(htmlResponse).find(Settings.identifier)[0] || undefined;
+        var page = $(dom).find(Settings.identifier)[0] || undefined;
         if (page === undefined) return false;
 
         var currentPage = $(Settings.identifier)[0] || undefined;
@@ -644,7 +645,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         }.bind(this), active.delay);
     }
 
-    Transparent.replaceCanvases = function(htmlResponse) {
+    Transparent.replaceCanvases = function(dom) {
 
         // Extract existing canvas to avoid redrawing them.. (time consuming)
         $.each($('html').find("canvas"), function () {
@@ -655,15 +656,15 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             var id = this.getAttribute("id");
             if (id) {
 
-                var canvas = $(htmlResponse).find("#page #" + id);
+                var canvas = $(dom).find("#page #" + id);
                 canvas.replaceWith(this);
 
             } else {
 
-                if(htmlResponse === undefined)
+                if(dom === undefined)
                     console.alert("Response missing..");
 
-                var parent = Transparent.findElementFromParents(htmlResponse, $(this).parents(), 3);
+                var parent = Transparent.findElementFromParents(dom, $(this).parents(), 3);
                 if (parent === undefined) {
                     console.error("Unexpected canvas without ID found..", this)
                     return false;
@@ -674,7 +675,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         });
     }
 
-    Transparent.rescue = function(htmlResponse)
+    Transparent.rescue = function(dom)
     {
         console.error("Rescue mode.. called");
         rescueMode = true;
@@ -708,8 +709,8 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                 return node.tagName === 'SCRIPT';
         }
 
-        document.head.innerHTML = $(htmlResponse).find("head").html();
-        document.body.innerHTML = $(htmlResponse).find("body").html();
+        document.head.innerHTML = $(dom).find("head").html();
+        document.body.innerHTML = $(dom).find("body").html();
         nodeScriptReplace($("head")[0]);
         nodeScriptReplace($("body")[0]);
     }
@@ -903,16 +904,16 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         })
     }
 
-    Transparent.onLoad = function(identifier, htmlResponse, callback = null) {
+    Transparent.onLoad = function(identifier, dom, callback = null) {
 
         window.previousLocation = window.location.toString();
         if(callback === null) callback = function() {};
 
         // Replace canvases..
-        Transparent.replaceCanvases(htmlResponse);
+        Transparent.replaceCanvases(dom);
 
         // Replace head..
-        var head = $(htmlResponse).find("head");
+        var head = $(dom).find("head");
         $("head").children().each(function() {
 
             var el   = this;
@@ -941,17 +942,25 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         });
 
         // Extract page block to be loaded
-        var page = $(htmlResponse).find(identifier);
+        var page = $(dom).find(identifier);
         var oldPage = $(identifier);
 
         // Make sure name/layout keep the same after a page change (tolerance for POST or GET requests)
         if  (page.data("name") == oldPage.data("name")) delete page.removeData("prevName");
         else page.data("prevName", oldPage.data("name"));
 
+        var switchLayout = Transparent.state.SWITCH.replace("X", page.data("layout")).replace("Y", oldPage.data("layout"));
         if  (page.data("layout") == oldPage.data("layout")) delete page.removeData("prevLayout");
         else page.data("prevLayout", oldPage.data("layout"));
 
-        // Apply changes
+        var state = Array.from(Transparent.state);
+
+        var     htmlClass = Array.from($(dom).find("html").attr("class").split(" ") || []).filter(x => !state.includes(x));
+        var  oldHtmlClass = Array.from($(Transparent.html).attr("class").split(" ") || []);
+        var removeHtmlClass = oldHtmlClass.filter(x => !htmlClass.includes(x) && switchLayout != x && !state.includes(x));
+
+        Transparent.html.removeClass(removeHtmlClass).addClass(htmlClass);
+
         $(page).insertBefore(oldPage);
 
         oldPage.remove();
@@ -1116,7 +1125,6 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         function handleResponse(uuid, status = 200, method = null, data = null, xhr = null, request = null) {
 
-            var htmlResponse = document.createElement("html");
             var responseText = Transparent.getResponseText(uuid);
             var responseURL  = (xhr ? xhr.responseURL : null) || url.href;
             if(!responseText) {
@@ -1143,25 +1151,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                 return window.location.href = responseURL;
             }
 
-            var matches = responseText.match(/<html (.*)>/);
-            if (matches !== null) {
-
-                var objectResponse = document.createElement("html");
-                $(objectResponse)[0].innerHTML = "<object " + matches[1] + "></object>";
-
-                Object.values(Transparent.state).forEach(e => Transparent.html.removeClass(e));
-
-                var addClass = $(objectResponse).find("object").attr("class");
-                var removeClass = $("html").attr("class").replace(/transparent.*/i, "");
-                Object.values(Transparent.state).forEach(e => removeClass.replace(e, ""));
-
-                Transparent.html
-                    .removeClass(removeClass)
-                    .addClass(addClass)
-                    .addClass(Transparent.state.READY);
-            }
-
-            $(htmlResponse)[0].innerHTML = responseText;
+            var dom = new DOMParser().parseFromString(responseText, "text/html");
 
             // Error detected..
             if(status >= 500) {
@@ -1170,15 +1160,15 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                 if(xhr) history.pushState({uuid: uuid, status:status, method: method, data: data, href: responseURL}, '', responseURL);
 
                 // Call rescue..
-                return Transparent.rescue(htmlResponse);
+                return Transparent.rescue(dom);
             }
 
             // Page not recognized.. just go there.. no POST information transmitted..
-            if(!Transparent.isPage(htmlResponse))
+            if(!Transparent.isPage(dom))
                 return window.location.href = responseURL;
 
             // Layout not compatible.. needs to be reloaded (exception when POST is detected..)
-            if(!Transparent.isCompatibleLayout(htmlResponse, method, data))
+            if(!Transparent.isCompatibleLayout(dom, method, data))
                 return window.location.href = responseURL;
 
             // From here the page is valid..
@@ -1186,7 +1176,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             if(xhr) history.pushState({uuid: uuid, status:status, method: method, data: data, href: responseURL}, '', responseURL);
 
             // Mark layout as known
-            if(!Transparent.isKnownLayout(htmlResponse)) {
+            if(!Transparent.isKnownLayout(dom)) {
 
                 Transparent.html.addClass(Transparent.state.NEW);
                 dispatchEvent(new Event('transparent:'+Transparent.state.NEW));
@@ -1206,22 +1196,23 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
             // Callback active
             var prevLayout = Transparent.getLayout();
-            var newLayout = Transparent.getLayout(htmlResponse);
-            Transparent.html.addClass(prevLayout+"-to-"+newLayout);
-            dispatchEvent(new Event('transparent:'+prevLayout+'-to-'+newLayout));
+            var newLayout = Transparent.getLayout(dom);
+            var switchLayout = Transparent.state.SWITCH.replace("X", prevLayout).replace("Y", newLayout);
+            Transparent.html.addClass(switchLayout);
+
+            dispatchEvent(new Event('transparent:'+switchLayout));
 
             Transparent.html.addClass(Transparent.state.LOADING);
-
             return Transparent.activeIn(function() {
 
-                Transparent.onLoad(Settings.identifier, htmlResponse, function() {
+                Transparent.onLoad(Settings.identifier, dom, function() {
 
                     // Go back to top of the page..
                     Transparent.scrollToHash(location.hash, {duration:0});
                     Transparent.activeOut(function() {
 
                         Transparent.html
-                            .removeClass(prevLayout+"-to-"+newLayout)
+                            .removeClass(switchLayout)
                             .removeClass(Transparent.state.SUBMIT)
                             .removeClass(Transparent.state.POPSTATE)
                             .removeClass(Transparent.state.NEW);
@@ -1232,7 +1223,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         }
 
         if(history.state && !Transparent.hasResponseText(history.state.uuid))
-            Transparent.setResponseText(history.state.uuid, $("html")[0]);
+            Transparent.setResponseText(history.state.uuid, Transparent.html);
 
         // This append on user click (e.g. when user push a link)
         // It is null when dev is pushing or replacing state
