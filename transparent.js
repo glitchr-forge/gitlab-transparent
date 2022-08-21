@@ -1,3 +1,42 @@
+(function(namespace) {
+
+    namespace.replaceHash = function(newHash, triggerHashChange = true, skipIfEmptyIdentifier = true) {
+        
+        if(!newHash) newHash = "";
+        if (newHash !== "" && (''+newHash).charAt(0) !== '#')
+            newHash = '#' + newHash;
+
+        var oldURL = location.origin+location.pathname+location.hash;
+        var newURL = location.origin+location.pathname+newHash;
+
+        var fallback  = $(newHash).length === 0;
+
+        var hashElement = $(newHash)[0] ?? undefined;
+        if (hashElement !== undefined) // Update hash only if element is displayed
+            fallback |= window.getComputedStyle(hashElement)["display"] == "none";
+
+        if(skipIfEmptyIdentifier && fallback){
+
+            dispatchEvent(new HashChangeEvent("hashfallback", {oldURL:oldURL, newURL:newURL}));
+            newHash = "";
+
+            oldURL = location.origin+location.pathname+location.hash;
+            newURL = location.origin+location.pathname+newHash;
+        }
+
+        if(oldURL == newURL) return false;
+
+        var state = Object.assign({}, history.state, {href: newURL});
+        history.replaceState(state, '', newURL);
+
+        if(triggerHashChange)
+            dispatchEvent(new HashChangeEvent("hashchange", {oldURL:oldURL, newURL:newURL}));
+
+        return true;
+    }
+
+})(window);
+
 $.fn.serializeObject = function() {
     var o = {};
     var a = this.serializeArray();
@@ -14,39 +53,56 @@ $.fn.serializeObject = function() {
     return o;
 };
 
-(function(namespace) {
+$.fn.isScrollable  = function() { return $(this).isScrollableX() || $(this).isScrollableY(); }
+$.fn.isScrollableX = function() {
 
-    namespace.replaceHash = function(newhash, triggerHashChange = true, skipIfEmptyIdentifier = true) {
+    return $(this).map(function(i) {
 
-        if (!newhash) newhash = "";
-        if (newhash !== "" && (''+newhash).charAt(0) !== '#')
-            newhash = '#' + newhash;
+        var el = this[i] === window ? document.documentElement : this[i];
+        var hasScrollableContent = el.scrollWidth > el.clientWidth;
 
-        var oldURL = location.origin+location.pathname+location.hash;
-        var newURL = location.origin+location.pathname+newhash;
-        if(oldURL == newURL) return false;
+        var overflowXStyle = window.getComputedStyle(el).overflowX;
+        var isOverflowHidden = overflowXStyle.indexOf('hidden') !== -1;
 
-        if(skipIfEmptyIdentifier && $(newhash).length === 0)
-        {
-            dispatchEvent(new HashChangeEvent("hashfallback", {oldURL:oldURL, newURL:newURL}));
-            newHash = "";
+        return hasScrollableContent && !isOverflowHidden;
 
-            oldURL = location.origin+location.pathname+location.hash;
-            newURL = location.origin+location.pathname+newhash;
-            return oldURL != newURL;
+    }.bind(this));
+}
+$.fn.isScrollableY = function() {
+
+    return $(this).map(function(i) {
+
+        var el = this[i] === window ? document.documentElement : this[i];
+        var hasScrollableContent = el.scrollHeight > el.clientHeight;
+
+        var overflowYStyle = window.getComputedStyle(el).overflowY;
+        var isOverflowHidden = overflowYStyle.indexOf('hidden') !== -1;
+
+        return hasScrollableContent && !isOverflowHidden;
+
+    }.bind(this));
+}
+
+$.fn.closestScrollable = function()
+{
+    return $(this).map((i) => {
+
+        var target = this[i] === window ? document.documentElement : this[i];
+        if (target === undefined) target = document.documentElement;
+
+        while (target !== document.documentElement) {
+
+            if($(target).isScrollable()[0]) return target;
+
+            if(target.parentElement === undefined) return undefined;
+            if(target.parentElement === null) return null;
+
+            target = target.parentElement;
         }
 
-        var state = Object.assign({}, history.state, {href: newURL});
-        history.replaceState(state, '', newURL);
-
-        if(triggerHashChange)
-            dispatchEvent(new HashChangeEvent("hashchange", {oldURL:oldURL, newURL:newURL}));
-
-
-        return true;
-    }
-
-})(window);
+        return $(target).isScrollable() ? target : undefined;
+    });
+}
 
 $.fn.repaint = function(duration = 1000, reiteration=5) {
 
@@ -748,8 +804,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         speed    = parseFloat(dict["speed"] ?? 0);
         easing   = dict["easing"] ?? "swing";
         debounce = dict["debounce"] ?? 0;
-        combine  = dict["combine"] ?? true;
-
+        
         duration = 1000*Transparent.parseDuration(dict["duration"] ?? 0);
         durationX = 1000*Transparent.parseDuration(dict["durationX"] ?? dict["duration"] ?? 0);
         durationY = 1000*Transparent.parseDuration(dict["durationY"] ?? dict["duration"] ?? 0);
@@ -765,7 +820,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             if(cancelable)
                 $(el).off("scroll.user mousedown.user wheel.user DOMMouseScroll.user mousewheel.user touchmove.user", () => null);
 
-            origin.dispatchEvent(new Event('scroll'));
+            window.dispatchEvent(new Event('scroll'));
             callback();
 
             $(el).prop("user-scroll", true);
@@ -776,14 +831,10 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             $(el).scrollTop = scrollTop;
             $(el).scrollLeft = scrollLeft;
 
-            origin.dispatchEvent(new Event('scroll'));
+            window.dispatchEvent(new Event('scroll'));
             callback();
 
             $(el).prop("user-scroll", true);
-
-        } else if (combine) {
-
-            $(el).animate({scrollTop: scrollTop, scrollLeft: scrollLeft}, duration, easing, Transparent.debounce(callbackWrapper, debounce));
 
         } else {
 
@@ -843,7 +894,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     }
 
     var memory = [];
-    Transparent.fileLoaded =
+    Transparent.fileLoaded = [];
     Transparent.inMemory = function(el) {
 
         // TO BE DONE. (PRELOAD IMAGES ON PRIORITY)
@@ -1036,7 +1087,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         return dict;
     }
 
-    Transparent.scrollToHash = function(hash = window.location.hash, options = {}, callback = function() {})
+    Transparent.scrollToHash = function(hash = window.location.hash, options = {}, callback = function() {}, el = window)
     {
         if (hash === "") options = Object.assign({duration: Settings["smoothscroll_duration"], speed: Settings["smoothscroll_speed"]}, options, {left:0, top:0});
         else {
@@ -1057,8 +1108,8 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         var bottomReach = document.body.scrollHeight - (window.scrollY + window.innerHeight) < 1;
         var bottomOverflow = scrollTop > window.scrollY + window.innerHeight;
 
-        if(bottomReach && bottomOverflow) callback();
-        else Transparent.scrollTo(options, callback);
+        if(bottomReach && bottomOverflow) callback({}, el);
+        else Transparent.scrollTo(options, callback, el);
 
         return this;
     }
@@ -1111,7 +1162,8 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
                 if (e.target !== undefined && $(e.target).data("skip-hash") !== true)
                     window.replaceHash(url.hash);
-            });
+
+            }, $(e.target).closestScrollable());
 
             return;
         }
