@@ -162,8 +162,11 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
     const State = Transparent.state = {
 
+        ROOT       : "transparent",
+
         SWITCH     : "X-to-Y",
         READY      : "ready",
+        RELOAD     : "reload",
         DISABLE    : "disable",
         LOADING    : "loading",
         NEW        : "new",
@@ -184,7 +187,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     var rescueMode = false;
 
     Transparent.html = $($(document).find("html")[0]);
-    Transparent.html.addClass("transparent " + Transparent.state.LOADING + " " + Transparent.state.FIRST);
+    Transparent.html.addClass(Transparent.state.ROOT+ " " + Transparent.state.LOADING + " " + Transparent.state.FIRST);
 
     if(!Transparent.html.hasClass(Transparent.state.ACTIVE)) {
         Transparent.html.addClass(Transparent.state.ACTIVE);
@@ -689,7 +692,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                     dispatchEvent(new Event('transparent:load'));
 
                     Object.values(Transparent.state).forEach(e => Transparent.html.removeClass(e));
-                    Transparent.html.addClass(Transparent.state.READY);
+                    Transparent.html.addClass(Transparent.state.ROOT + " " + Transparent.state.READY);
 
                 } else {
 
@@ -736,21 +739,20 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         console.error("Rescue mode.. called");
         rescueMode = true;
 
-        function nodeScriptReplace(node) {
-            if ( nodeScriptIs(node) === true ) {
-                    node.parentNode.replaceChild( nodeScriptClone(node) , node );
-            }
+        function scriptReplaceEl(node) {
+
+            if ( nodeScriptIs(node) === true )
+                node.parentNode.replaceChild( scriptCloneEl(node) , node );
             else {
-                    var i = -1, children = node.childNodes;
-                    while ( ++i < children.length ) {
-                          nodeScriptReplace( children[i] );
-                    }
+                var i = -1, children = node.childNodes;
+                while ( ++i < children.length )
+                        scriptReplaceEl( children[i] );
             }
 
             return node;
         }
 
-        function nodeScriptClone(node){
+        function scriptCloneEl(node){
                 var script  = document.createElement("script");
                 script.text = node.innerHTML;
 
@@ -767,14 +769,13 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         document.head.innerHTML = $(dom).find("head").html();
         document.body.innerHTML = $(dom).find("body").html();
-        nodeScriptReplace($("head")[0]);
-        nodeScriptReplace($("body")[0]);
+        scriptReplaceEl($("head")[0]);
+        scriptReplaceEl($("body")[0]);
     }
 
     Transparent.userScroll = function(el = undefined) { return $(el === undefined ? document.documentElement : el).closestScrollable().prop("user-scroll") ?? true; }
     Transparent.scrollTo = function(dict, callback = function() {}, el = window)
     {
-        var origin = el;
         if (el === window  )
             el = document.documentElement;
         if (el === document)
@@ -1004,14 +1005,13 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         if  (page.data("layout") == oldPage.data("layout")) delete page.removeData("prevLayout");
         else page.data("prevLayout", oldPage.data("layout"));
 
-        var state = Array.from(Transparent.state);
+        var states = Array.from(Transparent.state);
 
-        var     htmlClass = Array.from(($(dom).find("html").attr("class") || "").split(" ")).filter(x => !state.includes(x));
+        var     htmlClass = Array.from(($(dom).find("html").attr("class") || "").split(" ")).filter(x => !states.includes(x));
         var  oldHtmlClass = Array.from(($(Transparent.html).attr("class") || "").split(" "));
-        var removeHtmlClass = oldHtmlClass.filter(x => !htmlClass.includes(x) && switchLayout != x && !state.includes(x));
+        var removeHtmlClass = oldHtmlClass.filter(x => !htmlClass.includes(x) && switchLayout != x && !states.includes(x));
 
-        Transparent.html.removeClass(removeHtmlClass).addClass(htmlClass);
-
+        Transparent.html.removeClass(removeHtmlClass).addClass(htmlClass);        
         $(page).insertBefore(oldPage);
 
         oldPage.remove();
@@ -1206,7 +1206,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             var dom = new DOMParser().parseFromString(responseText, "text/html");
 
             // Error detected..
-            if(status >= 500) {
+            if(status != 200) {
 
                 // Add new page to history..
                 if(xhr) history.pushState({uuid: uuid, status:status, method: method, data: data, href: responseURL}, '', responseURL);
@@ -1254,8 +1254,16 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
             dispatchEvent(new Event('transparent:'+switchLayout));
 
+            if($(dom).find("html").hasClass(Transparent.state.RELOAD))
+                window.location.reload();
+                    
+                
             Transparent.html.addClass(Transparent.state.LOADING);
             return Transparent.activeIn(function() {
+                        
+                // Reload state found..
+                if($(dom).find("html").hasClass(Transparent.state.RELOAD))
+                    return;
 
                 Transparent.onLoad(Settings.identifier, dom, function() {
 
@@ -1307,8 +1315,9 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     // Overload onpopstate
     if(Settings.disable) {
 
-        var removeClass = $(Transparent.html).attr("class").replace(/transparent.*/i, "");
-        Transparent.html.removeClass(removeClass).addClass(Transparent.state.READY+" "+Transparent.state.DISABLE);
+        var states    = Array.from(Transparent.state);
+        var htmlClass = Array.from(($("html").attr("class") || "").split(" ")).filter(x => !states.includes(x));
+        Transparent.html.removeClass(states).addClass(htmlClass.join(" ")+" "+Transparent.state.ROOT+" "+Transparent.state.READY+" "+Transparent.state.DISABLE);
 
     } else {
 
