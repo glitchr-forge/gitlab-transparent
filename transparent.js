@@ -147,7 +147,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     var Settings = Transparent.settings = {
         "headers": {},
         "data": {},
-        "disable":true,
+        "disable":false,
         "debug": false,
         "response_text": {},
         "response_limit": 25,
