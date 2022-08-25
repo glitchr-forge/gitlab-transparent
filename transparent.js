@@ -422,16 +422,16 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                 if (href.startsWith("#")) href = location.pathname + href;
                 if (href.endsWith  ("#")) href = href.slice(0, -1);
 
-                var data = Transparent.findNearestForm(el);
                 var pat  = /^https?:\/\//i;
-                if (pat.test(href)) return ["GET", new URL(href),];
+                if (pat.test(href)) return ["GET", new URL(href), el];
 
-                return ["GET", new URL(href, location.origin), data];
+                return ["GET", new URL(href, location.origin), el];
 
             case "INPUT":
             case "BUTTON":
                 var domainBaseURI = el.baseURI.split('/').slice(0, 3).join('/');
                 var domainFormAction = el.formAction.split('/').slice(0, 3).join('/');
+
                 var pathname = el.formAction.replace(domainFormAction, "");
                 if(!pathname) return null;
 
@@ -782,36 +782,60 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         var cancelable = dict["cancelable"] ?? false;
         if(cancelable && $(el).prop("cancel")) $(el).stop();
 
-        if(Transparent.userScroll(el)) {
+        if(!Sticky.userScroll(el)) {
 
-            if(cancelable) {
+            if($(el).prop("cancelable")) {
 
-                $(el).prop("cancel", true);
-                $(el).on("scroll.userscroll mousedown.userscroll wheel.userscroll DOMMouseScroll.userscroll mousewheel.userscroll touchmove.userscroll", function(e) {
-                    $(this).prop("user-scroll", true);
-                });
+                $(el).prop("user-scroll", true);
+                $(el).stop();
             }
 
-        } else {
-
-            $(el).prop("user-scroll", false);
+            return;
         }
 
-        scrollTop  = dict["top"] ?? el.scrollTop;
-        scrollLeft = dict["left"] ?? el.scrollLeft;
+        $(el).prop("user-scroll", false);
+        if(cancelable) {
+
+            $(el).prop("cancelable", true);
+            $(el).on("scroll.userscroll mousedown.userscroll wheel.userscroll DOMMouseScroll.userscroll mousewheel.userscroll touchmove.userscroll", function(e) {
+                $(this).prop("user-scroll", true);
+            });
+        }
+
+        var maxScrollX = $(el).prop("scrollWidth") - Math.round($(el).prop("clientWidth"));
+        if (maxScrollX == 0) maxScrollX = Math.round($(el).prop("clientWidth"));
+        var maxScrollY = $(el).prop("scrollHeight") - Math.round($(el).prop("clientHeight"));
+        if (maxScrollY == 0) maxScrollY = Math.round($(el).prop("clientHeight"));
+
+        scrollTop  = Math.max(0, Math.min(dict["top"] ?? $(el).prop("scrollTop"), maxScrollY));
+        scrollLeft = Math.max(0, Math.min(dict["left"] ?? $(el).prop("scrollLeft"), maxScrollX));
 
         speed    = parseFloat(dict["speed"] ?? 0);
         easing   = dict["easing"] ?? "swing";
         debounce = dict["debounce"] ?? 0;
 
-        duration = 1000*Transparent.parseDuration(dict["duration"] ?? 0);
-        durationX = 1000*Transparent.parseDuration(dict["durationX"] ?? dict["duration"] ?? 0);
-        durationY = 1000*Transparent.parseDuration(dict["durationY"] ?? dict["duration"] ?? 0);
+        duration  = 1000*Transparent.parseDuration(dict["duration"] ?? 0);
+        durationX = 1000*Transparent.parseDuration(dict["duration-x"] ?? dict["duration"] ?? 0);
+        durationY = 1000*Transparent.parseDuration(dict["duration-y"] ?? dict["duration"] ?? 0);
 
         if(speed) {
 
-            var distance = scrollTop - window.offsetTop - window.scrollY;
-            duration = speed ? 1000*distance/speed : duration;
+            var currentScrollX = $(el)[0].scrollLeft;
+            if(currentScrollX < scrollLeft || scrollLeft == 0) // Going to the right
+                distanceX = Math.abs(scrollLeft - currentScrollX);
+            else // Going back to 0 position
+                distanceX = currentScrollX;
+
+
+            var currentScrollY = $(el)[0].scrollTop;
+            if(currentScrollY <= scrollTop || scrollTop == 0) // Going to the right
+                distanceY = Math.abs(scrollTop - currentScrollY);
+            else // Going back to 0 position
+                distanceY = currentScrollY;
+
+            durationX = speed ? 1000*distanceX/speed : durationX;
+            durationY = speed ? 1000*distanceY/speed : durationY;
+            duration = durationX+durationY;
         }
 
         var callbackWrapper = function() {
@@ -827,8 +851,8 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         if(duration == 0) {
 
-            $(el).scrollTop = scrollTop;
-            $(el).scrollLeft = scrollLeft;
+            $(el).scrollTop(scrollTop);
+            $(el).scrollLeft(scrollLeft);
 
             window.dispatchEvent(new Event('scroll'));
             callback();
@@ -837,8 +861,8 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         } else {
 
-            $(el).animate({scrollTop: scrollTop}, durationX, easing,
-                () => $(el).animate({scrollLeft: scrollLeft}, durationY, easing, Transparent.debounce(callbackWrapper, debounce))
+            $(el).animate({scrollTop: scrollTop}, durationY, easing,
+                () => $(el).animate({scrollLeft: scrollLeft}, durationX, easing, Transparent.debounce(callbackWrapper, debounce))
             );
         }
 
@@ -1090,8 +1114,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
     Transparent.scrollToHash = function(hash = window.location.hash, options = {}, callback = function() {}, el = window)
     {
-        if (hash === "") options = Object.assign({duration: Settings["smoothscroll_duration"], speed: Settings["smoothscroll_speed"]}, options, {left:0, top:0});
-        else {
+        if (hash !== "") {
 
             if ((''+hash).charAt(0) !== '#')
                 hash = '#' + hash;
@@ -1104,16 +1127,21 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
                 options = Object.assign({duration: Settings["smoothscroll_duration"], speed: Settings["smoothscroll_speed"]}, options, {left:scrollLeft, top:scrollTop});
             }
+
+            var bottomReach = document.body.scrollHeight - (window.scrollY + window.innerHeight) < 1;
+            var bottomOverflow = scrollTop > window.scrollY + window.innerHeight;
         }
 
-        var bottomReach = document.body.scrollHeight - (window.scrollY + window.innerHeight) < 1;
-        var bottomOverflow = scrollTop > window.scrollY + window.innerHeight;
-
-        if(bottomReach && bottomOverflow) callback({}, el);
+        if(hash === "" || (bottomReach && bottomOverflow)) callback({}, el);
         else Transparent.scrollTo(options, callback, el);
 
         return this;
     }
+
+    Transparent.isElement = function(obj){
+        try { return Boolean(obj.constructor.__proto__.prototype.constructor.name); }
+        catch(e) { return false; }
+    };
 
     function __main__(e) {
 
@@ -1126,10 +1154,11 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         dispatchEvent(new CustomEvent('transparent:link', {link:link}));
 
-        const uuid = uuidv4();
-        const type = link[0];
-        const url  = link[1];
-        const data = link[2];
+        const uuid   = uuidv4();
+        const type   = link[0];
+        const url    = link[1];
+        const data   = Transparent.isElement(link[2]) ? undefined : link[2];
+        const target = Transparent.isElement(link[2]) ? link[2] : undefined;
         if  (!url) return;
 
         // Wait for transparent window event to be triggered
@@ -1172,7 +1201,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         if(e.metaKey && e.altKey) return window.open(url).focus();
         if(e.metaKey && e.shiftKey) return window.open(url, '_blank').focus(); // Safari not focusing..
-        if(e.metaKey) return window.open(url, '_blank');
+        if(e.metaKey || $(target).attr("target") == "_blank") return window.open(url, '_blank');
 
         dispatchEvent(new Event('transparent:onbeforeunload'));
         dispatchEvent(new Event('onbeforeunload'));
@@ -1270,7 +1299,9 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                 Transparent.onLoad(Settings.identifier, dom, function() {
 
                     // Go back to top of the page..
-                    Transparent.scrollToHash(location.hash, {duration:0});
+                    if(location.hash) Transparent.scrollToHash(location.hash, {duration:0});
+                    else Transparent.scrollTo({top:0, left:0, cancelable: false});
+
                     Transparent.activeOut(function() {
 
                         Transparent.html
@@ -1291,6 +1322,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         // It is null when dev is pushing or replacing state
         var addNewState = !e.state;
         if (addNewState) {
+
 
             // Submit ajax request..
             var xhr = new XMLHttpRequest();
