@@ -995,38 +995,6 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             }
         });
 
-        var body = $(dom).find("body");
-        $("body").children().each(function() {
-
-            var el   = this;
-            var found = false;
-
-            body.children().each(function() {
-
-                found = this.isEqualNode(el);
-                return !found;
-            });
-
-            if(!found) this.remove();
-        });
-
-        body.children().each(function() {
-
-            var el   = this;
-            var found = false;
-
-            $("body").children().each(function() {
-                found = this.isEqualNode(el);
-                return !found;
-            });
-
-            if(!found) {
-
-                if(this.tagName != "SCRIPT") $("body").append(this.cloneNode(true));
-                else $("body").append(this);
-            }
-        });
-
         // Extract page block to be loaded
         var page = $(dom).find(identifier);
         var oldPage = $(identifier);
@@ -1189,16 +1157,9 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         e.preventDefault();
         if (url == location) return;
 
-        console.log("XX");
-        console.log(url.hash);
-
         if((e.type == Transparent.state.CLICK || e.type == Transparent.state.HASHCHANGE) && url.pathname == location.pathname && type != "POST") {
 
-            console.log("XX");
-            console.log(url.hash);
             if(!url.hash) return;
-            console.log("XX");
-            console.log(url.hash);
             Transparent.scrollToHash(url.hash ?? "", {easing:Settings["smoothscroll_easing"], duration:Settings["smoothscroll_duration"], speed:Settings["smoothscroll_speed"]}, function() {
 
                 if (e.target != undefined && $(e.target).data("skip-hash") != true)
