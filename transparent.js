@@ -1,7 +1,7 @@
 (function(namespace) {
 
     namespace.replaceHash = function(newHash, triggerHashChange = true, skipIfEmptyIdentifier = true) {
-        
+
         if(!newHash) newHash = "";
         if (newHash !== "" && (''+newHash).charAt(0) !== '#')
             newHash = '#' + newHash;
@@ -15,7 +15,7 @@
         if (hashElement !== undefined) // Update hash only if element is displayed
             fallback |= window.getComputedStyle(hashElement)["display"] == "none";
 
-        if(skipIfEmptyIdentifier && fallback){
+        if(skipIfEmptyIdentifier && !newHash && fallback){
 
             dispatchEvent(new HashChangeEvent("hashfallback", {oldURL:oldURL, newURL:newURL}));
             newHash = "";
@@ -752,6 +752,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             return node;
         }
 
+        function nodeScriptIs(node) { return node.tagName === 'SCRIPT'; }
         function scriptCloneEl(node){
                 var script  = document.createElement("script");
                 script.text = node.innerHTML;
@@ -763,13 +764,10 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                 return script;
         }
 
-        function nodeScriptIs(node) {
-                return node.tagName === 'SCRIPT';
-        }
-
         document.head.innerHTML = $(dom).find("head").html();
-        document.body.innerHTML = $(dom).find("body").html();
         scriptReplaceEl($("head")[0]);
+
+        document.body.innerHTML = $(dom).find("body").html();
         scriptReplaceEl($("body")[0]);
     }
 
@@ -805,7 +803,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         speed    = parseFloat(dict["speed"] ?? 0);
         easing   = dict["easing"] ?? "swing";
         debounce = dict["debounce"] ?? 0;
-        
+
         duration = 1000*Transparent.parseDuration(dict["duration"] ?? 0);
         durationX = 1000*Transparent.parseDuration(dict["durationX"] ?? dict["duration"] ?? 0);
         durationY = 1000*Transparent.parseDuration(dict["durationY"] ?? dict["duration"] ?? 0);
@@ -990,7 +988,43 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                 return !found;
             });
 
-            if(!found) $("head").append(this);
+            if(!found) {
+
+                if(this.tagName != "SCRIPT") $("head").append(this.cloneNode(true));
+                else $("head").append(this);
+            }
+        });
+
+        var body = $(dom).find("body");
+        $("body").children().each(function() {
+
+            var el   = this;
+            var found = false;
+
+            body.children().each(function() {
+
+                found = this.isEqualNode(el);
+                return !found;
+            });
+
+            if(!found) this.remove();
+        });
+
+        body.children().each(function() {
+
+            var el   = this;
+            var found = false;
+
+            $("body").children().each(function() {
+                found = this.isEqualNode(el);
+                return !found;
+            });
+
+            if(!found) {
+
+                if(this.tagName != "SCRIPT") $("body").append(this.cloneNode(true));
+                else $("body").append(this);
+            }
         });
 
         // Extract page block to be loaded
@@ -1005,13 +1039,12 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         if  (page.data("layout") == oldPage.data("layout")) delete page.removeData("prevLayout");
         else page.data("prevLayout", oldPage.data("layout"));
 
-        var states = Array.from(Transparent.state);
-
+        var states = Object.values(Transparent.state);
         var     htmlClass = Array.from(($(dom).find("html").attr("class") || "").split(" ")).filter(x => !states.includes(x));
         var  oldHtmlClass = Array.from(($(Transparent.html).attr("class") || "").split(" "));
         var removeHtmlClass = oldHtmlClass.filter(x => !htmlClass.includes(x) && switchLayout != x && !states.includes(x));
 
-        Transparent.html.removeClass(removeHtmlClass).addClass(htmlClass);        
+        Transparent.html.removeClass(removeHtmlClass).addClass(htmlClass);
         $(page).insertBefore(oldPage);
 
         oldPage.remove();
@@ -1158,9 +1191,10 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         if((e.type == Transparent.state.CLICK || e.type == Transparent.state.HASHCHANGE) && url.pathname == location.pathname && type != "POST") {
 
+            if(!url.hash) return;
             Transparent.scrollToHash(url.hash ?? "", {easing:Settings["smoothscroll_easing"], duration:Settings["smoothscroll_duration"], speed:Settings["smoothscroll_speed"]}, function() {
 
-                if (e.target !== undefined && $(e.target).data("skip-hash") !== true)
+                if (e.target != undefined && $(e.target).data("skip-hash") != true)
                     window.replaceHash(url.hash);
 
             }, $(e.target).closestScrollable());
@@ -1178,7 +1212,8 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         function handleResponse(uuid, status = 200, method = null, data = null, xhr = null, request = null) {
 
             var responseText = Transparent.getResponseText(uuid);
-            var responseURL  = (xhr ? xhr.responseURL : null) || url.href;
+            var responseURL  = url.href; // NB: xhr.responseURL strips away #fragments
+
             if(!responseText) {
 
                 if(!request && responseText === null) {
@@ -1256,11 +1291,10 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
             if($(dom).find("html").hasClass(Transparent.state.RELOAD))
                 window.location.reload();
-                    
-                
+
             Transparent.html.addClass(Transparent.state.LOADING);
             return Transparent.activeIn(function() {
-                        
+
                 // Reload state found..
                 if($(dom).find("html").hasClass(Transparent.state.RELOAD))
                     return;
@@ -1315,7 +1349,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     // Overload onpopstate
     if(Settings.disable) {
 
-        var states    = Array.from(Transparent.state);
+        var states    = Object.values(Transparent.state);
         var htmlClass = Array.from(($("html").attr("class") || "").split(" ")).filter(x => !states.includes(x));
         Transparent.html.removeClass(states).addClass(htmlClass.join(" ")+" "+Transparent.state.ROOT+" "+Transparent.state.READY+" "+Transparent.state.DISABLE);
 
