@@ -15,7 +15,7 @@
         if (hashElement !== undefined) // Update hash only if element is displayed
             fallback |= window.getComputedStyle(hashElement)["display"] == "none";
 
-        if(skipIfEmptyIdentifier && !newHash && fallback){
+        if((skipIfEmptyIdentifier && !newHash) || fallback){
 
             dispatchEvent(new HashChangeEvent("hashfallback", {oldURL:oldURL, newURL:newURL}));
             newHash = "";
@@ -147,7 +147,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     var Settings = Transparent.settings = {
         "headers": {},
         "data": {},
-        "disable":false,
+        "disable": false,
         "debug": false,
         "response_text": {},
         "response_limit": 25,
@@ -765,9 +765,9 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         }
 
         document.head.innerHTML = $(dom).find("head").html();
-        scriptReplaceEl($("head")[0]);
-
         document.body.innerHTML = $(dom).find("body").html();
+
+        scriptReplaceEl($("head")[0]);
         scriptReplaceEl($("body")[0]);
     }
 
@@ -1189,9 +1189,16 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         e.preventDefault();
         if (url == location) return;
 
+        console.log("XX");
+        console.log(url.hash);
+
         if((e.type == Transparent.state.CLICK || e.type == Transparent.state.HASHCHANGE) && url.pathname == location.pathname && type != "POST") {
 
+            console.log("XX");
+            console.log(url.hash);
             if(!url.hash) return;
+            console.log("XX");
+            console.log(url.hash);
             Transparent.scrollToHash(url.hash ?? "", {easing:Settings["smoothscroll_easing"], duration:Settings["smoothscroll_duration"], speed:Settings["smoothscroll_speed"]}, function() {
 
                 if (e.target != undefined && $(e.target).data("skip-hash") != true)
