@@ -1152,6 +1152,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         const link = Transparent.findLink(e);
         if   (link == null) return;
 
+        e.preventDefault();
         dispatchEvent(new CustomEvent('transparent:link', {link:link}));
 
         const uuid   = uuidv4();
@@ -1316,7 +1317,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         }
 
         if(history.state && !Transparent.hasResponseText(history.state.uuid))
-            Transparent.setResponseText(history.state.uuid, Transparent.html);
+            Transparent.setResponseText(history.state.uuid, Transparent.html[0]);
 
         // This append on user click (e.g. when user push a link)
         // It is null when dev is pushing or replacing state
@@ -1358,6 +1359,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         window.onpopstate   = __main__; // Onpopstate pop out straight to previous page.. this creates a jump while changing pages with hash..
         window.onhashchange = __main__;
         document.addEventListener('click', __main__, false);
+
         $("form").submit(__main__);
     }
 
