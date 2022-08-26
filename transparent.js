@@ -1152,7 +1152,6 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         const link = Transparent.findLink(e);
         if   (link == null) return;
 
-        e.preventDefault();
         dispatchEvent(new CustomEvent('transparent:link', {link:link}));
 
         const uuid   = uuidv4();
