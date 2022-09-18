@@ -148,6 +148,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         "headers": {},
         "data": {},
         "disable": false,
+        "global_code": true,
         "debug": false,
         "response_text": {},
         "response_limit": 25,
@@ -1007,14 +1008,10 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             var el   = this;
             var found = false;
 
-            $("head").children().each(function() {
-                found = this.isEqualNode(el);
-                return !found;
-            });
-
+            $("head").children().each(function() { found |= this.isEqualNode(el); });
             if(!found) {
 
-                if(this.tagName != "SCRIPT") $("head").append(this.cloneNode(true));
+                if(this.tagName != "SCRIPT" || Settings["global_code"] == true) $("head").append(this.cloneNode(true));
                 else $("head").append(this);
             }
         });
@@ -1040,6 +1037,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         $(page).insertBefore(oldPage);
 
         oldPage.remove();
+        dispatchEvent(new Event('DOMContentLoaded'));
 
         Transparent.addLayout();
 
