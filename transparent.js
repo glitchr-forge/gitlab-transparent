@@ -783,7 +783,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         var cancelable = dict["cancelable"] ?? false;
         if(cancelable && $(el).prop("cancel")) $(el).stop();
 
-        if(!Sticky.userScroll(el)) {
+        if(!Transparent.userScroll(el)) {
 
             if($(el).prop("cancelable")) {
 
