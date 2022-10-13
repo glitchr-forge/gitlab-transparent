@@ -53,33 +53,48 @@ $.fn.serializeObject = function() {
     return o;
 };
 
-$.fn.isScrollable  = function() { return $(this).isScrollableX() || $(this).isScrollableY(); }
+$.fn.isScrollable  = function() 
+{ 
+    for (let el of $(this).isScrollableX())
+        if(el) return true;
+   
+    for (let el of $(this).isScrollableY())
+        if(el) return true;
+
+    return false;
+}
+
 $.fn.isScrollableX = function() {
 
     return $(this).map(function(i) {
 
         var el = this[i] === window ? document.documentElement : this[i];
+        var isDom = el == document.documentElement;
+
         var hasScrollableContent = el.scrollWidth > el.clientWidth;
 
-        var overflowXStyle = window.getComputedStyle(el).overflowX;
-        var isOverflowHidden = overflowXStyle.indexOf('hidden') !== -1;
-
-        return hasScrollableContent && !isOverflowHidden;
+        var overflowStyle   = window.getComputedStyle(el).overflowX;
+        var isOverflowScroll = overflowStyle.indexOf('scroll') !== -1;
+        
+        return hasScrollableContent && (isOverflowScroll || isDom);
 
     }.bind(this));
 }
+
 $.fn.isScrollableY = function() {
 
     return $(this).map(function(i) {
 
         var el = this[i] === window ? document.documentElement : this[i];
+        var isDom = el == document.documentElement;
+
         var hasScrollableContent = el.scrollHeight > el.clientHeight;
 
-        var overflowYStyle = window.getComputedStyle(el).overflowY;
-        var isOverflowHidden = overflowYStyle.indexOf('hidden') !== -1;
+        var overflowStyle   = window.getComputedStyle(el).overflowY;
+        var isOverflowScroll = overflowStyle.indexOf('scroll') !== -1;
 
-        return hasScrollableContent && !isOverflowHidden;
-
+        return hasScrollableContent && (isOverflowScroll || isDom);
+        
     }.bind(this));
 }
 
@@ -92,7 +107,7 @@ $.fn.closestScrollable = function()
 
         while (target !== document.documentElement) {
 
-            if($(target).isScrollable()[0]) return target;
+            if($(target).isScrollable()) return target;
 
             if(target.parentElement === undefined) return undefined;
             if(target.parentElement === null) return null;
@@ -166,6 +181,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         ROOT       : "transparent",
 
         SWITCH     : "X-to-Y",
+        SAME       : "same",
         READY      : "ready",
         RELOAD     : "reload",
         DISABLE    : "disable",
@@ -224,7 +240,28 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         }
 
         // If no response refresh page based on the requested url
-        return sessionStorage.getItem('transparent['+uuid+']') || null;
+        return sessionStorage.getItem('transparent[response]['+uuid+']') || null;
+    }
+
+    Transparent.getResponsePosition = function(uuid)
+    {
+        var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
+
+        // Bubble up the most recent uuid
+        var index = array.indexOf(uuid);
+        if (index > -1) {
+            array.splice(index, 1);
+            array.push(uuid);
+        }
+
+        // If no response refresh page based on the requested url
+        var position = sessionStorage.getItem('transparent[position]['+uuid+']');
+        return position != "undefined" ? JSON.parse(position) : [];
+    }
+    
+    Transparent.getResponse = function(uuid)
+    {
+        return [ Transparent.getResponseText(uuid), Transparent.getResponsePosition(uuid) ];
     }
 
     function isDomEntity(entity)
@@ -232,7 +269,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         return typeof entity  === 'object' && entity.nodeType !== undefined;
     }
 
-    Transparent.setResponseText = function(uuid, responseText, exceptionRaised = false)
+    Transparent.setResponse = function(uuid, responseText, scrollableXY = [], exceptionRaised = false)
     {
         if(isDomEntity(responseText))
             responseText = responseText.outerHTML;
@@ -248,7 +285,73 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             if(isLocalStorageNameSupported()) {
 
                 sessionStorage.setItem('transparent', JSON.stringify(array));
-                sessionStorage.setItem('transparent['+uuid+']', responseText);
+                sessionStorage.setItem('transparent[response]['+uuid+']', responseText);
+                sessionStorage.setItem('transparent[position]['+uuid+']', JSON.stringify(scrollableXY));
+            }
+
+        } catch(e) {
+
+            if (e.name === 'QuotaExceededError')
+                sessionStorage.clear();
+
+            return exceptionRaised === false ? Transparent.setResponse(uuid, responseText, scrollableXY, true) : this;
+        }
+
+        return this;
+    }
+
+    Transparent.setResponse = function(uuid, responseText, scrollableXY, exceptionRaised = false)
+    {
+        if(isDomEntity(responseText))
+            responseText = responseText.outerHTML;
+
+        var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
+        if( ! (uuid in array) ) {
+            
+            array.push(uuid);
+            while(array.length > Settings["response_limit"])
+                sessionStorage.removeItem('transparent['+array.shift()+']');
+        }
+
+        try {
+
+            if(isLocalStorageNameSupported()) {
+
+                sessionStorage.setItem('transparent', JSON.stringify(array));
+                sessionStorage.setItem('transparent[response]['+uuid+']', responseText);
+                sessionStorage.setItem('transparent[position]['+uuid+']', JSON.stringify(scrollableXY));
+            }
+
+        } catch(e) {
+
+            if (e.name === 'QuotaExceededError')
+                sessionStorage.clear();
+
+            return exceptionRaised === false ? Transparent.setResponse(uuid, responseText, scrollableXY, true) : this;
+        }
+
+        return this;
+    }
+
+    Transparent.setResponseText = function(uuid, responseText, exceptionRaised = false)
+    {
+        if(isDomEntity(responseText))
+            responseText = responseText.outerHTML;
+
+        var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
+        if( ! (uuid in array) ) {
+            
+            array.push(uuid);
+            while(array.length > Settings["response_limit"])
+                sessionStorage.removeItem('transparent['+array.shift()+']');
+        }
+
+        try {
+
+            if(isLocalStorageNameSupported()) {
+
+                sessionStorage.setItem('transparent', JSON.stringify(array));
+                sessionStorage.setItem('transparent[response]['+uuid+']', responseText);
             }
 
         } catch(e) {
@@ -262,11 +365,39 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         return this;
     }
 
+    Transparent.setResponsePosition = function(uuid, scrollableXY, exceptionRaised = false)
+    {
+        var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
+        if( ! (uuid in array) ) {
+            
+            array.push(uuid);
+            while(array.length > Settings["response_limit"])
+                sessionStorage.removeItem('transparent['+array.shift()+']');
+        }
 
-    Transparent.hasResponseText = function(uuid)
+        try {
+
+            if(isLocalStorageNameSupported()) {
+
+                sessionStorage.setItem('transparent', JSON.stringify(array));
+                sessionStorage.setItem('transparent[position]['+uuid+']', JSON.stringify(scrollableXY));
+            }
+
+        } catch(e) {
+
+            if (e.name === 'QuotaExceededError')
+                sessionStorage.clear();
+
+            return exceptionRaised === false ? Transparent.setResponsePosition(uuid, scrollableXY, true) : this;
+        }
+
+        return this;
+    }
+
+    Transparent.hasResponse = function(uuid)
     {
         if(isLocalStorageNameSupported())
-            return 'transparent['+uuid+']' in sessionStorage;
+            return 'transparent[response]['+uuid+']' in sessionStorage;
 
         return false;
     }
@@ -294,8 +425,10 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         Transparent.addLayout();
 
-        Transparent.scrollToHash(location.hash);
-        Transparent.activeOut(() => Transparent.html.removeClass(Transparent.state.FIRST));
+        Transparent.scrollToHash(location.hash, {}, function() { 
+
+            Transparent.activeOut(() => Transparent.html.removeClass(Transparent.state.FIRST));
+        });
 
         return this;
     };
@@ -316,7 +449,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         var layout = dom !== null ? $(dom).find(Settings.identifier) : $(Settings.identifier);
         if(!layout.length) return undefined;
 
-        return layout.data("layout");
+        return layout.attr("layout");
     }
 
     Transparent.findNearestForm = function (el) {
@@ -559,8 +692,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         var page = (dom ? $(dom).find(Settings.identifier) : $(Settings.identifier))[0];
         if (page === undefined) return false;
 
-        var layout = page.dataset.layout;
-
+        var layout = $(page).attr("layout");
         return knownLayout.indexOf(layout) !== -1;
     }
 
@@ -773,7 +905,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     }
 
     Transparent.userScroll = function(el = undefined) { return $(el === undefined ? document.documentElement : el).closestScrollable().prop("user-scroll") ?? true; }
-    Transparent.scrollTo = function(dict, callback = function() {}, el = window)
+    Transparent.scrollTo = function(dict, el = window, callback = function() {})
     {
         if (el === window  )
             el = document.documentElement;
@@ -852,9 +984,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         if(duration == 0) {
 
-            $(el).scrollTop(scrollTop);
-            $(el).scrollLeft(scrollLeft);
-
+            el.scrollTo(scrollLeft, scrollTop);
             window.dispatchEvent(new Event('scroll'));
             callback();
 
@@ -922,6 +1052,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     Transparent.inMemory = function(el) {
 
         // TO BE DONE. (PRELOAD IMAGES ON PRIORITY)
+        // FORCE LOADING IF IMAGE IS NOT MANDATORY
         if(element in memory) return true;
 
         $(el).each(function() {
@@ -979,7 +1110,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         })
     }
 
-    Transparent.onLoad = function(identifier, dom, callback = null) {
+    Transparent.onLoad = function(uuid, dom, callback = null, scrollTo = false) {
 
         window.previousLocation = window.location.toString();
         if(callback === null) callback = function() {};
@@ -1017,16 +1148,18 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         });
 
         // Extract page block to be loaded
-        var page = $(dom).find(identifier);
-        var oldPage = $(identifier);
+        var page = $(dom).find(Settings.identifier);
+        var oldPage = $(Settings.identifier);
 
         // Make sure name/layout keep the same after a page change (tolerance for POST or GET requests)
-        if  (page.data("name") == oldPage.data("name")) delete page.removeData("prevName");
+        if  (page.data("name") == oldPage.data("name"))page.removeAttr("prevName");
         else page.data("prevName", oldPage.data("name"));
 
-        var switchLayout = Transparent.state.SWITCH.replace("X", page.data("layout")).replace("Y", oldPage.data("layout"));
-        if  (page.data("layout") == oldPage.data("layout")) delete page.removeData("prevLayout");
-        else page.data("prevLayout", oldPage.data("layout"));
+        if(oldPage.attr("layout") != undefined && page.attr("layout") != undefined) {
+
+            var switchLayout = Transparent.state.SWITCH.replace("X", page.attr("layout")).replace("Y", oldPage.attr("layout"));
+            page.attr("prevLayout", oldPage.attr("layout"));
+        }
 
         var states = Object.values(Transparent.state);
         var     htmlClass = Array.from(($(dom).find("html").attr("class") || "").split(" ")).filter(x => !states.includes(x));
@@ -1041,16 +1174,45 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         Transparent.addLayout();
 
+        if(scrollTo) {
+
+            // Go back to top of the page..
+            var scrollableElements   = Transparent.getScrollableElement();
+            var scrollableElementsXY = Transparent.getResponsePosition(uuid);
+
+            for(i = 0; i < scrollableElements.length; i++) {
+
+                var el = scrollableElements[i];
+                var positionXY = [0,0];
+                if(scrollableElementsXY.length == scrollableElements.length)
+                    positionXY = scrollableElementsXY[i] || [0,0];
+
+                if(el == window || el == document.documentElement) {
+
+                    if(location.hash) Transparent.scrollToHash(location.hash, {duration:0});
+                    else Transparent.scrollTo({top:positionXY[0], left:positionXY[1], duration:0, cancelable: false}, el);
+
+                } else {
+                    
+                    Transparent.scrollTo({top:positionXY[0], left:positionXY[1], duration:0, cancelable: false}, el);
+                }
+            }
+        }
+
         $('head').append(function() {
 
-            $(identifier).append(function() {
+            $(Settings.identifier).append(function() {
 
-                // Callback if needed, or any other actions
-                callback();
+                setTimeout(function() { 
 
-                // Trigger onload event
-                dispatchEvent(new Event('transparent:load'));
-                dispatchEvent(new Event('load'));
+                    // Callback if needed, or any other actions
+                    callback();
+
+                    // Trigger onload event
+                    dispatchEvent(new Event('transparent:load'));
+                    dispatchEvent(new Event('load'));
+
+                }.bind(this), 1);
             });
         });
     }
@@ -1131,8 +1293,8 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         }
 
         if(hash === "" || (bottomReach && bottomOverflow)) callback({}, el);
-        else Transparent.scrollTo(options, callback, el);
-
+        else Transparent.scrollTo(options, el, callback);
+        
         return this;
     }
 
@@ -1141,6 +1303,22 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         catch(e) { return false; }
     };
 
+    Transparent.getScrollableElement = function(el = document.documentElement)
+    {    
+        return $(el).find('*').add(el).filter(function() { return $(this).isScrollable(); });
+    };
+
+    Transparent.getScrollableElementXY = function() {
+    
+        var elementsXY = [];
+        var elements = Transparent.getScrollableElement();
+        
+        for(i = 0; i < elements.length; i++)
+            elementsXY.push([$(elements[i]).scrollTop(), $(elements[i]).scrollLeft()]);
+
+        return elementsXY;
+    }
+    
     function __main__(e) {
 
         // Disable transparent JS (e.g. during development..)
@@ -1206,7 +1384,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         function handleResponse(uuid, status = 200, method = null, data = null, xhr = null, request = null) {
 
-            var responseText = Transparent.getResponseText(uuid);
+            responseText  = Transparent.getResponseText(uuid);
             var responseURL  = url.href; // NB: xhr.responseURL strips away #fragments
 
             if(!responseText) {
@@ -1224,8 +1402,8 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                     console.error(sessionStorage);
                 }
 
-                if(!Transparent.hasResponseText(uuid))
-                    Transparent.setResponseText(uuid, responseText);
+                if(!Transparent.hasResponse(uuid))
+                    Transparent.setResponse(uuid, responseText);
             }
 
             if(!responseText) {
@@ -1279,6 +1457,9 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             // Callback active
             var prevLayout = Transparent.getLayout();
             var newLayout = Transparent.getLayout(dom);
+            if(prevLayout == newLayout) 
+                Transparent.html.addClass(Transparent.state.SAME);
+            
             var switchLayout = Transparent.state.SWITCH.replace("X", prevLayout).replace("Y", newLayout);
             Transparent.html.addClass(switchLayout);
 
@@ -1288,17 +1469,14 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                 window.location.reload();
 
             Transparent.html.addClass(Transparent.state.LOADING);
+
             return Transparent.activeIn(function() {
 
                 // Reload state found..
                 if($(dom).find("html").hasClass(Transparent.state.RELOAD))
                     return;
 
-                Transparent.onLoad(Settings.identifier, dom, function() {
-
-                    // Go back to top of the page..
-                    if(location.hash) Transparent.scrollToHash(location.hash, {duration:0});
-                    else Transparent.scrollTo({top:0, left:0, cancelable: false});
+                Transparent.onLoad(uuid, dom, function() {
 
                     Transparent.activeOut(function() {
 
@@ -1309,19 +1487,20 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                             .removeClass(Transparent.state.NEW);
                     });
 
-                }, method != "POST" /* avoid to return to top of page when submitting form */);
+                }, type != "POST");
             });
         }
 
-        if(history.state && !Transparent.hasResponseText(history.state.uuid))
-            Transparent.setResponseText(history.state.uuid, Transparent.html[0]);
+        if(history.state && !Transparent.hasResponse(history.state.uuid))
+                Transparent.setResponse(history.state.uuid, Transparent.html[0], Transparent.getScrollableElementXY());
 
         // This append on user click (e.g. when user push a link)
         // It is null when dev is pushing or replacing state
         var addNewState = !e.state;
         if (addNewState) {
 
-
+            Transparent.setResponsePosition(history.state.uuid, Transparent.getScrollableElementXY());    
+            
             // Submit ajax request..
             var xhr = new XMLHttpRequest();
             return jQuery.ajax({
