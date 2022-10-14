@@ -449,7 +449,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         var layout = dom !== null ? $(dom).find(Settings.identifier) : $(Settings.identifier);
         if(!layout.length) return undefined;
 
-        return layout.attr("layout");
+        return layout.data("layout");
     }
 
     Transparent.findNearestForm = function (el) {
@@ -692,7 +692,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         var page = (dom ? $(dom).find(Settings.identifier) : $(Settings.identifier))[0];
         if (page === undefined) return false;
 
-        var layout = $(page).attr("layout");
+        var layout = $(page).data("layout");
         return knownLayout.indexOf(layout) !== -1;
     }
 
@@ -1152,13 +1152,13 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         var oldPage = $(Settings.identifier);
 
         // Make sure name/layout keep the same after a page change (tolerance for POST or GET requests)
-        if  (page.data("name") == oldPage.data("name"))page.removeAttr("prevName");
+        if  (page.data("name") == oldPage.data("name")) page.removeAttr("prevName");
         else page.data("prevName", oldPage.data("name"));
 
-        if(oldPage.attr("layout") != undefined && page.attr("layout") != undefined) {
+        if(oldPage.data("layout") != undefined && page.data("layout") != undefined) {
 
-            var switchLayout = Transparent.state.SWITCH.replace("X", page.attr("layout")).replace("Y", oldPage.attr("layout"));
-            page.attr("prevLayout", oldPage.attr("layout"));
+            var switchLayout = Transparent.state.SWITCH.replace("X", page.data("layout")).replace("Y", oldPage.data("layout"));
+            page.data("prevLayout", oldPage.data("layout"));
         }
 
         var states = Object.values(Transparent.state);
