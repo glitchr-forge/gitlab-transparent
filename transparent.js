@@ -1152,7 +1152,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         var oldPage = $(Settings.identifier);
 
         // Make sure name/layout keep the same after a page change (tolerance for POST or GET requests)
-        if  (page.data("name") == oldPage.data("name")) page.removeAttr("prevName");
+        if  (page.data("name") == oldPage.data("name")) page.removeData("prevName");
         else page.data("prevName", oldPage.data("name"));
 
         if(oldPage.data("layout") != undefined && page.data("layout") != undefined) {
@@ -1433,7 +1433,12 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
             // From here the page is valid..
             // so new page added to history..
-            if(xhr) history.pushState({uuid: uuid, status:status, method: method, data: data, href: responseURL}, '', responseURL);
+            console.log(xhr);
+            if(xhr) {
+            
+                history.pushState({uuid: uuid, status:status, method: method, data: data, href: responseURL}, '', responseURL);
+                console.log({uuid: uuid, status:status, method: method, data: data, href: responseURL});
+            }
 
             // Mark layout as known
             if(!Transparent.isKnownLayout(dom)) {
