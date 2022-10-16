@@ -1433,13 +1433,9 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
             // From here the page is valid..
             // so new page added to history..
-            console.log(xhr);
-            if(xhr) {
-            
+            if(xhr)
                 history.pushState({uuid: uuid, status:status, method: method, data: data, href: responseURL}, '', responseURL);
-                console.log({uuid: uuid, status:status, method: method, data: data, href: responseURL});
-            }
-
+            
             // Mark layout as known
             if(!Transparent.isKnownLayout(dom)) {
 
