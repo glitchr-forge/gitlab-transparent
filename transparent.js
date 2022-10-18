@@ -53,11 +53,11 @@ $.fn.serializeObject = function() {
     return o;
 };
 
-$.fn.isScrollable  = function() 
-{ 
+$.fn.isScrollable  = function()
+{
     for (let el of $(this).isScrollableX())
         if(el) return true;
-   
+
     for (let el of $(this).isScrollableY())
         if(el) return true;
 
@@ -75,7 +75,7 @@ $.fn.isScrollableX = function() {
 
         var overflowStyle   = window.getComputedStyle(el).overflowX;
         var isOverflowScroll = overflowStyle.indexOf('scroll') !== -1;
-        
+
         return hasScrollableContent && (isOverflowScroll || isDom);
 
     }.bind(this));
@@ -94,7 +94,7 @@ $.fn.isScrollableY = function() {
         var isOverflowScroll = overflowStyle.indexOf('scroll') !== -1;
 
         return hasScrollableContent && (isOverflowScroll || isDom);
-        
+
     }.bind(this));
 }
 
@@ -258,7 +258,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         var position = sessionStorage.getItem('transparent[position]['+uuid+']');
         return position != "undefined" ? JSON.parse(position) : [];
     }
-    
+
     Transparent.getResponse = function(uuid)
     {
         return [ Transparent.getResponseText(uuid), Transparent.getResponsePosition(uuid) ];
@@ -307,7 +307,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
         if( ! (uuid in array) ) {
-            
+
             array.push(uuid);
             while(array.length > Settings["response_limit"])
                 sessionStorage.removeItem('transparent['+array.shift()+']');
@@ -340,7 +340,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
         if( ! (uuid in array) ) {
-            
+
             array.push(uuid);
             while(array.length > Settings["response_limit"])
                 sessionStorage.removeItem('transparent['+array.shift()+']');
@@ -369,7 +369,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     {
         var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
         if( ! (uuid in array) ) {
-            
+
             array.push(uuid);
             while(array.length > Settings["response_limit"])
                 sessionStorage.removeItem('transparent['+array.shift()+']');
@@ -425,7 +425,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         Transparent.addLayout();
 
-        Transparent.scrollToHash(location.hash, {}, function() { 
+        Transparent.scrollToHash(location.hash, {}, function() {
 
             Transparent.activeOut(() => Transparent.html.removeClass(Transparent.state.FIRST));
         });
@@ -907,6 +907,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     Transparent.userScroll = function(el = undefined) { return $(el === undefined ? document.documentElement : el).closestScrollable().prop("user-scroll") ?? true; }
     Transparent.scrollTo = function(dict, el = window, callback = function() {})
     {
+        el = $(el).length ? $(el)[0] : window;
         if (el === window  )
             el = document.documentElement;
         if (el === document)
@@ -959,7 +960,6 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             else // Going back to 0 position
                 distanceX = currentScrollX;
 
-
             var currentScrollY = $(el)[0].scrollTop;
             if(currentScrollY <= scrollTop || scrollTop == 0) // Going to the right
                 distanceY = Math.abs(scrollTop - currentScrollY);
@@ -976,7 +976,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             if(cancelable)
                 $(el).off("scroll.user mousedown.user wheel.user DOMMouseScroll.user mousewheel.user touchmove.user", () => null);
 
-            window.dispatchEvent(new Event('scroll'));
+            el.dispatchEvent(new Event('scroll'));
             callback();
 
             $(el).prop("user-scroll", true);
@@ -985,7 +985,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         if(duration == 0) {
 
             el.scrollTo(scrollLeft, scrollTop);
-            window.dispatchEvent(new Event('scroll'));
+            el.dispatchEvent(new Event('scroll'));
             callback();
 
             $(el).prop("user-scroll", true);
@@ -1112,6 +1112,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
     Transparent.onLoad = function(uuid, dom, callback = null, scrollTo = false) {
 
+        window.previousHash     = window.location.hash;
         window.previousLocation = window.location.toString();
         if(callback === null) callback = function() {};
 
@@ -1183,18 +1184,20 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             for(i = 0; i < scrollableElements.length; i++) {
 
                 var el = scrollableElements[i];
-                var positionXY = [0,0];
+                var positionXY = undefined;
                 if(scrollableElementsXY.length == scrollableElements.length)
-                    positionXY = scrollableElementsXY[i] || [0,0];
+                    positionXY = scrollableElementsXY[i] || undefined;
 
                 if(el == window || el == document.documentElement) {
 
-                    if(location.hash) Transparent.scrollToHash(location.hash, {duration:0});
-                    else Transparent.scrollTo({top:positionXY[0], left:positionXY[1], duration:0, cancelable: false}, el);
+                    if(positionXY != undefined) Transparent.scrollTo({top:positionXY[0], left:positionXY[1], duration:0, cancelable: false});
+                    else if (location.hash) Transparent.scrollToHash(location.hash, {duration:0});
+                    else Transparent.scrollTo({top:0, left:0, duration:0, cancelable: false});
 
                 } else {
-                    
-                    Transparent.scrollTo({top:positionXY[0], left:positionXY[1], duration:0, cancelable: false}, el);
+
+                    if(positionXY != undefined) Transparent.scrollTo({top:positionXY[0], left:positionXY[1], duration:0, cancelable: false}, el);
+                    else Transparent.scrollTo({top:0, left:0, duration:0, cancelable: false}, el);
                 }
             }
         }
@@ -1203,7 +1206,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
             $(Settings.identifier).append(function() {
 
-                setTimeout(function() { 
+                setTimeout(function() {
 
                     // Callback if needed, or any other actions
                     callback();
@@ -1294,7 +1297,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         if(hash === "" || (bottomReach && bottomOverflow)) callback({}, el);
         else Transparent.scrollTo(options, el, callback);
-        
+
         return this;
     }
 
@@ -1304,21 +1307,21 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     };
 
     Transparent.getScrollableElement = function(el = document.documentElement)
-    {    
+    {
         return $(el).find('*').add(el).filter(function() { return $(this).isScrollable(); });
     };
 
     Transparent.getScrollableElementXY = function() {
-    
+
         var elementsXY = [];
         var elements = Transparent.getScrollableElement();
-        
+
         for(i = 0; i < elements.length; i++)
             elementsXY.push([$(elements[i]).scrollTop(), $(elements[i]).scrollLeft()]);
 
         return elementsXY;
     }
-    
+
     function __main__(e) {
 
         // Disable transparent JS (e.g. during development..)
@@ -1435,7 +1438,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             // so new page added to history..
             if(xhr)
                 history.pushState({uuid: uuid, status:status, method: method, data: data, href: responseURL}, '', responseURL);
-            
+
             // Mark layout as known
             if(!Transparent.isKnownLayout(dom)) {
 
@@ -1458,9 +1461,9 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             // Callback active
             var prevLayout = Transparent.getLayout();
             var newLayout = Transparent.getLayout(dom);
-            if(prevLayout == newLayout) 
+            if(prevLayout == newLayout)
                 Transparent.html.addClass(Transparent.state.SAME);
-            
+
             var switchLayout = Transparent.state.SWITCH.replace("X", prevLayout).replace("Y", newLayout);
             Transparent.html.addClass(switchLayout);
 
@@ -1473,9 +1476,9 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
             return Transparent.activeIn(function() {
 
-                // Reload state found..
+                $(Transparent.html).prop("user-scroll", true);
                 if($(dom).find("html").hasClass(Transparent.state.RELOAD))
-                    return;
+                    return; // Reload state found..
 
                 Transparent.onLoad(uuid, dom, function() {
 
@@ -1500,8 +1503,9 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         var addNewState = !e.state;
         if (addNewState) {
 
-            Transparent.setResponsePosition(history.state.uuid, Transparent.getScrollableElementXY());    
-            
+            Transparent.setResponsePosition(history.state.uuid, Transparent.getScrollableElementXY());
+            $(Transparent.html).prop("user-scroll", false); // make sure to avoid page jump during transition (cancelled in activeIn callback)
+
             // Submit ajax request..
             var xhr = new XMLHttpRequest();
             return jQuery.ajax({
