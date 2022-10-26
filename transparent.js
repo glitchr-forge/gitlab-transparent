@@ -164,7 +164,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         "data": {},
         "disable": false,
         "global_code": true,
-        "debug": false,
+        "debug": true,
         "response_text": {},
         "response_limit": 25,
         "throttle": 1000,
@@ -198,6 +198,8 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         ACTIVE     : "active",
         ACTIVEOUT  : "active-out",
         POSTACTIVE : "post-active",
+
+        NOTIFICATION: "notification"
     };
 
     var isReady    = false;
@@ -457,11 +459,11 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         switch (el.tagName) {
             case "FORM":
                 var form = $(el);
-                return (form.length ? form.serialize() : null);
+                return (form.length ? form[0] : undefined);
             case "INPUT":
             case "BUTTON":
                 var form = $(el).closest("form");
-                return (form.length ? form.serialize() : null);
+                return (form.length ? form[0] : undefined);
         }
 
         // Try to detect target element
@@ -477,7 +479,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                 return Transparent.findNearestForm(el.target);
 
             var form = $(el.target).closest("form");
-            return (form.length ? form.serialize() : null);
+            return (form.length ? form[0] : undefined);
         }
 
         return null;
@@ -495,7 +497,6 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             if (href.endsWith  ("#")) href = href.slice(0, -1);
 
             var data = history.state ? Transparent.getData(history.state.uuid) : {};
-
             return ["GET", new URL(el.newURL), data];
 
         } else if (el.type == Transparent.state.POPSTATE) {
@@ -534,12 +535,17 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                 var method = el.target.getAttribute("method") || "GET";
                     method = method.toUpperCase();
 
-                var data = Transparent.findNearestForm(el);
-                if (data == null) return null;
+                var form = Transparent.findNearestForm(el);
+                if (form == null) {
+                    console.error("No form found upstream of ", el);
+                    return null;
+                }
+
+                if(!form.checkValidity()) return null;
 
                 var pat  = /^https?:\/\//i;
-                if (pat.test(href)) return [method, new URL(href), data];
-                return [method, new URL(href, location.origin), data];
+                if (pat.test(href)) return [method, new URL(href), form];
+                return [method, new URL(href, location.origin), form];
             }
         }
 
@@ -571,21 +577,17 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
                 if (domainBaseURI == domainFormAction && el.getAttribute("type") == "submit") {
 
-                    var data = Transparent.findNearestForm(el);
-                    if (data == null) {
+                    var form = Transparent.findNearestForm(el);
+                    if (form == null) {
                         console.error("No form found upstream of ", el);
                         return null;
                     }
 
-                    var data = Transparent.findNearestForm(el);
-                    if (data == null) {
-                        console.error("No form found upstream of ", el);
-                        return null;
-                    }
+                    if(!form.checkValidity()) return null;
 
                     var pat  = /^https?:\/\//i;
-                    if (pat.test(href)) return ["POST", new URL(pathname), data];
-                    return ["POST", new URL(pathname, location.origin), data];
+                    if (pat.test(href)) return ["POST", new URL(pathname), form];
+                    return ["POST", new URL(pathname, location.origin), form];
                 }
         }
 
@@ -611,9 +613,12 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             if (href.startsWith("#")) href = location.pathname + href;
             if (href.endsWith  ("#")) href = href.slice(0, -1);
 
+            var form = Transparent.findNearestForm(el);
+            if (form == null) return null;
+
             var pat  = /^https?:\/\//i;
-            if (pat.test(href)) return ["GET", new URL(href), Transparent.findNearestForm(el)];
-            return ["GET", new URL(href, location.origin), Transparent.findNearestForm(el)];
+            if (pat.test(href)) return ["GET", new URL(href), form];
+            return ["GET", new URL(href, location.origin), form];
         }
 
         if (el.target && el.target.parentElement)
@@ -867,41 +872,42 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         });
     }
 
+    Transparent.evalScript = function(el)
+    {
+        function scriptCloneEl(el){
+            var script  = document.createElement("script");
+            script.text = el.innerHTML;
+
+            var i = -1, attrs = el.attributes, attr;
+            while ( ++i < attrs.length ) {
+                script.setAttribute( (attr = attrs[i]).name, attr.value );
+            }
+
+            eval($(script).text());
+            return script;
+        }
+
+        if (el.tagName === 'SCRIPT' ) el.parentNode.replaceChild( scriptCloneEl(el) , el );
+        else {
+
+            var i = -1, children = el.childNodes;
+            while ( ++i < children.length )
+                Transparent.evalScript( children[i] );
+        }
+
+        return el;
+    }
+
     Transparent.rescue = function(dom)
     {
         console.error("Rescue mode.. called");
         rescueMode = true;
 
-        function scriptReplaceEl(node) {
-
-            if ( nodeScriptIs(node) === true )
-                node.parentNode.replaceChild( scriptCloneEl(node) , node );
-            else {
-                var i = -1, children = node.childNodes;
-                while ( ++i < children.length )
-                        scriptReplaceEl( children[i] );
-            }
-
-            return node;
-        }
-
-        function nodeScriptIs(node) { return node.tagName === 'SCRIPT'; }
-        function scriptCloneEl(node){
-                var script  = document.createElement("script");
-                script.text = node.innerHTML;
-
-                var i = -1, attrs = node.attributes, attr;
-                while ( ++i < attrs.length ) {
-                    script.setAttribute( (attr = attrs[i]).name, attr.value );
-                }
-                return script;
-        }
-
         document.head.innerHTML = $(dom).find("head").html();
         document.body.innerHTML = $(dom).find("body").html();
 
-        scriptReplaceEl($("head")[0]);
-        scriptReplaceEl($("body")[0]);
+        Transparent.evalScript($("head")[0]);
+        Transparent.evalScript($("body")[0]);
     }
 
     Transparent.userScroll = function(el = undefined) { return $(el === undefined ? document.documentElement : el).closestScrollable().prop("user-scroll") ?? true; }
@@ -1170,6 +1176,8 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         $(page).insertBefore(oldPage);
 
         oldPage.remove();
+        
+        if(Settings["global_code"] == true) Transparent.evalScript($(page)[0]);
         dispatchEvent(new Event('DOMContentLoaded'));
 
         Transparent.addLayout();
@@ -1333,9 +1341,17 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         const uuid   = uuidv4();
         const type   = link[0];
         const url    = link[1];
-        const data   = Transparent.isElement(link[2]) ? undefined : link[2];
-        const target = Transparent.isElement(link[2]) ? link[2] : undefined;
-        if  (!url) return;
+
+        var target = Transparent.isElement(link[2]) ? link[2] : undefined;
+        var data   = Transparent.isElement(link[2]) ? undefined : link[2];
+
+        var form   = target != undefined && target.tagName == "FORM" ? target : undefined;
+        if (form) {
+            data = $(form).serialize();
+            $(form).find(':submit').attr('disabled', 'disabled');
+        }
+
+        if (!url) return;
 
         // Wait for transparent window event to be triggered
         if (!isReady) return;
@@ -1382,6 +1398,11 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         dispatchEvent(new Event('transparent:onbeforeunload'));
         dispatchEvent(new Event('onbeforeunload'));
 
+        function isJsonResponse(str) {
+            try { JSON.parse(str); return true; }
+            catch (e) { return false; }
+        }
+
         function handleResponse(uuid, status = 200, method = null, data = null, xhr = null, request = null) {
 
             responseText  = Transparent.getResponseText(uuid);
@@ -1406,36 +1427,40 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                     Transparent.setResponse(uuid, responseText);
             }
 
-            if(!responseText) {
-                console.error("No response found.");
-                return window.location.href = responseURL;
+            var dom = new DOMParser().parseFromString(responseText, "text/html");
+            if(request && request.getResponseHeader("Content-Type") == "application/json") {
+
+                if(!isJsonResponse(responseText)) {
+                    console.error("Invalid response received for "+ responseURL);                
+                    if(Settings.debug) return Transparent.rescue(dom);
+                }
+
+                if(form) {
+                    $(form).find(':submit').removeAttr('disabled');
+                    form.reset();
+                }
+                
+                if(Settings.debug) console.log(JSON.parse(responseText));
+                return dispatchEvent(new Event('load'));
             }
+ 
+            // From here the page is valid..
+            // so the new page is added to history..
+            if(xhr)
+                history.pushState({uuid: uuid, status:status, method: method, data: data, href: responseURL}, '', responseURL);
 
             var dom = new DOMParser().parseFromString(responseText, "text/html");
-
-            // Error detected..
-            if(status != 200) {
-
-                // Add new page to history..
-                if(xhr) history.pushState({uuid: uuid, status:status, method: method, data: data, href: responseURL}, '', responseURL);
-
-                // Call rescue..
+            if(status != 200) // Blatant error received..
                 return Transparent.rescue(dom);
-            }
 
             // Page not recognized.. just go there.. no POST information transmitted..
-            if(!Transparent.isPage(dom))
-                return window.location.href = responseURL;
+            if(!Transparent.isPage(dom))        
+                return window.location.href = url;
 
             // Layout not compatible.. needs to be reloaded (exception when POST is detected..)
             if(!Transparent.isCompatibleLayout(dom, method, data))
-                return window.location.href = responseURL;
+                return window.location.href = url;
 
-            // From here the page is valid..
-            // so new page added to history..
-            if(xhr)
-                history.pushState({uuid: uuid, status:status, method: method, data: data, href: responseURL}, '', responseURL);
-            
             // Mark layout as known
             if(!Transparent.isKnownLayout(dom)) {
 
@@ -1500,7 +1525,8 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         var addNewState = !e.state;
         if (addNewState) {
 
-            Transparent.setResponsePosition(history.state.uuid, Transparent.getScrollableElementXY());    
+            if(history.state)
+                Transparent.setResponsePosition(history.state.uuid, Transparent.getScrollableElementXY());    
             
             // Submit ajax request..
             var xhr = new XMLHttpRequest();
