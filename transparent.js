@@ -1453,6 +1453,8 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                 history.pushState({uuid: uuid, status:status, method: method, data: data, href: responseURL}, '', responseURL);
 
             var dom = new DOMParser().parseFromString(responseText, "text/html");
+            if(status == 405) // PATCH issue
+                return location.reload();
             if(status != 200) // Blatant error received..
                 return Transparent.rescue(dom);
 
