@@ -879,7 +879,8 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             script.text = el.innerHTML;
 
             var i = -1, attrs = el.attributes, attr;
-            while ( ++i < attrs.length ) {
+            var N = attrs.length;
+            while ( ++i < N ) {
                 script.setAttribute( (attr = attrs[i]).name, attr.value );
             }
 
@@ -891,8 +892,10 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         else {
 
             var i = -1, children = el.childNodes;
-            while ( ++i < children.length )
+            var N = children.length;
+            while ( ++i < N ) {
                 Transparent.evalScript( children[i] );
+            }
         }
 
         return el;
@@ -1116,15 +1119,46 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         })
     }
 
+    Transparent.transferAttributes = function(dom) {
+
+        var html = $(dom).find("html");
+        $($("html")[0].attributes).each(function(i, attr) { 
+            if(attr.name == "class") return;
+            $("html").removeAttr(attr.name);
+        });
+
+        $($(html)[0].attributes).each(function(i, attr) {
+            if(attr.name == "class") return;
+            $("html").attr(attr.name, attr.value);
+        });
+
+        var head = $(dom).find("head");
+        $($("head")[0].attributes).each(function(i, attr) { 
+            $("head").removeAttr(attr.name);
+        });
+
+        $($(head)[0].attributes).each(function(i, attr) {
+            $("head").attr(attr.name, attr.value);
+        });
+
+        var body = $(dom).find("body");
+        $($("body")[0].attributes).each(function(i, attr) { 
+            $("body").removeAttr(attr.name);
+        });
+        $($(body)[0].attributes).each(function(i, attr) {
+            $("body").attr(attr.name, attr.value);
+        });
+    }
+
     Transparent.onLoad = function(uuid, dom, callback = null, scrollTo = false) {
 
         window.previousHash     = window.location.hash;
         window.previousLocation = window.location.toString();
         if(callback === null) callback = function() {};
 
-        // Replace canvases..
-        Transparent.replaceCanvases(dom);
-
+        // Transfert attributes
+        Transparent.transferAttributes(dom);
+        
         // Replace head..
         var head = $(dom).find("head");
         $("head").children().each(function() {
@@ -1153,6 +1187,9 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                 else $("head").append(this);
             }
         });
+
+        // Replace canvases..
+        Transparent.replaceCanvases(dom);
 
         // Extract page block to be loaded
         var page = $(dom).find(Settings.identifier);
@@ -1338,7 +1375,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         // Determine link
         const link = Transparent.findLink(e);
         if   (link == null) return;
-
+        
         dispatchEvent(new CustomEvent('transparent:link', {link:link}));
 
         const uuid   = uuidv4();
@@ -1353,8 +1390,6 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             data = $(form).serialize();
             $(form).find(':submit').attr('disabled', 'disabled');
         }
-
-        if (!url) return;
 
         // Wait for transparent window event to be triggered
         if (!isReady) return;
@@ -1379,9 +1414,10 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         if (url.origin != location.origin) return;
 
         e.preventDefault();
+
         if (url == location) return;
 
-        if((e.type == Transparent.state.CLICK || e.type == Transparent.state.HASHCHANGE) && url.pathname == location.pathname && type != "POST") {
+        if((e.type == Transparent.state.CLICK || e.type == Transparent.state.HASHCHANGE) && url.pathname == location.pathname && url.search == location.search && type != "POST") {
 
             if(!url.hash) return;
             Transparent.scrollToHash(url.hash ?? "", {easing:Settings["smoothscroll_easing"], duration:Settings["smoothscroll_duration"], speed:Settings["smoothscroll_speed"]}, function() {
@@ -1453,8 +1489,6 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                 history.pushState({uuid: uuid, status:status, method: method, data: data, href: responseURL}, '', responseURL);
 
             var dom = new DOMParser().parseFromString(responseText, "text/html");
-            if(status == 405) // PATCH issue
-                return location.reload();
             if(status != 200) // Blatant error received..
                 return Transparent.rescue(dom);
 
