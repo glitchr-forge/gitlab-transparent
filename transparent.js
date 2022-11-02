@@ -1445,7 +1445,10 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         function handleResponse(uuid, status = 200, method = null, data = null, xhr = null, request = null) {
 
             responseText  = Transparent.getResponseText(uuid);
-            var responseURL  = url.href; // NB: xhr.responseURL strips away #fragments
+            
+            var responseURL = xhr.responseURL || url.href;
+            if(url.href.substring(0, url.href.indexOf("#")).trimEnd("/") == responseURL.substring(0, responseURL.indexOf("#")).trimEnd("/")  )
+                responseURL = url.href; // NB: xhr.responseURL strips away #fragments
 
             if(!responseText) {
 
@@ -1469,6 +1472,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             var dom = new DOMParser().parseFromString(responseText, "text/html");
             if(request && request.getResponseHeader("Content-Type") == "application/json") {
 
+                console.log(request);
                 if(!isJsonResponse(responseText)) {
                     console.error("Invalid response received for "+ responseURL);                
                     if(Settings.debug) return Transparent.rescue(dom);
@@ -1479,7 +1483,15 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                     form.reset();
                 }
                 
-                if(Settings.debug) console.log(JSON.parse(responseText));
+                var response = JSON.parse(responseText);
+                if(Settings.debug) console.log(response);
+
+                if(response.code == "302") {
+                    
+                    if(response.target) location.href = response.target;
+                    else location.reload();
+                }
+
                 return dispatchEvent(new Event('load'));
             }
  
