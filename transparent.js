@@ -1504,7 +1504,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             if(status != 200) // Blatant error received..
                 return Transparent.rescue(dom);
 
-            // Page not recognized.. just go there.. no POST information transmitted..
+                // Page not recognized.. just go there.. no POST information transmitted..
             if(!Transparent.isPage(dom))        
                 return window.location.href = url;
 
