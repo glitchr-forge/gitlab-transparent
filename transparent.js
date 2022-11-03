@@ -991,6 +991,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             $(el).prop("user-scroll", true);
         };
 
+        duration =0;
         if(duration == 0) {
 
             el.scrollTo(scrollLeft, scrollTop);
@@ -1331,7 +1332,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             if (hashElement !== undefined) {
 
                 var scrollTop  = hashElement.getBoundingClientRect().top  + document.documentElement.scrollTop - Transparent.getScrollPadding().top;
-                var scrollLeft = hashElement.getBoundingClientRect().left + document.documentElement.scrollTop - Transparent.getScrollPadding().left;
+                var scrollLeft = hashElement.getBoundingClientRect().left + document.documentElement.scrollLeft - Transparent.getScrollPadding().left;
 
                 options = Object.assign({duration: Settings["smoothscroll_duration"], speed: Settings["smoothscroll_speed"]}, options, {left:scrollLeft, top:scrollTop});
             }
@@ -1443,11 +1444,18 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         }
 
         function handleResponse(uuid, status = 200, method = null, data = null, xhr = null, request = null) {
+            
+            var responseURL;
+                responseURL = xhr.responseURL || url.href;
 
             responseText  = Transparent.getResponseText(uuid);
             
-            var responseURL = xhr.responseURL || url.href;
-            if(url.href.substring(0, url.href.indexOf("#")).trimEnd("/") == responseURL.substring(0, responseURL.indexOf("#")).trimEnd("/")  )
+            var fragmentPos = responseURL.indexOf("#");
+            var strippedResponseUrl = (fragmentPos < 0 ? responseURL : responseURL.substring(0, fragmentPos)).trimEnd("/");
+
+            var fragmentPos = url.href.indexOf("#");
+            var strippedUrlHref = (fragmentPos < 0 ? url.href : url.href.substring(0, fragmentPos)).trimEnd("/");
+            if( strippedUrlHref == strippedResponseUrl )
                 responseURL = url.href; // NB: xhr.responseURL strips away #fragments
 
             if(!responseText) {
@@ -1472,7 +1480,6 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             var dom = new DOMParser().parseFromString(responseText, "text/html");
             if(request && request.getResponseHeader("Content-Type") == "application/json") {
 
-                console.log(request);
                 if(!isJsonResponse(responseText)) {
                     console.error("Invalid response received for "+ responseURL);                
                     if(Settings.debug) return Transparent.rescue(dom);
