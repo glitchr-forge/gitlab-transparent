@@ -1446,7 +1446,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         function handleResponse(uuid, status = 200, method = null, data = null, xhr = null, request = null) {
             
             var responseURL;
-                responseURL = xhr.responseURL || url.href;
+                responseURL = xhr !== null ? xhr.responseURL : url.href;
 
             responseText  = Transparent.getResponseText(uuid);
             
