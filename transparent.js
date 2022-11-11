@@ -922,29 +922,6 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         if (el === document)
             el = document.documentElement;
 
-        var cancelable = dict["cancelable"] ?? false;
-        if(cancelable && $(el).prop("cancel")) $(el).stop();
-
-        if(!Transparent.userScroll(el)) {
-
-            if($(el).prop("cancelable")) {
-
-                $(el).prop("user-scroll", true);
-                $(el).stop();
-            }
-
-            return;
-        }
-
-        $(el).prop("user-scroll", false);
-        if(cancelable) {
-
-            $(el).prop("cancelable", true);
-            $(el).on("scroll.userscroll mousedown.userscroll wheel.userscroll DOMMouseScroll.userscroll mousewheel.userscroll touchmove.userscroll", function(e) {
-                $(this).prop("user-scroll", true);
-            });
-        }
-
         var maxScrollX = $(el).prop("scrollWidth") - Math.round($(el).prop("clientWidth"));
         if (maxScrollX == 0) maxScrollX = Math.round($(el).prop("clientWidth"));
         var maxScrollY = $(el).prop("scrollHeight") - Math.round($(el).prop("clientHeight"));
@@ -982,16 +959,12 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         var callbackWrapper = function() {
 
-            if(cancelable)
-                $(el).off("scroll.user mousedown.user wheel.user DOMMouseScroll.user mousewheel.user touchmove.user", () => null);
-
             el.dispatchEvent(new Event('scroll'));
             callback();
 
             $(el).prop("user-scroll", true);
         };
 
-        duration =0;
         if(duration == 0) {
 
             el.scrollTo(scrollLeft, scrollTop);
@@ -1123,7 +1096,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     Transparent.transferAttributes = function(dom) {
 
         var html = $(dom).find("html");
-        $($("html")[0].attributes).each(function(i, attr) { 
+        $($("html")[0].attributes).each(function(i, attr) {
             if(attr.name == "class") return;
             $("html").removeAttr(attr.name);
         });
@@ -1134,7 +1107,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         });
 
         var head = $(dom).find("head");
-        $($("head")[0].attributes).each(function(i, attr) { 
+        $($("head")[0].attributes).each(function(i, attr) {
             $("head").removeAttr(attr.name);
         });
 
@@ -1143,7 +1116,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         });
 
         var body = $(dom).find("body");
-        $($("body")[0].attributes).each(function(i, attr) { 
+        $($("body")[0].attributes).each(function(i, attr) {
             $("body").removeAttr(attr.name);
         });
         $($(body)[0].attributes).each(function(i, attr) {
@@ -1159,7 +1132,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         // Transfert attributes
         Transparent.transferAttributes(dom);
-        
+
         // Replace head..
         var head = $(dom).find("head");
         $("head").children().each(function() {
@@ -1194,6 +1167,8 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         // Extract page block to be loaded
         var page = $(dom).find(Settings.identifier);
+        if(dom == undefined || page == undefined) window.reload(); // Error a posteriori
+
         var oldPage = $(Settings.identifier);
 
         // Make sure name/layout keep the same after a page change (tolerance for POST or GET requests)
@@ -1215,7 +1190,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         $(page).insertBefore(oldPage);
 
         oldPage.remove();
-        
+
         if(Settings["global_code"] == true) Transparent.evalScript($(page)[0]);
         dispatchEvent(new Event('DOMContentLoaded'));
 
@@ -1236,14 +1211,14 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
                 if(el == window || el == document.documentElement) {
 
-                    if(positionXY != undefined) Transparent.scrollTo({top:positionXY[0], left:positionXY[1], duration:0, cancelable: false});
+                    if(positionXY != undefined) Transparent.scrollTo({top:positionXY[0], left:positionXY[1], duration:0});
                     else if (location.hash) Transparent.scrollToHash(location.hash, {duration:0});
-                    else Transparent.scrollTo({top:0, left:0, duration:0, cancelable: false});
+                    else Transparent.scrollTo({top:0, left:0, duration:0});
 
                 } else {
 
-                    if(positionXY != undefined) Transparent.scrollTo({top:positionXY[0], left:positionXY[1], duration:0, cancelable: false}, el);
-                    else Transparent.scrollTo({top:0, left:0, duration:0, cancelable: false}, el);
+                    if(positionXY != undefined) Transparent.scrollTo({top:positionXY[0], left:positionXY[1], duration:0}, el);
+                    else Transparent.scrollTo({top:0, left:0, duration:0}, el);
                 }
             }
         }
@@ -1376,7 +1351,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         // Determine link
         const link = Transparent.findLink(e);
         if   (link == null) return;
-        
+
         dispatchEvent(new CustomEvent('transparent:link', {link:link}));
 
         const uuid   = uuidv4();
@@ -1444,12 +1419,12 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         }
 
         function handleResponse(uuid, status = 200, method = null, data = null, xhr = null, request = null) {
-            
+
             var responseURL;
                 responseURL = xhr !== null ? xhr.responseURL : url.href;
 
             responseText  = Transparent.getResponseText(uuid);
-            
+
             var fragmentPos = responseURL.indexOf("#");
             var strippedResponseUrl = (fragmentPos < 0 ? responseURL : responseURL.substring(0, fragmentPos)).trimEnd("/");
 
@@ -1481,7 +1456,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             if(request && request.getResponseHeader("Content-Type") == "application/json") {
 
                 if(!isJsonResponse(responseText)) {
-                    console.error("Invalid response received for "+ responseURL);                
+                    console.error("Invalid response received for "+ responseURL);
                     if(Settings.debug) return Transparent.rescue(dom);
                 }
 
@@ -1489,19 +1464,19 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                     $(form).find(':submit').removeAttr('disabled');
                     form.reset();
                 }
-                
+
                 var response = JSON.parse(responseText);
                 if(Settings.debug) console.log(response);
 
                 if(response.code == "302") {
-                    
+
                     if(response.target) location.href = response.target;
                     else location.reload();
                 }
 
                 return dispatchEvent(new Event('load'));
             }
- 
+
             // From here the page is valid..
             // so the new page is added to history..
             if(xhr)
@@ -1512,7 +1487,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                 return Transparent.rescue(dom);
 
                 // Page not recognized.. just go there.. no POST information transmitted..
-            if(!Transparent.isPage(dom))        
+            if(!Transparent.isPage(dom))
                 return window.location.href = url;
 
             // Layout not compatible.. needs to be reloaded (exception when POST is detected..)
@@ -1585,7 +1560,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
             if(history.state)
                 Transparent.setResponsePosition(history.state.uuid, Transparent.getScrollableElementXY());
-            
+
             $(Transparent.html).prop("user-scroll", false); // make sure to avoid page jump during transition (cancelled in activeIn callback)
 
             // Submit ajax request..
