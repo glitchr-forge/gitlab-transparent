@@ -1231,7 +1231,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
                 var el = scrollableElements[i];
                 var positionXY = undefined;
-                if(scrollableElementsXY.length == scrollableElements.length)
+                if(scrollableElementsXY && scrollableElementsXY.length == scrollableElements.length)
                     positionXY = scrollableElementsXY[i] || undefined;
 
                 if(el == window || el == document.documentElement) {
