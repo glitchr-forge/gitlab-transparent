@@ -1042,7 +1042,16 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                     entries.forEach(function (entry) {
                         if (entry.isIntersecting) {
                             var image = entry.target;
-                                image.onload = () => image.classList.add("loaded");
+                            var lazybox = image.closest(".lazybox");
+
+                                image.onload = function() {
+                                    this.classList.add("loaded");
+                                    this.classList.remove("loading");
+                                    if(lazybox) lazybox.classList.remove("loading");
+                                };
+
+                                if(lazybox) lazybox.classList.add("loading");
+                                image.classList.add("loading");
                                 image.src = image.dataset.src;
 
                             imageObserver.unobserve(image);

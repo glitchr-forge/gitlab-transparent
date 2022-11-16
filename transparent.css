@@ -5,11 +5,11 @@ img[data-src]:not(.loaded) {
 	visibility: hidden;
 }
 
-.lazybox { animation: blink 2s infinite; }
+.lazybox.loading { animation: blink 2s infinite; }
 @keyframes blink {
-	0%		{ background-color: var(--primary-background);}
-	25%		{ background-color: var(--ternary-background);}
-	50%		{ background-color: var(--primary-background);}
-	75%		{ background-color: var(--ternary-background);}
-	100%	{ background-color: var(--primary-background);}
+	0%		{ background-color: transparent;}
+	25%		{ background-color: #FEFEFEAA;}
+	50%		{ background-color: transparent;}
+	75%		{ background-color: #FEFEFEAA;}
+	100%	{ background-color: transparent;}
 }
