@@ -1047,6 +1047,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                                 image.onload = function() {
                                     this.classList.add("loaded");
                                     this.classList.remove("loading");
+                                    if(lazybox) lazybox.classList.add("loaded");
                                     if(lazybox) lazybox.classList.remove("loading");
                                 };
 
