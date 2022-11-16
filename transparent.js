@@ -165,6 +165,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         "disable": false,
         "global_code": true,
         "debug": true,
+        "lazyload": true,
         "response_text": {},
         "response_limit": 25,
         "throttle": 1000,
@@ -216,6 +217,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     window.addEventListener("DOMContentLoaded", function()
     {
         Transparent.loader = $($(document).find(Settings.loader)[0] ?? Transparent.html);
+        Transparent.lazyload();
     });
 
     Transparent.isRescueMode = function() { return rescueMode; }
@@ -1030,31 +1032,57 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         }, new Set());
     }
 
-    var memory = [];
-    Transparent.fileLoaded = [];
-    Transparent.inMemory = function(el) {
+    Transparent.lazyLoad = function (lazyloadImages = undefined)
+    {
+        lazyloadImages = lazyloadImages || document.querySelectorAll("img[data-src]:not(.loaded)");
+        console.log(lazyloadImages);
+        if ("IntersectionObserver" in window) {
 
-        // TO BE DONE. (PRELOAD IMAGES ON PRIORITY)
-        // FORCE LOADING IF IMAGE IS NOT MANDATORY
-        if(element in memory) return true;
+                var imageObserver = new IntersectionObserver(function (entries, observer) {
+                    entries.forEach(function (entry) {
+                        if (entry.isIntersecting) {
+                            var image = entry.target;
+                                image.onload = () => image.classList.add("loaded");
+                                image.src = image.dataset.src;
 
-        $(el).each(function() {
-
-            var isImage = this.tagName == "IMG";
-            console.log(isImage);
-
-            $(this).addClass('fadein');
-            $(this).on('load.transparent', function() {
-
-                $(this).removeClass('fadein');
-
-                iImages++;
-                console.log(this.src, iImages, nImages);
-                if(iImages >= nImages) {
-                    console.log("YAY !");
-                }
+                            imageObserver.unobserve(image);
+                        }
+                });
             });
-        });
+
+            lazyloadImages.forEach(function (image) {
+                imageObserver.observe(image);
+            });
+
+        } else {
+
+                var lazyloadThrottleTimeout;
+
+            function lazyload() {
+                if (lazyloadThrottleTimeout) {
+                    clearTimeout(lazyloadThrottleTimeout);
+                }
+
+                lazyloadThrottleTimeout = setTimeout(function () {
+                    var scrollTop = window.pageYOffset;
+                    lazyloadImages.forEach(function (img) {
+                        if (img.offsetTop < (window.innerHeight + scrollTop)) {
+                            img.src = img.dataset.src;
+                            img.classList.add('loaded');
+                        }
+                    });
+                    if (lazyloadImages.length == 0) {
+                        document.removeEventListener("scroll", lazyload);
+                        window.removeEventListener("resize", lazyload);
+                        window.removeEventListener("orientationChange", lazyload);
+                    }
+                }, 20);
+            }
+
+            document.addEventListener("scroll", lazyload);
+            window.addEventListener("resize", lazyload);
+            window.addEventListener("orientationChange", lazyload);
+        }
     }
 
     Transparent.loadImages = function()
