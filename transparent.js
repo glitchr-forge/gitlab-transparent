@@ -217,7 +217,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     window.addEventListener("DOMContentLoaded", function()
     {
         Transparent.loader = $($(document).find(Settings.loader)[0] ?? Transparent.html);
-        Transparent.lazyload();
+        Transparent.lazyLoad();
     });
 
     Transparent.isRescueMode = function() { return rescueMode; }
@@ -428,6 +428,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         Transparent.html.addClass(Transparent.state.READY);
 
         Transparent.addLayout();
+        Transparent.lazyLoad();
 
         Transparent.scrollToHash(location.hash, {}, function() {
 
@@ -1035,7 +1036,6 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     Transparent.lazyLoad = function (lazyloadImages = undefined)
     {
         lazyloadImages = lazyloadImages || document.querySelectorAll("img[data-src]:not(.loaded)");
-        console.log(lazyloadImages);
         if ("IntersectionObserver" in window) {
 
                 var imageObserver = new IntersectionObserver(function (entries, observer) {
