@@ -704,7 +704,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         return knownLayout.indexOf(layout) !== -1;
     }
 
-    Transparent.isCompatibleLayout = function(dom, method = null, data = null)
+    Transparent.isCompatiblePage = function(dom, method = null, data = null)
     {
         // If no html response.. skip
         if(!dom) return false;
@@ -719,13 +719,10 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         var currentPage = $(Settings.identifier)[0] || undefined;
         if (currentPage === undefined) return false;
 
-        var name  = currentPage.dataset.name || "default";
-        var prevName = page.dataset.prevName || name;
+        var name  = currentPage.getAttribute("data-name") || "default";
+        var newName = page.getAttribute("data-name") || "default";
 
-        var layout = currentPage.dataset.layout;
-        var prevLayout = page.dataset.prevLayout || layout;
-
-        return name == prevName && layout == prevLayout;
+        return name == newName;
     }
 
     Transparent.parseDuration = function(str) {
@@ -1215,13 +1212,10 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         var oldPage = $(Settings.identifier);
 
         // Make sure name/layout keep the same after a page change (tolerance for POST or GET requests)
-        if  (page.data("name") == oldPage.data("name")) page.removeData("prevName");
-        else page.data("prevName", oldPage.data("name"));
+        if(oldPage.attr("data-layout") != undefined && page.attr("data-layout") != undefined) {
 
-        if(oldPage.data("layout") != undefined && page.data("layout") != undefined) {
-
-            var switchLayout = Transparent.state.SWITCH.replace("X", page.data("layout")).replace("Y", oldPage.data("layout"));
-            page.data("prevLayout", oldPage.data("layout"));
+            var switchLayout = Transparent.state.SWITCH.replace("X", page.attr("data-layout")).replace("Y", oldPage.attr("data-layout"));
+            page.attr("data-layout-prev", oldPage.attr("data-layout"));
         }
 
         var states = Object.values(Transparent.state);
@@ -1538,7 +1532,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                 return window.location.href = url;
 
             // Layout not compatible.. needs to be reloaded (exception when POST is detected..)
-            if(!Transparent.isCompatibleLayout(dom, method, data))
+            if(!Transparent.isCompatiblePage(dom, method, data))
                 return window.location.href = url;
 
             // Mark layout as known
