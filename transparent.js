@@ -165,6 +165,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         "disable": false,
         "global_code": true,
         "debug": true,
+        "lazyload": true,
         "response_text": {},
         "response_limit": 25,
         "throttle": 1000,
@@ -216,6 +217,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     window.addEventListener("DOMContentLoaded", function()
     {
         Transparent.loader = $($(document).find(Settings.loader)[0] ?? Transparent.html);
+        Transparent.lazyLoad();
     });
 
     Transparent.isRescueMode = function() { return rescueMode; }
@@ -258,7 +260,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         // If no response refresh page based on the requested url
         var position = sessionStorage.getItem('transparent[position]['+uuid+']');
-        return position != "undefined" ? JSON.parse(position) : [];
+        return position != "undefined" ? (JSON.parse(position) || []) : [];
     }
 
     Transparent.getResponse = function(uuid)
@@ -426,6 +428,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         Transparent.html.addClass(Transparent.state.READY);
 
         Transparent.addLayout();
+        Transparent.lazyLoad();
 
         Transparent.scrollToHash(location.hash, {}, function() {
 
@@ -701,7 +704,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         return knownLayout.indexOf(layout) !== -1;
     }
 
-    Transparent.isCompatibleLayout = function(dom, method = null, data = null)
+    Transparent.isCompatiblePage = function(dom, method = null, data = null)
     {
         // If no html response.. skip
         if(!dom) return false;
@@ -716,13 +719,10 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         var currentPage = $(Settings.identifier)[0] || undefined;
         if (currentPage === undefined) return false;
 
-        var name  = currentPage.dataset.name || "default";
-        var prevName = page.dataset.prevName || name;
+        var name  = currentPage.getAttribute("data-name") || "default";
+        var newName = page.getAttribute("data-name") || "default";
 
-        var layout = currentPage.dataset.layout;
-        var prevLayout = page.dataset.prevLayout || layout;
-
-        return name == prevName && layout == prevLayout;
+        return name == newName;
     }
 
     Transparent.parseDuration = function(str) {
@@ -906,6 +906,11 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         console.error("Rescue mode.. called");
         rescueMode = true;
 
+        var head = $(dom).find("head").html();
+        var body = $(dom).find("body").html();
+        if(head == undefined || body == undefined)
+            window.reload();
+
         document.head.innerHTML = $(dom).find("head").html();
         document.body.innerHTML = $(dom).find("body").html();
 
@@ -921,29 +926,6 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             el = document.documentElement;
         if (el === document)
             el = document.documentElement;
-
-        var cancelable = dict["cancelable"] ?? false;
-        if(cancelable && $(el).prop("cancel")) $(el).stop();
-
-        if(!Transparent.userScroll(el)) {
-
-            if($(el).prop("cancelable")) {
-
-                $(el).prop("user-scroll", true);
-                $(el).stop();
-            }
-
-            return;
-        }
-
-        $(el).prop("user-scroll", false);
-        if(cancelable) {
-
-            $(el).prop("cancelable", true);
-            $(el).on("scroll.userscroll mousedown.userscroll wheel.userscroll DOMMouseScroll.userscroll mousewheel.userscroll touchmove.userscroll", function(e) {
-                $(this).prop("user-scroll", true);
-            });
-        }
 
         var maxScrollX = $(el).prop("scrollWidth") - Math.round($(el).prop("clientWidth"));
         if (maxScrollX == 0) maxScrollX = Math.round($(el).prop("clientWidth"));
@@ -982,16 +964,12 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         var callbackWrapper = function() {
 
-            if(cancelable)
-                $(el).off("scroll.user mousedown.user wheel.user DOMMouseScroll.user mousewheel.user touchmove.user", () => null);
-
             el.dispatchEvent(new Event('scroll'));
             callback();
 
             $(el).prop("user-scroll", true);
         };
 
-        duration =0;
         if(duration == 0) {
 
             el.scrollTo(scrollLeft, scrollTop);
@@ -1057,31 +1035,66 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         }, new Set());
     }
 
-    var memory = [];
-    Transparent.fileLoaded = [];
-    Transparent.inMemory = function(el) {
+    Transparent.lazyLoad = function (lazyloadImages = undefined)
+    {
+        lazyloadImages = lazyloadImages || document.querySelectorAll("img[data-src]:not(.loaded)");
+        if ("IntersectionObserver" in window) {
 
-        // TO BE DONE. (PRELOAD IMAGES ON PRIORITY)
-        // FORCE LOADING IF IMAGE IS NOT MANDATORY
-        if(element in memory) return true;
+                var imageObserver = new IntersectionObserver(function (entries, observer) {
+                    entries.forEach(function (entry) {
+                        if (entry.isIntersecting) {
+                            var image = entry.target;
+                            var lazybox = image.closest(".lazybox");
 
-        $(el).each(function() {
+                                image.onload = function() {
+                                    this.classList.add("loaded");
+                                    this.classList.remove("loading");
+                                    if(lazybox) lazybox.classList.add("loaded");
+                                    if(lazybox) lazybox.classList.remove("loading");
+                                };
 
-            var isImage = this.tagName == "IMG";
-            console.log(isImage);
+                                if(lazybox) lazybox.classList.add("loading");
+                                image.classList.add("loading");
+                                image.src = image.dataset.src;
 
-            $(this).addClass('fadein');
-            $(this).on('load.transparent', function() {
-
-                $(this).removeClass('fadein');
-
-                iImages++;
-                console.log(this.src, iImages, nImages);
-                if(iImages >= nImages) {
-                    console.log("YAY !");
-                }
+                            imageObserver.unobserve(image);
+                        }
+                });
             });
-        });
+
+            lazyloadImages.forEach(function (image) {
+                imageObserver.observe(image);
+            });
+
+        } else {
+
+                var lazyloadThrottleTimeout;
+
+            function lazyload() {
+                if (lazyloadThrottleTimeout) {
+                    clearTimeout(lazyloadThrottleTimeout);
+                }
+
+                lazyloadThrottleTimeout = setTimeout(function () {
+                    var scrollTop = window.pageYOffset;
+                    lazyloadImages.forEach(function (img) {
+                        if (img.offsetTop < (window.innerHeight + scrollTop)) {
+                            img.src = img.dataset.src;
+                            img.classList.add('loaded');
+                        }
+                    });
+                    if (lazyloadImages.length == 0) {
+                        document.removeEventListener("scroll", lazyload);
+                        window.removeEventListener("resize", lazyload);
+                        window.removeEventListener("orientationChange", lazyload);
+                    }
+                }, 20);
+            }
+
+            document.addEventListener("scroll", lazyload);
+            window.addEventListener("resize", lazyload);
+            window.addEventListener("orientationChange", lazyload);
+        }
     }
 
     Transparent.loadImages = function()
@@ -1123,7 +1136,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
     Transparent.transferAttributes = function(dom) {
 
         var html = $(dom).find("html");
-        $($("html")[0].attributes).each(function(i, attr) { 
+        $($("html")[0].attributes).each(function(i, attr) {
             if(attr.name == "class") return;
             $("html").removeAttr(attr.name);
         });
@@ -1134,7 +1147,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         });
 
         var head = $(dom).find("head");
-        $($("head")[0].attributes).each(function(i, attr) { 
+        $($("head")[0].attributes).each(function(i, attr) {
             $("head").removeAttr(attr.name);
         });
 
@@ -1143,7 +1156,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         });
 
         var body = $(dom).find("body");
-        $($("body")[0].attributes).each(function(i, attr) { 
+        $($("body")[0].attributes).each(function(i, attr) {
             $("body").removeAttr(attr.name);
         });
         $($(body)[0].attributes).each(function(i, attr) {
@@ -1159,7 +1172,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         // Transfert attributes
         Transparent.transferAttributes(dom);
-        
+
         // Replace head..
         var head = $(dom).find("head");
         $("head").children().each(function() {
@@ -1194,16 +1207,15 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         // Extract page block to be loaded
         var page = $(dom).find(Settings.identifier);
+        if(dom == undefined || page == undefined) window.reload(); // Error a posteriori
+
         var oldPage = $(Settings.identifier);
 
         // Make sure name/layout keep the same after a page change (tolerance for POST or GET requests)
-        if  (page.data("name") == oldPage.data("name")) page.removeData("prevName");
-        else page.data("prevName", oldPage.data("name"));
+        if(oldPage.attr("data-layout") != undefined && page.attr("data-layout") != undefined) {
 
-        if(oldPage.data("layout") != undefined && page.data("layout") != undefined) {
-
-            var switchLayout = Transparent.state.SWITCH.replace("X", page.data("layout")).replace("Y", oldPage.data("layout"));
-            page.data("prevLayout", oldPage.data("layout"));
+            var switchLayout = Transparent.state.SWITCH.replace("X", page.attr("data-layout")).replace("Y", oldPage.attr("data-layout"));
+            page.attr("data-layout-prev", oldPage.attr("data-layout"));
         }
 
         var states = Object.values(Transparent.state);
@@ -1215,7 +1227,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         $(page).insertBefore(oldPage);
 
         oldPage.remove();
-        
+
         if(Settings["global_code"] == true) Transparent.evalScript($(page)[0]);
         dispatchEvent(new Event('DOMContentLoaded'));
 
@@ -1231,19 +1243,20 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
                 var el = scrollableElements[i];
                 var positionXY = undefined;
-                if(scrollableElementsXY && scrollableElementsXY.length == scrollableElements.length)
+
+                if(scrollableElementsXY.length == scrollableElements.length)
                     positionXY = scrollableElementsXY[i] || undefined;
 
                 if(el == window || el == document.documentElement) {
 
-                    if(positionXY != undefined) Transparent.scrollTo({top:positionXY[0], left:positionXY[1], duration:0, cancelable: false});
+                    if(positionXY != undefined) Transparent.scrollTo({top:positionXY[0], left:positionXY[1], duration:0});
                     else if (location.hash) Transparent.scrollToHash(location.hash, {duration:0});
-                    else Transparent.scrollTo({top:0, left:0, duration:0, cancelable: false});
+                    else Transparent.scrollTo({top:0, left:0, duration:0});
 
                 } else {
 
-                    if(positionXY != undefined) Transparent.scrollTo({top:positionXY[0], left:positionXY[1], duration:0, cancelable: false}, el);
-                    else Transparent.scrollTo({top:0, left:0, duration:0, cancelable: false}, el);
+                    if(positionXY != undefined) Transparent.scrollTo({top:positionXY[0], left:positionXY[1], duration:0}, el);
+                    else Transparent.scrollTo({top:0, left:0, duration:0}, el);
                 }
             }
         }
@@ -1376,7 +1389,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         // Determine link
         const link = Transparent.findLink(e);
         if   (link == null) return;
-        
+
         dispatchEvent(new CustomEvent('transparent:link', {link:link}));
 
         const uuid   = uuidv4();
@@ -1437,6 +1450,9 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         dispatchEvent(new Event('transparent:onbeforeunload'));
         dispatchEvent(new Event('onbeforeunload'));
+        
+        $(Transparent.html).prop("user-scroll", true);
+        $(Transparent.html).stop();
 
         function isJsonResponse(str) {
             try { JSON.parse(str); return true; }
@@ -1444,12 +1460,12 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         }
 
         function handleResponse(uuid, status = 200, method = null, data = null, xhr = null, request = null) {
-            
+
             var responseURL;
                 responseURL = xhr !== null ? xhr.responseURL : url.href;
 
             responseText  = Transparent.getResponseText(uuid);
-            
+
             var fragmentPos = responseURL.indexOf("#");
             var strippedResponseUrl = (fragmentPos < 0 ? responseURL : responseURL.substring(0, fragmentPos)).trimEnd("/");
 
@@ -1481,7 +1497,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
             if(request && request.getResponseHeader("Content-Type") == "application/json") {
 
                 if(!isJsonResponse(responseText)) {
-                    console.error("Invalid response received for "+ responseURL);                
+                    console.error("Invalid response received for "+ responseURL);
                     if(Settings.debug) return Transparent.rescue(dom);
                 }
 
@@ -1489,19 +1505,19 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                     $(form).find(':submit').removeAttr('disabled');
                     form.reset();
                 }
-                
+
                 var response = JSON.parse(responseText);
                 if(Settings.debug) console.log(response);
 
                 if(response.code == "302") {
-                    
+
                     if(response.target) location.href = response.target;
                     else location.reload();
                 }
 
                 return dispatchEvent(new Event('load'));
             }
- 
+
             // From here the page is valid..
             // so the new page is added to history..
             if(xhr)
@@ -1512,11 +1528,11 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
                 return Transparent.rescue(dom);
 
                 // Page not recognized.. just go there.. no POST information transmitted..
-            if(!Transparent.isPage(dom))        
+            if(!Transparent.isPage(dom))
                 return window.location.href = url;
 
             // Layout not compatible.. needs to be reloaded (exception when POST is detected..)
-            if(!Transparent.isCompatibleLayout(dom, method, data))
+            if(!Transparent.isCompatiblePage(dom, method, data))
                 return window.location.href = url;
 
             // Mark layout as known
@@ -1556,12 +1572,11 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
             return Transparent.activeIn(function() {
 
-                $(Transparent.html).prop("user-scroll", true);
                 if($(dom).find("html").hasClass(Transparent.state.RELOAD))
                     return; // Reload state found..
 
                 Transparent.onLoad(uuid, dom, function() {
-
+                
                     Transparent.activeOut(function() {
 
                         Transparent.html
@@ -1585,7 +1600,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
             if(history.state)
                 Transparent.setResponsePosition(history.state.uuid, Transparent.getScrollableElementXY());
-            
+
             $(Transparent.html).prop("user-scroll", false); // make sure to avoid page jump during transition (cancelled in activeIn callback)
 
             // Submit ajax request..
