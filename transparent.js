@@ -260,7 +260,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         // If no response refresh page based on the requested url
         var position = sessionStorage.getItem('transparent[position]['+uuid+']');
-        return position != "undefined" ? JSON.parse(position) : [];
+        return position != "undefined" ? (JSON.parse(position) || []) : [];
     }
 
     Transparent.getResponse = function(uuid)
@@ -1249,6 +1249,7 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
                 var el = scrollableElements[i];
                 var positionXY = undefined;
+
                 if(scrollableElementsXY.length == scrollableElements.length)
                     positionXY = scrollableElementsXY[i] || undefined;
 
