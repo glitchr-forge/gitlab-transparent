@@ -909,6 +909,11 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
         console.error("Rescue mode.. called");
         rescueMode = true;
 
+        var head = $(dom).find("head").html();
+        var body = $(dom).find("body").html();
+        if(head == undefined || body == undefined)
+            window.reload();
+
         document.head.innerHTML = $(dom).find("head").html();
         document.body.innerHTML = $(dom).find("body").html();
 
@@ -1450,6 +1455,9 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
         dispatchEvent(new Event('transparent:onbeforeunload'));
         dispatchEvent(new Event('onbeforeunload'));
+        
+        $(Transparent.html).prop("user-scroll", true);
+        $(Transparent.html).stop();
 
         function isJsonResponse(str) {
             try { JSON.parse(str); return true; }
@@ -1569,12 +1577,11 @@ $.fn.repaint = function(duration = 1000, reiteration=5) {
 
             return Transparent.activeIn(function() {
 
-                $(Transparent.html).prop("user-scroll", true);
                 if($(dom).find("html").hasClass(Transparent.state.RELOAD))
                     return; // Reload state found..
 
                 Transparent.onLoad(uuid, dom, function() {
-
+                
                     Transparent.activeOut(function() {
 
                         Transparent.html
