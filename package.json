@@ -1,12 +1,12 @@
 {
-  "name": "transparentjs",
+  "name": "transparent",
   "version": "1.0.0",
-  "description": "SPA Application",
+  "description": "Transparent SPA Application",
   "main": "index.js",
   "repository": {
     "url": "ssh://git@gitlab.glitchr.dev:public-repository/javascript/transparentjs.git",
     "type": "git"
   },
-  "author": "Glitch Art <support@glitchr.io>",
-  "license": "MIT"
+  "author": "Marco Meyer <marco.meyer@glitchr.io>",
+  "license": "LGPL-3.0-or-later"
 }
