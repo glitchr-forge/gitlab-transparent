@@ -1583,8 +1583,10 @@
                 }, type != "POST");
         }
 
+        if(Transparent.isRescueMode()) window.location.href = url;
+
         if(history.state && !Transparent.hasResponse(history.state.uuid))
-                Transparent.setResponse(history.state.uuid, Transparent.html[0], Transparent.getScrollableElementXY());
+            Transparent.setResponse(history.state.uuid, Transparent.html[0], Transparent.getScrollableElementXY());
 
         // This append on user click (e.g. when user push a link)
         // It is null when dev is pushing or replacing state
