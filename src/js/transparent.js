@@ -165,6 +165,7 @@
         "response_text": {},
         "response_limit": 25,
         "throttle": 1000,
+        "rescue_reload": 5000,
         "identifier": "#page",
         "loader": "#loader",
         "smoothscroll_duration": "200ms",
@@ -899,21 +900,28 @@
 
     Transparent.rescue = function(dom)
     {
-        Transparent.activeOut();
-        
         console.error("Rescue mode.. called");
         rescueMode = true;
 
         var head = $(dom).find("head").html();
         var body = $(dom).find("body").html();
-        if(head == undefined || body == undefined)
-            window.reload();
 
-        document.head.innerHTML = $(dom).find("head").html();
-        document.body.innerHTML = $(dom).find("body").html();
+        console.log(head, body);
+        if(head == undefined || body == "undefined") {
+            
+            $(Settings.identifier).html("<div class='error'></div>");
 
-        Transparent.evalScript($("head")[0]);
-        Transparent.evalScript($("body")[0]);
+            setTimeout(function() { window.location.reload(); }, Transparent.parseDuration(Settings["rescue_reload"]));
+
+        } else {
+
+            document.head.innerHTML = $(dom).find("head").html();
+            document.body.innerHTML = $(dom).find("body").html();
+            Transparent.evalScript($("head")[0]);
+            Transparent.evalScript($("body")[0]);
+        }
+        
+        Transparent.activeOut();
     }
 
     Transparent.userScroll = function(el = undefined) { return $(el === undefined ? document.documentElement : el).closestScrollable().prop("user-scroll") ?? true; }
@@ -1583,10 +1591,8 @@
                 }, type != "POST");
         }
 
-        if(Transparent.isRescueMode()) window.location.href = url;
-
         if(history.state && !Transparent.hasResponse(history.state.uuid))
-            Transparent.setResponse(history.state.uuid, Transparent.html[0], Transparent.getScrollableElementXY());
+                Transparent.setResponse(history.state.uuid, Transparent.html[0], Transparent.getScrollableElementXY());
 
         // This append on user click (e.g. when user push a link)
         // It is null when dev is pushing or replacing state
