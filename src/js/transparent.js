@@ -906,7 +906,6 @@
         var head = $(dom).find("head").html();
         var body = $(dom).find("body").html();
 
-        console.log(head, body);
         if(head == undefined || body == "undefined") {
             
             $(Settings.identifier).html("<div class='error'></div>");
