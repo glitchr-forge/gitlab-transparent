@@ -1411,7 +1411,8 @@
 
         var form   = target != undefined && target.tagName == "FORM" ? target : undefined;
         if (form) {
-            data = $(form).serialize();
+
+            data = new FormData(form);
             $(form).find(':submit').attr('disabled', 'disabled');
         }
 
@@ -1532,8 +1533,9 @@
 
             // From here the page is valid..
             // so the new page is added to history..
+            
             if(xhr)
-                history.pushState({uuid: uuid, status:status, method: method, data: data, href: responseURL}, '', responseURL);
+                history.pushState({uuid: uuid, status:status, method: method, data: data instanceof FormData ? "" : data, href: responseURL}, '', responseURL);
 
             var dom = new DOMParser().parseFromString(responseText, "text/html");
             if(status != 200) // Blatant error received..
@@ -1613,6 +1615,8 @@
                 url: url.href,
                 type: type,
                 data: data,
+                contentType: false,
+                processData: false,
                 dataType: 'html',
                 headers: Settings["headers"] || {},
                 xhr: function () { return xhr; },
