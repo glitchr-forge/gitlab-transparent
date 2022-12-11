@@ -267,7 +267,7 @@
 
     function isDomEntity(entity)
     {
-        return typeof entity  === 'object' && entity.nodeType !== undefined;
+        return entity !== null && typeof entity  === 'object' && entity.nodeType !== undefined;
     }
 
     Transparent.setResponse = function(uuid, responseText, scrollableXY = [], exceptionRaised = false)
@@ -903,21 +903,16 @@
         console.error("Rescue mode.. called");
         rescueMode = true;
 
-        var head = $(dom).find("head").html();
         var body = $(dom).find("body").html();
-
-        if(head == undefined || body == "undefined") {
+        if(body == "undefined") {
             
             $(Settings.identifier).html("<div class='error'></div>");
-
             setTimeout(function() { window.location.reload(); }, Transparent.parseDuration(Settings["rescue_reload"]));
 
         } else {
-
-            document.head.innerHTML = $(dom).find("head").html();
-            document.body.innerHTML = $(dom).find("body").html();
-            Transparent.evalScript($("head")[0]);
-            Transparent.evalScript($("body")[0]);
+            
+            document.documentElement.innerHTML = dom.documentElement === undefined ? dom : dom.documentElement.innerHTML;
+            Transparent.transferAttributes(dom);    
         }
         
         Transparent.activeOut();
@@ -1146,27 +1141,37 @@
             $("html").removeAttr(attr.name);
         });
 
-        $($(html)[0].attributes).each(function(i, attr) {
-            if(attr.name == "class") return;
-            $("html").attr(attr.name, attr.value);
-        });
+        if(html.length > 0) {
+
+            $($(html)[0].attributes).each(function(i, attr) {
+                if(attr.name == "class") return;
+                $("html").attr(attr.name, attr.value);
+            });
+        }
 
         var head = $(dom).find("head");
         $($("head")[0].attributes).each(function(i, attr) {
             $("head").removeAttr(attr.name);
         });
 
-        $($(head)[0].attributes).each(function(i, attr) {
-            $("head").attr(attr.name, attr.value);
-        });
+        if(head.length > 0) {
+
+            $($(head)[0].attributes).each(function(i, attr) {
+                $("head").attr(attr.name, attr.value);
+            });
+        }
 
         var body = $(dom).find("body");
         $($("body")[0].attributes).each(function(i, attr) {
             $("body").removeAttr(attr.name);
         });
-        $($(body)[0].attributes).each(function(i, attr) {
-            $("body").attr(attr.name, attr.value);
-        });
+
+        if(body.length > 0) {
+
+            $($(body)[0].attributes).each(function(i, attr) {
+                $("body").attr(attr.name, attr.value);
+            });
+        }
     }
 
     Transparent.onLoad = function(uuid, dom, callback = null, scrollTo = false) {
@@ -1500,7 +1505,6 @@
                 if(!Transparent.hasResponse(uuid))
                     Transparent.setResponse(uuid, responseText);
             }
-
             var dom = new DOMParser().parseFromString(responseText, "text/html");
             if(request && request.getResponseHeader("Content-Type") == "application/json") {
 
@@ -1537,7 +1541,7 @@
 
             // Page not recognized.. just go there.. no POST information transmitted..
             if(!Transparent.isPage(dom))
-                return window.location.href = url;
+                return Transparent.rescue(responseText);
 
             // Layout not compatible.. needs to be reloaded (exception when POST is detected..)
             if(!Transparent.isCompatiblePage(dom, method, data))
