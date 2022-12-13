@@ -15,36 +15,36 @@
         if(!newHash) newHash = "";
         if (newHash !== "" && (''+newHash).charAt(0) !== '#')
             newHash = '#' + newHash;
-    
+
         var oldURL = location.origin+location.pathname+location.hash;
         var newURL = location.origin+location.pathname+newHash;
-    
+
         var fallback  = $(newHash).length === 0;
-    
+
         var hashElement = $(newHash)[0] ?? undefined;
         if (hashElement !== undefined) // Update hash only if element is displayed
             fallback |= window.getComputedStyle(hashElement)["display"] == "none";
-    
+
         if((skipIfEmptyIdentifier && !newHash) || fallback){
-    
+
             dispatchEvent(new HashChangeEvent("hashfallback", {oldURL:oldURL, newURL:newURL}));
             newHash = "";
-    
+
             oldURL = location.origin+location.pathname+location.hash;
             newURL = location.origin+location.pathname+newHash;
         }
-    
+
         if(oldURL == newURL) return false;
-    
+
         var state = Object.assign({}, history.state, {href: newURL});
         history.replaceState(state, '', newURL);
-    
+
         if(triggerHashChange)
             dispatchEvent(new HashChangeEvent("hashchange", {oldURL:oldURL, newURL:newURL}));
-    
+
         return true;
     };
-    
+
     $.fn.serializeObject = function() {
         var o = {};
         var a = this.serializeArray();
@@ -60,98 +60,98 @@
         });
         return o;
     };
-    
+
     $.fn.isScrollable  = function()
     {
         for (let el of $(this).isScrollableX())
             if(el) return true;
-    
+
         for (let el of $(this).isScrollableY())
             if(el) return true;
-    
+
         return false;
     }
-    
+
     $.fn.isScrollableX = function() {
-    
+
         return $(this).map(function(i) {
-    
+
             var el = this[i] === window ? document.documentElement : this[i];
             var isDom = el == document.documentElement;
-    
+
             var hasScrollableContent = el.scrollWidth > el.clientWidth;
-    
+
             var overflowStyle   = window.getComputedStyle(el).overflowX;
             var isOverflowScroll = overflowStyle.indexOf('scroll') !== -1;
-    
+
             return hasScrollableContent && (isOverflowScroll || isDom);
-    
+
         }.bind(this));
     }
-    
+
     $.fn.isScrollableY = function() {
-    
+
         return $(this).map(function(i) {
-    
+
             var el = this[i] === window ? document.documentElement : this[i];
             var isDom = el == document.documentElement;
-    
+
             var hasScrollableContent = el.scrollHeight > el.clientHeight;
-    
+
             var overflowStyle   = window.getComputedStyle(el).overflowY;
             var isOverflowScroll = overflowStyle.indexOf('scroll') !== -1;
-    
+
             return hasScrollableContent && (isOverflowScroll || isDom);
-    
+
         }.bind(this));
     }
-    
+
     $.fn.closestScrollable = function()
     {
         return $(this).map((i) => {
-    
+
             var target = this[i] === window ? document.documentElement : this[i];
             if (target === undefined) target = document.documentElement;
-    
+
             while (target !== document.documentElement) {
-    
+
                 if($(target).isScrollable()) return target;
-    
+
                 if(target.parentElement === undefined) return undefined;
                 if(target.parentElement === null) return null;
-    
+
                 target = target.parentElement;
             }
-    
+
             return $(target).isScrollable() ? target : undefined;
         });
     }
-    
+
     $.fn.repaint = function(duration = 1000, reiteration=5) {
-    
+
         var time = 0;
         var interval = undefined;
         var fn = function () {
-    
+
             $(this).each(function (_, el) {
-    
+
                 var displayBak = el.style.display;
-    
+
                 el.style.display = "none";
                 el.style.display = displayBak;
                 el.offsetHeight;
             });
-    
+
             if (time > duration) clearInterval(interval);
                 time += duration/reiteration;
-    
+
         }.bind(this);
-    
+
         fn();
         if(reiteration > 0)
             interval = setInterval(fn, duration/reiteration);
     };
-    
+
     var Transparent = window.Transparent = {};
         Transparent.version = '0.1.0';
 
@@ -905,16 +905,16 @@
 
         var body = $(dom).find("body").html();
         if(body == "undefined") {
-            
+
             $(Settings.identifier).html("<div class='error'></div>");
             setTimeout(function() { window.location.reload(); }, Transparent.parseDuration(Settings["rescue_reload"]));
 
         } else {
-            
+
             document.documentElement.innerHTML = dom.documentElement === undefined ? dom : dom.documentElement.innerHTML;
-            Transparent.transferAttributes(dom);    
+            Transparent.transferAttributes(dom);
         }
-        
+
         Transparent.activeOut();
     }
 
@@ -1461,7 +1461,7 @@
 
         dispatchEvent(new Event('transparent:onbeforeunload'));
         dispatchEvent(new Event('onbeforeunload'));
-        
+
         $(Transparent.html).prop("user-scroll", true);
         $(Transparent.html).stop();
 
@@ -1533,7 +1533,7 @@
 
             // From here the page is valid..
             // so the new page is added to history..
-            
+
             if(xhr)
                 history.pushState({uuid: uuid, status:status, method: method, data: data instanceof FormData ? "" : data, href: responseURL}, '', responseURL);
 
@@ -1543,7 +1543,8 @@
 
             // Page not recognized.. just go there.. no POST information transmitted..
             if(!Transparent.isPage(dom))
-                return Transparent.rescue(responseText);
+                return window.location.href = url;
+                // return Transparent.rescue(dom);
 
             // Layout not compatible.. needs to be reloaded (exception when POST is detected..)
             if(!Transparent.isCompatiblePage(dom, method, data))
@@ -1583,7 +1584,7 @@
                 return window.location.reload();
 
             return Transparent.onLoad(uuid, dom, function() {
-                
+
                     Transparent.activeOut(function() {
 
                         Transparent.html
