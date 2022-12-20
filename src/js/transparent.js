@@ -1040,27 +1040,28 @@
         lazyloadImages = lazyloadImages || document.querySelectorAll("img[data-src]:not(.loaded)");
         if ("IntersectionObserver" in window) {
 
+                let options = { root:null, rootMargin: "100%" };
                 var imageObserver = new IntersectionObserver(function (entries, observer) {
                     entries.forEach(function (entry) {
                         if (entry.isIntersecting) {
                             var image = entry.target;
                             var lazybox = image.closest(".lazybox");
 
-                                image.onload = function() {
-                                    this.classList.add("loaded");
-                                    this.classList.remove("loading");
-                                    if(lazybox) lazybox.classList.add("loaded");
-                                    if(lazybox) lazybox.classList.remove("loading");
-                                };
+                            image.onload = function() {
+                                this.classList.add("loaded");
+                                this.classList.remove("loading");
+                                if(lazybox) lazybox.classList.add("loaded");
+                                if(lazybox) lazybox.classList.remove("loading");
+                            };
 
-                                if(lazybox) lazybox.classList.add("loading");
-                                image.classList.add("loading");
-                                image.src = image.dataset.src;
+                            if(lazybox) lazybox.classList.add("loading");
+                            image.classList.add("loading");
+                            image.src = image.dataset.src;
 
                             imageObserver.unobserve(image);
                         }
-                });
-            });
+                    });
+                }, options);
 
             lazyloadImages.forEach(function (image) {
                 imageObserver.observe(image);
