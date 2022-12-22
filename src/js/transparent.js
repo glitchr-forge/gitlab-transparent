@@ -211,7 +211,7 @@
         dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVE));
     }
 
-    window.addEventListener("DOMContentLoaded", function()
+    window.addEventListener("load", function()
     {
         Transparent.loader = $($(document).find(Settings.loader)[0] ?? Transparent.html);
         Transparent.lazyLoad();
