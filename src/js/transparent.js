@@ -161,7 +161,6 @@
         "disable": false,
         "global_code": true,
         "debug": true,
-        "lazyload": true,
         "response_text": {},
         "response_limit": 25,
         "throttle": 1000,
@@ -210,12 +209,6 @@
         Transparent.html.addClass(Transparent.state.ACTIVE);
         dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVE));
     }
-
-    window.addEventListener("load", function()
-    {
-        Transparent.loader = $($(document).find(Settings.loader)[0] ?? Transparent.html);
-        Transparent.lazyLoad();
-    });
 
     Transparent.isRescueMode = function() { return rescueMode; }
     Transparent.getData = function(uuid)
@@ -419,16 +412,14 @@
         Transparent.configure({'x-ajax-request': true});
         Transparent.configure(options);
 
+        if(isReady) return this;
         isReady = true;
 
         dispatchEvent(new Event('transparent:'+Transparent.state.READY));
         Transparent.html.addClass(Transparent.state.READY);
 
         Transparent.addLayout();
-        Transparent.lazyLoad();
-
         Transparent.scrollToHash(location.hash, {}, function() {
-
             Transparent.activeOut(() => Transparent.html.removeClass(Transparent.state.FIRST));
         });
 
@@ -1035,105 +1026,6 @@
         }, new Set());
     }
 
-    Transparent.lazyLoad = function (lazyloadImages = undefined)
-    {
-        lazyloadImages = lazyloadImages || document.querySelectorAll("img[data-src]:not(.loaded)");
-        if ("IntersectionObserver" in window) {
-
-                let options = { root:null, rootMargin: "100%" };
-                var imageObserver = new IntersectionObserver(function (entries, observer) {
-                    entries.forEach(function (entry) {
-                        if (entry.isIntersecting) {
-                            var image = entry.target;
-                            var lazybox = image.closest(".lazybox");
-
-                            image.onload = function() {
-                                this.classList.add("loaded");
-                                this.classList.remove("loading");
-                                if(lazybox) lazybox.classList.add("loaded");
-                                if(lazybox) lazybox.classList.remove("loading");
-                            };
-
-                            if(lazybox) lazybox.classList.add("loading");
-                            image.classList.add("loading");
-                            image.src = image.dataset.src;
-
-                            imageObserver.unobserve(image);
-                        }
-                    });
-                }, options);
-
-            lazyloadImages.forEach(function (image) {
-                imageObserver.observe(image);
-            });
-
-        } else {
-
-                var lazyloadThrottleTimeout;
-
-            function lazyload() {
-                if (lazyloadThrottleTimeout) {
-                    clearTimeout(lazyloadThrottleTimeout);
-                }
-
-                lazyloadThrottleTimeout = setTimeout(function () {
-                    var scrollTop = window.pageYOffset;
-                    lazyloadImages.forEach(function (img) {
-                        if (img.offsetTop < (window.innerHeight + scrollTop)) {
-                            img.src = img.dataset.src;
-                            img.classList.add('loaded');
-                        }
-                    });
-                    if (lazyloadImages.length == 0) {
-                        document.removeEventListener("scroll", lazyload);
-                        window.removeEventListener("resize", lazyload);
-                        window.removeEventListener("orientationChange", lazyload);
-                    }
-                }, 20);
-            }
-
-            document.addEventListener("scroll", lazyload);
-            window.addEventListener("resize", lazyload);
-            window.addEventListener("orientationChange", lazyload);
-        }
-    }
-
-    Transparent.loadImages = function()
-    {
-        function loadImg (src, timeout = 500) {
-            var imgPromise = new Promise((resolve, reject) => {
-
-                let img = new Image()
-                    img.onload = () => {
-                    resolve({
-                        src: src,
-                        width: img.naturalWidth,
-                        height: img.naturalHeight
-                    })
-                }
-
-                img.onerror = reject
-                img.src = src
-            })
-
-            var timer = new Promise((resolve, reject) => { setTimeout(reject, timeout) })
-            return Promise.race([imgPromise, timer])
-        }
-
-        function loadImgAll (imgList, timeout = 500) {
-            return new Promise((resolve, reject) => {
-                Promise.all(imgList
-                    .map(src => loadImg(src, timeout))
-                    .map(p => p.catch(e => false))
-                ).then(results => resolve(results.filter(r => r)))
-            })
-        }
-
-        return new Promise((resolve, reject) => {
-            loadImgAll(Array.from(Transparent.findImages(document.documentElement))).then(resolve, reject)
-        })
-    }
-
     Transparent.transferAttributes = function(dom) {
 
         var html = $(dom).find("html");
@@ -1634,6 +1526,9 @@
     var href = history.state ? history.state.href : null;
     if (href != location.origin + location.pathname + location.hash)
         history.replaceState({uuid: uuidv4(), status: history.state ? history.state.status : 200, data:{}, method: history.state ? history.state.method : "GET", href: location.origin + location.pathname + location.hash}, '', location.origin + location.pathname + location.hash);
+
+    window.addEventListener("DOMContentLoaded", function() { Transparent.loader = $($(document).find(Settings.loader)[0] ?? Transparent.html); }, true);
+    window.addEventListener("load",function() { Transparent.ready(); });
 
     // Overload onpopstate
     if(Settings.disable) {
