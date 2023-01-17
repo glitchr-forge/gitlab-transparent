@@ -15,36 +15,36 @@
         if(!newHash) newHash = "";
         if (newHash !== "" && (''+newHash).charAt(0) !== '#')
             newHash = '#' + newHash;
-
+    
         var oldURL = location.origin+location.pathname+location.hash;
         var newURL = location.origin+location.pathname+newHash;
-
+    
         var fallback  = $(newHash).length === 0;
-
+    
         var hashElement = $(newHash)[0] ?? undefined;
         if (hashElement !== undefined) // Update hash only if element is displayed
             fallback |= window.getComputedStyle(hashElement)["display"] == "none";
-
+    
         if((skipIfEmptyIdentifier && !newHash) || fallback){
-
+    
             dispatchEvent(new HashChangeEvent("hashfallback", {oldURL:oldURL, newURL:newURL}));
             newHash = "";
-
+    
             oldURL = location.origin+location.pathname+location.hash;
             newURL = location.origin+location.pathname+newHash;
         }
-
+    
         if(oldURL == newURL) return false;
-
+    
         var state = Object.assign({}, history.state, {href: newURL});
         history.replaceState(state, '', newURL);
-
+    
         if(triggerHashChange)
             dispatchEvent(new HashChangeEvent("hashchange", {oldURL:oldURL, newURL:newURL}));
-
+    
         return true;
     };
-
+    
     $.fn.serializeObject = function() {
         var o = {};
         var a = this.serializeArray();
@@ -60,98 +60,98 @@
         });
         return o;
     };
-
+    
     $.fn.isScrollable  = function()
     {
         for (let el of $(this).isScrollableX())
             if(el) return true;
-
+    
         for (let el of $(this).isScrollableY())
             if(el) return true;
-
+    
         return false;
     }
-
+    
     $.fn.isScrollableX = function() {
-
+    
         return $(this).map(function(i) {
-
+    
             var el = this[i] === window ? document.documentElement : this[i];
             var isDom = el == document.documentElement;
-
+    
             var hasScrollableContent = el.scrollWidth > el.clientWidth;
-
+    
             var overflowStyle   = window.getComputedStyle(el).overflowX;
             var isOverflowScroll = overflowStyle.indexOf('scroll') !== -1;
-
+    
             return hasScrollableContent && (isOverflowScroll || isDom);
-
+    
         }.bind(this));
     }
-
+    
     $.fn.isScrollableY = function() {
-
+    
         return $(this).map(function(i) {
-
+    
             var el = this[i] === window ? document.documentElement : this[i];
             var isDom = el == document.documentElement;
-
+    
             var hasScrollableContent = el.scrollHeight > el.clientHeight;
-
+    
             var overflowStyle   = window.getComputedStyle(el).overflowY;
             var isOverflowScroll = overflowStyle.indexOf('scroll') !== -1;
-
+    
             return hasScrollableContent && (isOverflowScroll || isDom);
-
+    
         }.bind(this));
     }
-
+    
     $.fn.closestScrollable = function()
     {
         return $(this).map((i) => {
-
+    
             var target = this[i] === window ? document.documentElement : this[i];
             if (target === undefined) target = document.documentElement;
-
+    
             while (target !== document.documentElement) {
-
+    
                 if($(target).isScrollable()) return target;
-
+    
                 if(target.parentElement === undefined) return undefined;
                 if(target.parentElement === null) return null;
-
+    
                 target = target.parentElement;
             }
-
+    
             return $(target).isScrollable() ? target : undefined;
         });
     }
-
+    
     $.fn.repaint = function(duration = 1000, reiteration=5) {
-
+    
         var time = 0;
         var interval = undefined;
         var fn = function () {
-
+    
             $(this).each(function (_, el) {
-
+    
                 var displayBak = el.style.display;
-
+    
                 el.style.display = "none";
                 el.style.display = displayBak;
                 el.offsetHeight;
             });
-
+    
             if (time > duration) clearInterval(interval);
                 time += duration/reiteration;
-
+    
         }.bind(this);
-
+    
         fn();
         if(reiteration > 0)
             interval = setInterval(fn, duration/reiteration);
     };
-
+    
     var Transparent = window.Transparent = {};
         Transparent.version = '0.1.0';
 
@@ -161,6 +161,7 @@
         "disable": false,
         "global_code": true,
         "debug": true,
+        "lazyload": true,
         "response_text": {},
         "response_limit": 25,
         "throttle": 1000,
@@ -209,6 +210,12 @@
         Transparent.html.addClass(Transparent.state.ACTIVE);
         dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVE));
     }
+
+    window.addEventListener("DOMContentLoaded", function()
+    {
+        Transparent.loader = $($(document).find(Settings.loader)[0] ?? Transparent.html);
+        Transparent.lazyLoad();
+    });
 
     Transparent.isRescueMode = function() { return rescueMode; }
     Transparent.getData = function(uuid)
@@ -260,7 +267,7 @@
 
     function isDomEntity(entity)
     {
-        return entity !== null && typeof entity  === 'object' && entity.nodeType !== undefined;
+        return typeof entity  === 'object' && entity.nodeType !== undefined;
     }
 
     Transparent.setResponse = function(uuid, responseText, scrollableXY = [], exceptionRaised = false)
@@ -412,14 +419,16 @@
         Transparent.configure({'x-ajax-request': true});
         Transparent.configure(options);
 
-        if(isReady) return this;
         isReady = true;
 
         dispatchEvent(new Event('transparent:'+Transparent.state.READY));
         Transparent.html.addClass(Transparent.state.READY);
 
         Transparent.addLayout();
+        Transparent.lazyLoad();
+
         Transparent.scrollToHash(location.hash, {}, function() {
+
             Transparent.activeOut(() => Transparent.html.removeClass(Transparent.state.FIRST));
         });
 
@@ -894,18 +903,24 @@
         console.error("Rescue mode.. called");
         rescueMode = true;
 
+        var head = $(dom).find("head").html();
         var body = $(dom).find("body").html();
-        if(body == "undefined") {
 
+        console.log(head, body);
+        if(head == undefined || body == "undefined") {
+            
             $(Settings.identifier).html("<div class='error'></div>");
+
             setTimeout(function() { window.location.reload(); }, Transparent.parseDuration(Settings["rescue_reload"]));
 
         } else {
 
-            document.documentElement.innerHTML = dom.documentElement === undefined ? dom : dom.documentElement.innerHTML;
-            Transparent.transferAttributes(dom);
+            document.head.innerHTML = $(dom).find("head").html();
+            document.body.innerHTML = $(dom).find("body").html();
+            Transparent.evalScript($("head")[0]);
+            Transparent.evalScript($("body")[0]);
         }
-
+        
         Transparent.activeOut();
     }
 
@@ -1026,6 +1041,104 @@
         }, new Set());
     }
 
+    Transparent.lazyLoad = function (lazyloadImages = undefined)
+    {
+        lazyloadImages = lazyloadImages || document.querySelectorAll("img[data-src]:not(.loaded)");
+        if ("IntersectionObserver" in window) {
+
+                var imageObserver = new IntersectionObserver(function (entries, observer) {
+                    entries.forEach(function (entry) {
+                        if (entry.isIntersecting) {
+                            var image = entry.target;
+                            var lazybox = image.closest(".lazybox");
+
+                                image.onload = function() {
+                                    this.classList.add("loaded");
+                                    this.classList.remove("loading");
+                                    if(lazybox) lazybox.classList.add("loaded");
+                                    if(lazybox) lazybox.classList.remove("loading");
+                                };
+
+                                if(lazybox) lazybox.classList.add("loading");
+                                image.classList.add("loading");
+                                image.src = image.dataset.src;
+
+                            imageObserver.unobserve(image);
+                        }
+                });
+            });
+
+            lazyloadImages.forEach(function (image) {
+                imageObserver.observe(image);
+            });
+
+        } else {
+
+                var lazyloadThrottleTimeout;
+
+            function lazyload() {
+                if (lazyloadThrottleTimeout) {
+                    clearTimeout(lazyloadThrottleTimeout);
+                }
+
+                lazyloadThrottleTimeout = setTimeout(function () {
+                    var scrollTop = window.pageYOffset;
+                    lazyloadImages.forEach(function (img) {
+                        if (img.offsetTop < (window.innerHeight + scrollTop)) {
+                            img.src = img.dataset.src;
+                            img.classList.add('loaded');
+                        }
+                    });
+                    if (lazyloadImages.length == 0) {
+                        document.removeEventListener("scroll", lazyload);
+                        window.removeEventListener("resize", lazyload);
+                        window.removeEventListener("orientationChange", lazyload);
+                    }
+                }, 20);
+            }
+
+            document.addEventListener("scroll", lazyload);
+            window.addEventListener("resize", lazyload);
+            window.addEventListener("orientationChange", lazyload);
+        }
+    }
+
+    Transparent.loadImages = function()
+    {
+        function loadImg (src, timeout = 500) {
+            var imgPromise = new Promise((resolve, reject) => {
+
+                let img = new Image()
+                    img.onload = () => {
+                    resolve({
+                        src: src,
+                        width: img.naturalWidth,
+                        height: img.naturalHeight
+                    })
+                }
+
+                img.onerror = reject
+                img.src = src
+            })
+
+            var timer = new Promise((resolve, reject) => { setTimeout(reject, timeout) })
+            return Promise.race([imgPromise, timer])
+        }
+
+        function loadImgAll (imgList, timeout = 500) {
+            return new Promise((resolve, reject) => {
+                Promise.all(imgList
+                    .map(src => loadImg(src, timeout))
+                    .map(p => p.catch(e => false))
+                ).then(results => resolve(results.filter(r => r)))
+            })
+        }
+
+        return new Promise((resolve, reject) => {
+            loadImgAll(Array.from(Transparent.findImages(document.documentElement))).then(resolve, reject)
+        })
+    }
+
     Transparent.transferAttributes = function(dom) {
 
         var html = $(dom).find("html");
@@ -1034,37 +1147,27 @@
             $("html").removeAttr(attr.name);
         });
 
-        if(html.length > 0) {
-
-            $($(html)[0].attributes).each(function(i, attr) {
-                if(attr.name == "class") return;
-                $("html").attr(attr.name, attr.value);
-            });
-        }
+        $($(html)[0].attributes).each(function(i, attr) {
+            if(attr.name == "class") return;
+            $("html").attr(attr.name, attr.value);
+        });
 
         var head = $(dom).find("head");
         $($("head")[0].attributes).each(function(i, attr) {
             $("head").removeAttr(attr.name);
         });
 
-        if(head.length > 0) {
-
-            $($(head)[0].attributes).each(function(i, attr) {
-                $("head").attr(attr.name, attr.value);
-            });
-        }
+        $($(head)[0].attributes).each(function(i, attr) {
+            $("head").attr(attr.name, attr.value);
+        });
 
         var body = $(dom).find("body");
         $($("body")[0].attributes).each(function(i, attr) {
             $("body").removeAttr(attr.name);
         });
-
-        if(body.length > 0) {
-
-            $($(body)[0].attributes).each(function(i, attr) {
-                $("body").attr(attr.name, attr.value);
-            });
-        }
+        $($(body)[0].attributes).each(function(i, attr) {
+            $("body").attr(attr.name, attr.value);
+        });
     }
 
     Transparent.onLoad = function(uuid, dom, callback = null, scrollTo = false) {
@@ -1076,19 +1179,14 @@
         // Transfert attributes
         Transparent.transferAttributes(dom);
 
-        // Replace head..
+        // Replace head.. (@TODO keep ordering, by adding after.. last node probed)
         var head = $(dom).find("head");
         $("head").children().each(function() {
 
             var el   = this;
             var found = false;
 
-            head.children().each(function() {
-
-                found = this.isEqualNode(el);
-                return !found;
-            });
-
+            head.children().each(function() { found |= this.isEqualNode(el); });
             if(!found) this.remove();
         });
 
@@ -1105,6 +1203,30 @@
             }
         });
 
+        // Replace body end (@TODO keep ordering, by adding after.. last node probed)
+        var bodyScript = $(dom).find("body > script");
+        $("body").find("script").each(function() {
+           
+            var el   = this;
+            var found = false;
+
+            bodyScript.each(function() { found |= this.isEqualNode(el); });
+            if(!found) this.remove();
+        });
+
+        bodyScript.each(function() {
+
+            var el   = this;
+            var found = false;
+
+            $("body").find("script").each(function() { found |= this.isEqualNode(el); });
+            if(!found) {
+                console.log("NEW:", this);
+                if(this.tagName != "SCRIPT" || Settings["global_code"] == true) $("body").append(this.cloneNode(true));
+                else $("body").append(this);
+            }
+        });
+        
         // Replace canvases..
         Transparent.replaceCanvases(dom);
 
@@ -1133,7 +1255,7 @@
 
         if(Settings["global_code"] == true) Transparent.evalScript($(page)[0]);
         dispatchEvent(new Event('DOMContentLoaded'));
-
+        console.log("DOMContentLoaded");
         Transparent.addLayout();
 
         if(scrollTo) {
@@ -1165,19 +1287,21 @@
         }
 
         $('head').append(function() {
+            $('body').append(function() {
 
-            $(Settings.identifier).append(function() {
+                $(Settings.identifier).append(function() {
 
-                setTimeout(function() {
+                    setTimeout(function() {
 
-                    // Callback if needed, or any other actions
-                    callback();
+                        // Callback if needed, or any other actions
+                        callback();
 
-                    // Trigger onload event
-                    dispatchEvent(new Event('transparent:load'));
-                    dispatchEvent(new Event('load'));
+                        // Trigger onload event
+                        dispatchEvent(new Event('transparent:load'));
+                        dispatchEvent(new Event('load'));
 
-                }.bind(this), 1);
+                    }.bind(this), 1);
+                });
             });
         });
     }
@@ -1304,8 +1428,7 @@
 
         var form   = target != undefined && target.tagName == "FORM" ? target : undefined;
         if (form) {
-
-            data = new FormData(form);
+            data = $(form).serialize();
             $(form).find(':submit').attr('disabled', 'disabled');
         }
 
@@ -1354,7 +1477,7 @@
 
         dispatchEvent(new Event('transparent:onbeforeunload'));
         dispatchEvent(new Event('onbeforeunload'));
-
+        
         $(Transparent.html).prop("user-scroll", true);
         $(Transparent.html).stop();
 
@@ -1399,6 +1522,7 @@
                 if(!Transparent.hasResponse(uuid))
                     Transparent.setResponse(uuid, responseText);
             }
+
             var dom = new DOMParser().parseFromString(responseText, "text/html");
             if(request && request.getResponseHeader("Content-Type") == "application/json") {
 
@@ -1426,9 +1550,8 @@
 
             // From here the page is valid..
             // so the new page is added to history..
-
             if(xhr)
-                history.pushState({uuid: uuid, status:status, method: method, data: data instanceof FormData ? "" : data, href: responseURL}, '', responseURL);
+                history.pushState({uuid: uuid, status:status, method: method, data: data, href: responseURL}, '', responseURL);
 
             var dom = new DOMParser().parseFromString(responseText, "text/html");
             if(status != 200) // Blatant error received..
@@ -1437,7 +1560,6 @@
             // Page not recognized.. just go there.. no POST information transmitted..
             if(!Transparent.isPage(dom))
                 return window.location.href = url;
-                // return Transparent.rescue(dom);
 
             // Layout not compatible.. needs to be reloaded (exception when POST is detected..)
             if(!Transparent.isCompatiblePage(dom, method, data))
@@ -1477,7 +1599,7 @@
                 return window.location.reload();
 
             return Transparent.onLoad(uuid, dom, function() {
-
+                
                     Transparent.activeOut(function() {
 
                         Transparent.html
@@ -1509,8 +1631,6 @@
                 url: url.href,
                 type: type,
                 data: data,
-                contentType: false,
-                processData: false,
                 dataType: 'html',
                 headers: Settings["headers"] || {},
                 xhr: function () { return xhr; },
@@ -1526,9 +1646,6 @@
     var href = history.state ? history.state.href : null;
     if (href != location.origin + location.pathname + location.hash)
         history.replaceState({uuid: uuidv4(), status: history.state ? history.state.status : 200, data:{}, method: history.state ? history.state.method : "GET", href: location.origin + location.pathname + location.hash}, '', location.origin + location.pathname + location.hash);
-
-    window.addEventListener("DOMContentLoaded", function() { Transparent.loader = $($(document).find(Settings.loader)[0] ?? Transparent.html); }, true);
-    window.addEventListener("load",function() { Transparent.ready(); });
 
     // Overload onpopstate
     if(Settings.disable) {
