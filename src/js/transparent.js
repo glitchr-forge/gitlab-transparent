@@ -906,7 +906,6 @@
         var head = $(dom).find("head").html();
         var body = $(dom).find("body").html();
 
-        console.log(head, body);
         if(head == undefined || body == "undefined") {
             
             $(Settings.identifier).html("<div class='error'></div>");
@@ -1221,7 +1220,7 @@
 
             $("body").find("script").each(function() { found |= this.isEqualNode(el); });
             if(!found) {
-                console.log("NEW:", this);
+                
                 if(this.tagName != "SCRIPT" || Settings["global_code"] == true) $("body").append(this.cloneNode(true));
                 else $("body").append(this);
             }
@@ -1255,7 +1254,7 @@
 
         if(Settings["global_code"] == true) Transparent.evalScript($(page)[0]);
         dispatchEvent(new Event('DOMContentLoaded'));
-        console.log("DOMContentLoaded");
+
         Transparent.addLayout();
 
         if(scrollTo) {
