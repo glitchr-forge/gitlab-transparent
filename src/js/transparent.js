@@ -906,6 +906,7 @@
         var head = $(dom).find("head").html();
         var body = $(dom).find("body").html();
 
+        console.log(head, body);
         if(head == undefined || body == "undefined") {
             
             $(Settings.identifier).html("<div class='error'></div>");
@@ -1178,14 +1179,19 @@
         // Transfert attributes
         Transparent.transferAttributes(dom);
 
-        // Replace head.. (@TODO keep ordering, by adding after.. last node probed)
+        // Replace head..
         var head = $(dom).find("head");
         $("head").children().each(function() {
 
             var el   = this;
             var found = false;
 
-            head.children().each(function() { found |= this.isEqualNode(el); });
+            head.children().each(function() {
+
+                found = this.isEqualNode(el);
+                return !found;
+            });
+
             if(!found) this.remove();
         });
 
@@ -1202,30 +1208,6 @@
             }
         });
 
-        // Replace body end (@TODO keep ordering, by adding after.. last node probed)
-        var bodyScript = $(dom).find("body > script");
-        $("body").find("script").each(function() {
-           
-            var el   = this;
-            var found = false;
-
-            bodyScript.each(function() { found |= this.isEqualNode(el); });
-            if(!found) this.remove();
-        });
-
-        bodyScript.each(function() {
-
-            var el   = this;
-            var found = false;
-
-            $("body").find("script").each(function() { found |= this.isEqualNode(el); });
-            if(!found) {
-                
-                if(this.tagName != "SCRIPT" || Settings["global_code"] == true) $("body").append(this.cloneNode(true));
-                else $("body").append(this);
-            }
-        });
-        
         // Replace canvases..
         Transparent.replaceCanvases(dom);
 
@@ -1286,21 +1268,19 @@
         }
 
         $('head').append(function() {
-            $('body').append(function() {
 
-                $(Settings.identifier).append(function() {
+            $(Settings.identifier).append(function() {
 
-                    setTimeout(function() {
+                setTimeout(function() {
 
-                        // Callback if needed, or any other actions
-                        callback();
+                    // Callback if needed, or any other actions
+                    callback();
 
-                        // Trigger onload event
-                        dispatchEvent(new Event('transparent:load'));
-                        dispatchEvent(new Event('load'));
+                    // Trigger onload event
+                    dispatchEvent(new Event('transparent:load'));
+                    dispatchEvent(new Event('load'));
 
-                    }.bind(this), 1);
-                });
+                }.bind(this), 1);
             });
         });
     }
