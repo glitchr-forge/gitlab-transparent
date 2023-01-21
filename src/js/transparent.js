@@ -1418,7 +1418,8 @@
 
         var form   = target != undefined && target.tagName == "FORM" ? target : undefined;
         if (form) {
-            data = new FormEvent(form);
+
+            data = new FormData(form);
             $(form).find(':submit').attr('disabled', 'disabled');
         }
 
