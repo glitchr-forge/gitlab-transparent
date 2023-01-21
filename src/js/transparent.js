@@ -1208,6 +1208,16 @@
             }
         });
 
+        var bodyScript = $(dom).find("body > script");
+            bodyScript.each(function() {
+
+                var el   = this;
+                var found = false;
+
+                $("body").children().each(function() { found |= this.isEqualNode(el); });
+                if(!found) $("body").append(this);
+            });
+
         // Replace canvases..
         Transparent.replaceCanvases(dom);
 
@@ -1235,7 +1245,8 @@
         oldPage.remove();
 
         if(Settings["global_code"] == true) Transparent.evalScript($(page)[0]);
-        dispatchEvent(new Event('DOMContentLoaded'));
+        document.dispatchEvent(new Event('DOMContentLoaded'));
+        window.dispatchEvent(new Event('DOMContentLoaded'));
 
         Transparent.addLayout();
 
@@ -1407,7 +1418,7 @@
 
         var form   = target != undefined && target.tagName == "FORM" ? target : undefined;
         if (form) {
-            data = $(form).serialize();
+            data = new FormEvent(form);
             $(form).find(':submit').attr('disabled', 'disabled');
         }
 
@@ -1530,7 +1541,7 @@
             // From here the page is valid..
             // so the new page is added to history..
             if(xhr)
-                history.pushState({uuid: uuid, status:status, method: method, data: data, href: responseURL}, '', responseURL);
+                history.pushState({uuid: uuid, status:status, method: method, data: {}, href: responseURL}, '', responseURL);
 
             var dom = new DOMParser().parseFromString(responseText, "text/html");
             if(status != 200) // Blatant error received..
@@ -1610,7 +1621,9 @@
                 url: url.href,
                 type: type,
                 data: data,
-                dataType: 'html',
+                cache: false,
+                contentType: false,
+                processData: false,
                 headers: Settings["headers"] || {},
                 xhr: function () { return xhr; },
                 success: function (html, status, request) { return handleResponse(uuid, request.status, type, data, xhr, request); },
