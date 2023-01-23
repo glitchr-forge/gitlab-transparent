@@ -1622,7 +1622,6 @@
                 url: url.href,
                 type: type,
                 data: data,
-                cache: false,
                 contentType: false,
                 processData: false,
                 headers: Settings["headers"] || {},
