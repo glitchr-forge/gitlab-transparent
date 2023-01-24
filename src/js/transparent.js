@@ -1280,18 +1280,21 @@
 
         $('head').append(function() {
 
-            $(Settings.identifier).append(function() {
+            $('body').append(function() {
 
-                setTimeout(function() {
+                $(Settings.identifier).append(function() {
 
-                    // Callback if needed, or any other actions
-                    callback();
+                    setTimeout(function() {
 
-                    // Trigger onload event
-                    dispatchEvent(new Event('transparent:load'));
-                    dispatchEvent(new Event('load'));
+                        // Callback if needed, or any other actions
+                        callback();
 
-                }.bind(this), 1);
+                        // Trigger onload event
+                        dispatchEvent(new Event('transparent:load'));
+                        dispatchEvent(new Event('load'));
+
+                    }.bind(this), 1);
+                });
             });
         });
     }
@@ -1652,7 +1655,7 @@
         window.onhashchange = __main__;
         document.addEventListener('click', __main__, false);
 
-        $("form").submit(__main__);
+        $("form").on("submit", __main__);
     }
 
     return Transparent;
