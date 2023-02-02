@@ -1,0 +1,22 @@
+
+@keyframes blinkOpacity {
+	0%		{ opacity: 1; }
+	25%		{ opacity: 0; }
+	50%		{ opacity: 1; }
+	75%		{ opacity: 0; }
+	100%	{ opacity: 1; }
+}
+
+.error
+{
+	animation: blink 5s infinite;
+
+	width:100vw;
+	height: 100vh;
+
+	background-image:url("../images/error.svg");
+	background-position: center;
+	background-repeat: no-repeat;
+
+	animation: blinkOpacity 2s infinite;
+}
