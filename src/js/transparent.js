@@ -910,7 +910,6 @@
         var head = $(dom).find("head").html();
         var body = $(dom).find("body").html();
 
-        console.log(head, body);
         if(head == undefined || body == "undefined") {
 
             $(Settings.identifier).html("<div class='error'></div>");
@@ -1180,125 +1179,125 @@
         window.previousLocation = window.location.toString();
         if(callback === null) callback = function() {};
 
-        // Transfert attributes
-        Transparent.transferAttributes(dom);
+        activeInRemainingTime = activeInRemainingTime - (Date.now() - activeInTime);
+        setTimeout(function() {
 
-        // Replace head..
-        var head = $(dom).find("head");
-        $("head").children().each(function() {
+            // Transfert attributes
+            Transparent.transferAttributes(dom);
 
-            var el   = this;
-            var found = false;
+            // Replace head..
+            var head = $(dom).find("head");
+            $("head").children().each(function() {
+
+                var el   = this;
+                var found = false;
+
+                head.children().each(function() {
+
+                    found = this.isEqualNode(el);
+                    return !found;
+                });
+
+                if(!found) this.remove();
+            });
 
             head.children().each(function() {
 
-                found = this.isEqualNode(el);
-                return !found;
+                var el   = this;
+                var found = false;
+
+                $("head").children().each(function() { found |= this.isEqualNode(el); });
+                if(!found) {
+
+                    if(this.tagName != "SCRIPT" || Settings["global_code"] == true) $("head").append(this.cloneNode(true));
+                    else $("head").append(this);
+                }
             });
 
-            if(!found) this.remove();
-        });
+            var bodyScript = $(dom).find("body > script");
+            bodyScript.each(function() {
 
-        head.children().each(function() {
+                var el   = this;
+                var found = false;
 
-            var el   = this;
-            var found = false;
+                $("body").children().each(function() { found |= this.isEqualNode(el); });
+                if(!found) $("body").append(this);
+            });
 
-            $("head").children().each(function() { found |= this.isEqualNode(el); });
-            if(!found) {
+            // Replace canvases..
+            Transparent.replaceCanvases(dom);
 
-                if(this.tagName != "SCRIPT" || Settings["global_code"] == true) $("head").append(this.cloneNode(true));
-                else $("head").append(this);
+            // Extract page block to be loaded
+            var page = $(dom).find(Settings.identifier);
+            if(dom == undefined || page == undefined) window.reload(); // Error a posteriori
+
+            var oldPage = $(Settings.identifier);
+
+            // Make sure name/layout keep the same after a page change (tolerance for POST or GET requests)
+            if(oldPage.attr("data-layout") != undefined && page.attr("data-layout") != undefined) {
+
+                var switchLayout = Transparent.state.SWITCH.replace("X", page.attr("data-layout")).replace("Y", oldPage.attr("data-layout"));
+                page.attr("data-layout-prev", oldPage.attr("data-layout"));
             }
-        });
 
-        var bodyScript = $(dom).find("body > script");
-        bodyScript.each(function() {
+            var states = Object.values(Transparent.state);
+            var     htmlClass = Array.from(($(dom).find("html").attr("class") || "").split(" ")).filter(x => !states.includes(x));
+            var  oldHtmlClass = Array.from(($(Transparent.html).attr("class") || "").split(" "));
+            var removeHtmlClass = oldHtmlClass.filter(x => !htmlClass.includes(x) && switchLayout != x && !states.includes(x));
 
-            var el   = this;
-            var found = false;
+            Transparent.html.removeClass(removeHtmlClass).addClass(htmlClass);
+            $(page).insertBefore(oldPage);
 
-            $("body").children().each(function() { found |= this.isEqualNode(el); });
-            if(!found) $("body").append(this);
-        });
+            oldPage.remove();
 
-        // Replace canvases..
-        Transparent.replaceCanvases(dom);
+            if(Settings["global_code"] == true) Transparent.evalScript($(page)[0]);
+            document.dispatchEvent(new Event('DOMContentLoaded'));
+            window.dispatchEvent(new Event('DOMContentLoaded'));
 
-        // Extract page block to be loaded
-        var page = $(dom).find(Settings.identifier);
-        if(dom == undefined || page == undefined) window.reload(); // Error a posteriori
+            Transparent.addLayout();
 
-        var oldPage = $(Settings.identifier);
+            if(scrollTo) {
 
-        // Make sure name/layout keep the same after a page change (tolerance for POST or GET requests)
-        if(oldPage.attr("data-layout") != undefined && page.attr("data-layout") != undefined) {
+                // Go back to top of the page..
+                var scrollableElements   = Transparent.getScrollableElement();
+                var scrollableElementsXY = Transparent.getResponsePosition(uuid);
 
-            var switchLayout = Transparent.state.SWITCH.replace("X", page.attr("data-layout")).replace("Y", oldPage.attr("data-layout"));
-            page.attr("data-layout-prev", oldPage.attr("data-layout"));
-        }
+                for(i = 0; i < scrollableElements.length; i++) {
 
-        var states = Object.values(Transparent.state);
-        var     htmlClass = Array.from(($(dom).find("html").attr("class") || "").split(" ")).filter(x => !states.includes(x));
-        var  oldHtmlClass = Array.from(($(Transparent.html).attr("class") || "").split(" "));
-        var removeHtmlClass = oldHtmlClass.filter(x => !htmlClass.includes(x) && switchLayout != x && !states.includes(x));
+                    var el = scrollableElements[i];
+                    var positionXY = undefined;
 
-        Transparent.html.removeClass(removeHtmlClass).addClass(htmlClass);
-        $(page).insertBefore(oldPage);
+                    if(scrollableElementsXY.length == scrollableElements.length)
+                        positionXY = scrollableElementsXY[i] || undefined;
 
-        oldPage.remove();
+                    if(el == window || el == document.documentElement) {
 
-        if(Settings["global_code"] == true) Transparent.evalScript($(page)[0]);
-        document.dispatchEvent(new Event('DOMContentLoaded'));
-        window.dispatchEvent(new Event('DOMContentLoaded'));
+                        if(positionXY != undefined) Transparent.scrollTo({top:positionXY[0], left:positionXY[1], duration:0});
+                        else if (location.hash) Transparent.scrollToHash(location.hash, {duration:0});
+                        else Transparent.scrollTo({top:0, left:0, duration:0});
 
-        Transparent.addLayout();
+                    } else {
 
-        if(scrollTo) {
-
-            // Go back to top of the page..
-            var scrollableElements   = Transparent.getScrollableElement();
-            var scrollableElementsXY = Transparent.getResponsePosition(uuid);
-
-            for(i = 0; i < scrollableElements.length; i++) {
-
-                var el = scrollableElements[i];
-                var positionXY = undefined;
-
-                if(scrollableElementsXY.length == scrollableElements.length)
-                    positionXY = scrollableElementsXY[i] || undefined;
-
-                if(el == window || el == document.documentElement) {
-
-                    if(positionXY != undefined) Transparent.scrollTo({top:positionXY[0], left:positionXY[1], duration:0});
-                    else if (location.hash) Transparent.scrollToHash(location.hash, {duration:0});
-                    else Transparent.scrollTo({top:0, left:0, duration:0});
-
-                } else {
-
-                    if(positionXY != undefined) Transparent.scrollTo({top:positionXY[0], left:positionXY[1], duration:0}, el);
-                    else Transparent.scrollTo({top:0, left:0, duration:0}, el);
+                        if(positionXY != undefined) Transparent.scrollTo({top:positionXY[0], left:positionXY[1], duration:0}, el);
+                        else Transparent.scrollTo({top:0, left:0, duration:0}, el);
+                    }
                 }
             }
-        }
 
-        $('head').append(function() {
+            $('head').append(function() {
 
-            $(Settings.identifier).append(function() {
+                $(Settings.identifier).append(function() {
 
-                activeInRemainingTime = activeInRemainingTime - (Date.now() - activeInTime);
-                setTimeout(function() {
+                        // Callback if needed, or any other actions
+                        callback();
 
-                    // Callback if needed, or any other actions
-                    callback();
-
-                    // Trigger onload event
-                    dispatchEvent(new Event('transparent:load'));
-                    dispatchEvent(new Event('load'));
-
-                }.bind(this), activeInRemainingTime > 0 ? activeInRemainingTime : 1);
+                        // Trigger onload event
+                        dispatchEvent(new Event('transparent:load'));
+                        dispatchEvent(new Event('load'));
+                });
             });
-        });
+
+        }.bind(this), activeInRemainingTime > 0 ? activeInRemainingTime : 1);
     }
 
     function uuidv4() {
