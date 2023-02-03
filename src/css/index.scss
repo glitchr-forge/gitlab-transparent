@@ -1,0 +1,37 @@
+
+img[data-src] { transition:all 0.25s ease !important; }
+img[data-src]:not(.loaded) {
+	opacity: 0;
+	visibility: hidden;
+}
+
+.lazybox.loading { animation: blink 2s infinite; }
+@keyframes blink {
+	0%		{ background-color: transparent;}
+	25%		{ background-color: #EFEFEFAA;}
+	50%		{ background-color: transparent;}
+	75%		{ background-color: #EFEFEFAA;}
+	100%	{ background-color: transparent;}
+}
+
+@keyframes blinkOpacity {
+	0%		{ opacity: 1; }
+	25%		{ opacity: 0; }
+	50%		{ opacity: 1; }
+	75%		{ opacity: 0; }
+	100%	{ opacity: 1; }
+}
+
+.error
+{
+	animation: blink 5s infinite;
+
+	width:100vw;
+	height: 100vh;
+
+	background-image:url("../images/error.svg");
+	background-position: center;
+	background-repeat: no-repeat;
+
+	animation: blinkOpacity 2s infinite;
+}
