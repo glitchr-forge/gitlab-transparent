@@ -1,2 +1,2 @@
 import './js/transparent.js';
-import './css/index.scss';
+import './css/index.css';
