@@ -1208,9 +1208,16 @@
 
                 $("head").children().each(function() { found |= this.isEqualNode(el); });
                 if(!found) {
+        
+            
+                    if(this.tagName != "SCRIPT" || Settings["global_code"] == true) {
+                    
+                        $("head").append(this.cloneNode(true));
+                    
+                    } else {
 
-                    if(this.tagName != "SCRIPT" || Settings["global_code"] == true) $("head").append(this.cloneNode(true));
-                    else $("head").append(this);
+                        $("head").append(this);
+                    }
                 }
             });
 
@@ -1221,7 +1228,14 @@
                 var found = false;
 
                 $("body").children().each(function() { found |= this.isEqualNode(el); });
-                if(!found) $("body").append(this);
+                if(!found) {
+
+                    if(this.tagName != "SCRIPT" || Settings["global_code"] == true) {
+                        $("body").append(this.cloneNode(true));
+                    } else {
+                        $("body").append(this);
+                    }
+                }
             });
 
             // Replace canvases..
@@ -1252,7 +1266,7 @@
 
             if(Settings["global_code"] == true) Transparent.evalScript($(page)[0]);
             document.dispatchEvent(new Event('DOMContentLoaded'));
-            window.dispatchEvent(new Event('DOMContentLoaded'));
+              window.dispatchEvent(new Event('DOMContentLoaded'));
 
             Transparent.addLayout();
 
