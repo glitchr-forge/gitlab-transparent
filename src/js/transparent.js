@@ -1573,11 +1573,15 @@
             if(xhr)
                 history.pushState({uuid: uuid, status:status, method: method, data: {}, href: responseURL}, '', responseURL);
 
+            // Invalid html page returned
+            if(!responseText.includes("<html>") || !responseText.includes("<body>") || !responseText.includes("<head>"))
+                return Transparent.rescue(dom);
+
             var dom = new DOMParser().parseFromString(responseText, "text/html");
             if(status != 200) // Blatant error received..
                 return Transparent.rescue(dom);
 
-            // Page not recognized.. just go there.. no POST information transmitted..
+            // Page not recognized.. just go fetch by yourself.. no POST information transmitted..
             if(!Transparent.isPage(dom))
                 return window.location.href = url;
 
@@ -1744,8 +1748,14 @@
                 }
             }
 
-            if(Settings.debug || preventDefault)
+            if(Settings.debug || preventDefault) {
+
+                if(preventDefault) Transparent.html.addClass(Transparent.state.READY);
+                if(preventDefault) Transparent.activeOut();
+                if(preventDefault) dispatchEvent(new Event('load'));
+
                 return "Dude, are you sure you want to leave? Think of the kittens!";
+            }
         }
 
         document.addEventListener('click', __main__, false);
