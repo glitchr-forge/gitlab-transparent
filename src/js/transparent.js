@@ -1437,7 +1437,18 @@
         var form   = target != undefined && target.tagName == "FORM" ? target : undefined;
         if (form) {
 
-            data = new FormData(form);
+            data = new FormData();
+            var formInput = $("[name^='"+form.name+"\[']");
+                formInput.each(function() {
+
+                    if(this.type == "file") {
+
+                        for(var i = 0; i < this.files.length; i++)
+                            data.append(this.name, field.files[i]);
+
+                    } else data.append(this.name, this.value);
+                });
+
             $(form).find(':submit').attr('disabled', 'disabled');
         }
 
@@ -1675,10 +1686,20 @@
             formDataBefore = {};
             $("form").each(function() {
 
-                var formData = new FormData(this);
-                for (var [fieldName,fieldValue] of formData.entries()) {
+                var formData = new FormData();
+                var formInput = $("[name^='"+this.name+"\[']");
+                    formInput.each(function() {
+
+                        if(this.type == "file") {
+
+                            for(var i = 0; i < this.files.length; i++)
+                                formData.append(this.name, field.files[i]);
+
+                        } else formData.append(this.name, this.value);
+                    });
+
+                for (var [fieldName,fieldValue] of formData.entries())
                     formDataBefore[fieldName] = fieldValue;
-                }
             });
         });
 
@@ -1688,7 +1709,18 @@
             var formDataAfter = [];
             $("form").each(function() {
 
-                var formData = new FormData(this);
+                var formData = new FormData();
+                var formInput = $("[name^='"+this.name+"\[']");
+                formInput.each(function() {
+
+                    if(this.type == "file") {
+
+                        for(var i = 0; i < this.files.length; i++)
+                            formData.append(this.name, field.files[i]);
+
+                    } else formData.append(this.name, this.value);
+                });
+
                 for (var [fieldName,fieldValue] of formData.entries()) {
                     formDataAfter[fieldName] = fieldValue;
                 }
