@@ -1208,12 +1208,12 @@
 
                 $("head").children().each(function() { found |= this.isEqualNode(el); });
                 if(!found) {
-        
-            
+
+
                     if(this.tagName != "SCRIPT" || Settings["global_code"] == true) {
-                    
+
                         $("head").append(this.cloneNode(true));
-                    
+
                     } else {
 
                         $("head").append(this);
@@ -1569,20 +1569,20 @@
             }
 
             // Invalid html page returned
-            if(!responseText.includes("<html>") || !responseText.includes("<body>") || !responseText.includes("<head>"))
+            if(!responseText.includes("<html") || !responseText.includes("<body") || !responseText.includes("<head"))
                 return Transparent.rescue(dom);
 
-            if(status >= 400) // Blatant error received..
+            if(status != 200) // Blatant error received..
                 return Transparent.rescue(dom);
-
-            // Page not recognized.. just go fetch by yourself.. no POST information transmitted..
-            if(!Transparent.isPage(dom))
-                return window.location.href = url;
 
             // From here the page is valid..
             // so the new page is added to history..
             if(xhr)
                 history.pushState({uuid: uuid, status:status, method: method, data: {}, href: responseURL}, '', responseURL);
+
+            // Page not recognized.. just go fetch by yourself.. no POST information transmitted..
+            if(!Transparent.isPage(dom))
+                return window.location.href = url;
 
             // Layout not compatible.. needs to be reloaded (exception when POST is detected..)
             if(!Transparent.isCompatiblePage(dom, method, data))
@@ -1708,7 +1708,7 @@
 
         window.onbeforeunload = function() {
 
-            if(Transparent.get("disable")) return;
+            if(Settings.disable) return;
 
             var preventDefault = false;
             var formDataAfter = [];
