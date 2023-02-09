@@ -160,7 +160,7 @@
         "data": {},
         "disable": false,
         "global_code": true,
-        "debug": true,
+        "debug": false,
         "lazyload": true,
         "response_text": {},
         "response_limit": 25,
@@ -1546,7 +1546,7 @@
                 }
 
                 var response = JSON.parse(responseText);
-                if(Settings.debug) console.log(response);
+                if(Settings.debug) console.debug(response);
 
                 if(response.code == "302") {
 
@@ -1668,10 +1668,59 @@
 
         window.onpopstate   = __main__; // Onpopstate pop out straight to previous page.. this creates a jump while changing pages with hash..
         window.onhashchange = __main__;
+
+        var formDataBefore = {};
+        $(window).on("DOMContentLoaded", function() {
+
+            formDataBefore = {};
+            $("form").each(function() {
+
+                var formData = new FormData(this);
+                for (var [fieldName,fieldValue] of formData.entries()) {
+                    formDataBefore[fieldName] = fieldValue;
+                }
+            });
+        });
+
+        window.onbeforeunload = function() {
+
+            var preventDefault = false;
+            var formDataAfter = [];
+            $("form").each(function() {
+
+                var formData = new FormData(this);
+                for (var [fieldName,fieldValue] of formData.entries()) {
+                    formDataAfter[fieldName] = fieldValue;
+                }
+            });
+
+            var formDataBeforeKeys = Object.entries(formDataBefore).keys();
+            var formDataAfterKeys  = Object.entries(formDataAfter).keys();
+
+            if(formDataAfterKeys != formDataAfterKeys) preventDefault = true;
+            else {
+
+                for (var [fieldName,fieldValueAfter] of Object.entries(formDataAfter)) {
+
+                    var fieldValueBefore = formDataBefore[fieldName];
+                    if(fieldValueBefore instanceof File) {
+
+                        if(!fieldValueAfter instanceof File) preventDefault = true;
+                        else if (fieldValueBefore.size != fieldValueAfter.size) preventDefault = true;
+
+                    } else if(fieldValueBefore != fieldValueAfter) preventDefault = true;
+                }
+            }
+
+            if(Settings.debug || preventDefault)
+                return "Dude, are you sure you want to leave? Think of the kittens!";
+        }
+
         document.addEventListener('click', __main__, false);
 
         $("form").on("submit", __main__);
     }
+
 
     return Transparent;
 });
