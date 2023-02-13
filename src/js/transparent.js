@@ -12,23 +12,23 @@
 
     window.replaceHash = function(newHash, triggerHashChange = true, skipIfEmptyIdentifier = true) {
 
+        var oldHash = location.hash;
+        var oldURL = location.origin+location.pathname+location.hash;
+        var oldHashElement = $(oldHash);
+
         if(!newHash) newHash = "";
         if (newHash !== "" && (''+newHash).charAt(0) !== '#')
             newHash = '#' + newHash;
-
-        var oldURL = location.origin+location.pathname+location.hash;
         var newURL = location.origin+location.pathname+newHash;
+        var newHashElement = $(newHash);
 
         var fallback  = $(newHash).length === 0;
-
-        var hashElement = $(newHash)[0] ?? undefined;
-        // if (hashElement !== undefined) // Update hash only if element is displayed
-        //     fallback |= window.getComputedStyle(hashElement)["display"] == "none";
+        fallback |= newHashElement.has(oldHashElement).length > 0;
 
         if((skipIfEmptyIdentifier && !newHash) || fallback){
 
             dispatchEvent(new HashChangeEvent("hashfallback", {oldURL:oldURL, newURL:newURL}));
-            newHash = "";
+            newHash = skipIfEmptyIdentifier && !newHash ? "" : (newHashElement.length == 0 ? "" : oldHash);
 
             oldURL = location.origin+location.pathname+location.hash;
             newURL = location.origin+location.pathname+newHash;
