@@ -1438,10 +1438,14 @@
         if (form) {
 
             data = new FormData();
-            var formInput = $("[name^='"+form.name+"\[']");
+            var formInput = $("form[name='"+form.name+"'] :input, [name^='"+form.name+"\[']");
                 formInput.each(function() {
 
-                    if(this.type == "file") {
+                    if(this.tagName == "BUTTON") {
+
+                        if(this == e.target) data.append(this.name, this.value);
+
+                    } else if(this.type == "file") {
 
                         for(var i = 0; i < this.files.length; i++)
                             data.append(this.name, field.files[i]);
@@ -1449,7 +1453,9 @@
                     } else data.append(this.name, this.value);
                 });
 
-            $(form).find(':submit').attr('disabled', 'disabled');
+            $(form).one("submit", function(e) { // Disable form submit button, after all submit events got processed
+                $(form).find(':submit').attr('disabled', 'disabled');
+            });
         }
 
         // Wait for transparent window event to be triggered
@@ -1473,7 +1479,7 @@
 
         // Unsecure url
         if (url.origin != location.origin) return;
-
+return;
         e.preventDefault();
 
         if (url == location) return;
