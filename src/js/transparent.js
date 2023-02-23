@@ -1453,9 +1453,7 @@
                     } else data.append(this.name, this.value);
                 });
 
-            $(form).one("submit", function(e) { // Disable form submit button, after all submit events got processed
-                $(form).find(':submit').attr('disabled', 'disabled');
-            });
+            $(form).find(':submit').attr('disabled', 'disabled');
         }
 
         // Wait for transparent window event to be triggered
@@ -1479,7 +1477,7 @@
 
         // Unsecure url
         if (url.origin != location.origin) return;
-return;
+
         e.preventDefault();
 
         if (url == location) return;
@@ -1648,13 +1646,15 @@ return;
         // It is null when dev is pushing or replacing state
         var addNewState = !e.state;
         if (addNewState) {
-
+            
             if(history.state)
-                Transparent.setResponsePosition(history.state.uuid, Transparent.getScrollableElementXY());
+                Transparent.setResponse(history.state.uuid, Transparent.html[0], Transparent.getScrollableElementXY());
 
             $(Transparent.html).prop("user-scroll", false); // make sure to avoid page jump during transition (cancelled in activeIn callback)
 
             // Submit ajax request..
+            if(form) form.dispatchEvent(new Event("submit"));
+
             var xhr = new XMLHttpRequest();
             return jQuery.ajax({
                 url: url.href,
