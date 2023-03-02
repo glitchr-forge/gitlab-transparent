@@ -419,6 +419,12 @@
         Transparent.configure({'x-ajax-request': true});
         Transparent.configure(options);
 
+        if(Settings.debug) {
+
+            if (Settings.disable) console.debug("Transparent is disabled..");
+            else console.debug("Transparent is running..");
+        }
+
         isReady = true;
 
         dispatchEvent(new Event('transparent:'+Transparent.state.READY));
@@ -1453,7 +1459,7 @@
                     } else if(this.type == "file") {
 
                         for(var i = 0; i < this.files.length; i++)
-                            data.append(this.name, field.files[i]);
+                            data.append(this.name, this.files[i]);
 
                     } else data.append(this.name, this.value);
                 });
@@ -1686,11 +1692,15 @@
     // Overload onpopstate
     if(Settings.disable) {
 
+        if(Settings.debug) console.debug("Transparent is disabled..");
+
         var states    = Object.values(Transparent.state);
         var htmlClass = Array.from(($("html").attr("class") || "").split(" ")).filter(x => !states.includes(x));
         Transparent.html.removeClass(states).addClass(htmlClass.join(" ")+" "+Transparent.state.ROOT+" "+Transparent.state.READY+" "+Transparent.state.DISABLE);
 
     } else {
+
+        if(Settings.debug) console.debug("Transparent is running..");
 
         window.onpopstate   = __main__; // Onpopstate pop out straight to previous page.. this creates a jump while changing pages with hash..
         window.onhashchange = __main__;
@@ -1708,13 +1718,16 @@
                         if(this.type == "file") {
 
                             for(var i = 0; i < this.files.length; i++)
-                                formData.append(this.name, field.files[i]);
+                                formData.append(this.name+"["+i+"]", this.files[i].name+";"+this.files[i].size+";"+this.files[i].lastModified);
 
                         } else formData.append(this.name, this.value);
                     });
 
-                for (var [fieldName,fieldValue] of formData.entries())
-                    formDataBefore[fieldName] = fieldValue;
+                for (var [fieldName,fieldValue] of formData.entries()) {
+
+                    if(!fieldName.endsWith("[]") && fieldName != "undefined")
+                        formDataBefore[fieldName] = fieldValue;
+                }
             });
         });
 
@@ -1734,20 +1747,31 @@
                     if(this.type == "file") {
 
                         for(var i = 0; i < this.files.length; i++)
-                            formData.append(this.name, field.files[i]);
+                            formData.append(this.name+"["+i+"]", this.files[i].name+";"+this.files[i].size+";"+this.files[i].lastModified);
 
                     } else formData.append(this.name, this.value);
                 });
 
                 for (var [fieldName,fieldValue] of formData.entries()) {
-                    formDataAfter[fieldName] = fieldValue;
+
+                    if(!fieldName.endsWith("[]") && fieldName != "undefined")
+                        formDataAfter[fieldName] = fieldValue;
                 }
             });
 
-            var formDataBeforeKeys = Object.entries(formDataBefore).keys();
-            var formDataAfterKeys  = Object.entries(formDataAfter).keys();
+            var formDataBeforeKeys    = Object.keys(formDataBefore);
+            var formDataAfterKeys     = Object.keys(formDataAfter);
+            var formDataBeforeEntries = Object.entries(formDataBefore);
+            var formDataAfterEntries  = Object.entries(formDataAfter);
+            function compare(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+            function compareKeys(a, b) {
 
-            if(formDataAfterKeys != formDataAfterKeys) preventDefault = true;
+                var aKeys = Object.keys(a).sort();
+                var bKeys = Object.keys(b).sort();
+                return JSON.stringify(aKeys) === JSON.stringify(bKeys);
+            }
+
+            if(!compareKeys(formDataBeforeKeys, formDataAfterKeys)) preventDefault = true;
             else {
 
                 for (var [fieldName,fieldValueAfter] of Object.entries(formDataAfter)) {
