@@ -522,10 +522,6 @@
 
             if(el.target && el.target.tagName == "FORM") {
 
-                // Action must be prevented here
-                // This is specific to form submission
-                el.preventDefault();
-
                 var href = el.target.getAttribute("action");
                 if(!href) href = location.pathname + href;
 
@@ -1416,6 +1412,7 @@
         return elementsXY;
     }
 
+    var formSubmission = false;
     function __main__(e) {
 
         // Disable transparent JS (e.g. during development..)
@@ -1434,7 +1431,15 @@
         var target = Transparent.isElement(link[2]) ? link[2] : undefined;
         var data   = Transparent.isElement(link[2]) ? undefined : link[2];
 
+        // Wait for transparent window event to be triggered
+        if (!isReady) return;
+
+        if (e.type != Transparent.state.POPSTATE   &&
+            e.type != Transparent.state.HASHCHANGE && !$(this).find(Settings.identifier).length) return;
+
         var form   = target != undefined && target.tagName == "FORM" ? target : undefined;
+        formSubmission = false;
+
         if (form) {
 
             data = new FormData();
@@ -1453,14 +1458,15 @@
                     } else data.append(this.name, this.value);
                 });
 
-            $(form).find(':submit').attr('disabled', 'disabled');
+            // Force page reload
+            formSubmission = true; // mark as form submission
+
+            if ($(e.target).hasClass(Transparent.state.RELOAD)) return;
+            if ($(form).hasClass(Transparent.state.RELOAD)) return;
+
+            if(e.type == "submit")
+                $(form).find(':submit').attr('disabled', 'disabled');
         }
-
-        // Wait for transparent window event to be triggered
-        if (!isReady) return;
-
-        if (e.type != Transparent.state.POPSTATE   &&
-            e.type != Transparent.state.HASHCHANGE && !$(this).find(Settings.identifier).length) return;
 
         // Specific page exception
         for(i = 0; i < Settings.exceptions.length; i++) {
@@ -1712,8 +1718,9 @@
             });
         });
 
-        window.onbeforeunload = function() {
+        window.onbeforeunload = function(e) {
 
+            if(formSubmission) return; // Do not display on form submission
             if(Settings.disable) return;
 
             var preventDefault = false;
