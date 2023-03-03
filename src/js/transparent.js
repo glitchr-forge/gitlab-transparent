@@ -469,6 +469,10 @@
             case "INPUT":
             case "BUTTON":
                 var form = $(el).closest("form");
+                if (form.length) return form[0];
+
+                var formName = $(el).attr("name").split("[")[0];
+                form = $("form[name="+formName+"]");
                 return (form.length ? form[0] : undefined);
         }
 
@@ -1634,7 +1638,7 @@
 
             dispatchEvent(new Event('transparent:'+switchLayout));
 
-            if($(dom).find("html").hasClass(Transparent.state.RELOAD))
+            if($(dom).find("html").hasClass(Transparent.state.RELOAD) || $(dom).find("html").hasClass(Transparent.state.DISABLE))
                 return window.location.reload();
 
             return Transparent.onLoad(uuid, dom, function() {
@@ -1658,7 +1662,7 @@
         // It is null when dev is pushing or replacing state
         var addNewState = !e.state;
         if (addNewState) {
-            
+
             if(history.state)
                 Transparent.setResponse(history.state.uuid, Transparent.html[0], Transparent.getScrollableElementXY());
 
@@ -1688,6 +1692,9 @@
     var href = history.state ? history.state.href : null;
     if (href != location.origin + location.pathname + location.hash)
         history.replaceState({uuid: uuidv4(), status: history.state ? history.state.status : 200, data:{}, method: history.state ? history.state.method : "GET", href: location.origin + location.pathname + location.hash}, '', location.origin + location.pathname + location.hash);
+
+    if($("html").hasClass(Transparent.state.DISABLE))
+        Settings.disable = true;
 
     // Overload onpopstate
     if(Settings.disable) {
