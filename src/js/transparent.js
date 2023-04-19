@@ -1453,20 +1453,25 @@
         if (form) {
 
             data = new FormData();
-            var formInput = $(form).find(":input, [name^='"+form.name+"\[']");
-                formInput.each(function() {
+            var formAmbiguity = $("form[name='"+form.name+"']").length > 1;
+            
+            var formInput = undefined; // In case of form ambiguity (two form with same name, restrict the data to the target form, if not extends it to each element with standard name)
+            if(formAmbiguity) formInput = $(form).find(":input, [name^='"+form.name+"\[']");
+            else $("form[name='"+form.name+"'] :input, [name^='"+form.name+"\[']");
+                
+            formInput.each(function() {
 
-                    if(this.tagName == "BUTTON") {
+                if(this.tagName == "BUTTON") {
 
-                        if(this == e.target) data.append(this.name, this.value);
+                    if(this == e.target) data.append(this.name, this.value);
 
-                    } else if(this.type == "file") {
+                } else if(this.type == "file") {
 
-                        for(var i = 0; i < this.files.length; i++)
-                            data.append(this.name, this.files[i]);
+                    for(var i = 0; i < this.files.length; i++)
+                        data.append(this.name, this.files[i]);
 
-                    } else data.append(this.name, this.value);
-                });
+                } else data.append(this.name, this.value);
+            });
 
             // Force page reload
             formSubmission = true; // mark as form submission
