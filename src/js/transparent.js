@@ -1453,7 +1453,7 @@
         if (form) {
 
             data = new FormData();
-            var formInput = $("form[name='"+form.name+"'] :input, [name^='"+form.name+"\[']");
+            var formInput = $(form).find(":input, [name^='"+form.name+"\[']");
                 formInput.each(function() {
 
                     if(this.tagName == "BUTTON") {
