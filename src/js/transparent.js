@@ -1457,7 +1457,7 @@
             
             var formInput = undefined; // In case of form ambiguity (two form with same name, restrict the data to the target form, if not extends it to each element with standard name)
             if(formAmbiguity) formInput = $(form).find(":input, [name^='"+form.name+"\[']");
-            else $("form[name='"+form.name+"'] :input, [name^='"+form.name+"\[']");
+            else formInput = $("form[name='"+form.name+"'] :input, [name^='"+form.name+"\[']");
                 
             formInput.each(function() {
 
@@ -1718,7 +1718,7 @@
         window.onhashchange = __main__;
 
         var formDataBefore = {};
-        $(window).on("DOMContentLoaded", function() {
+        $(window).on("load", function() {
 
             formDataBefore = {};
             $("form").each(function() {
@@ -1748,6 +1748,8 @@
             if(formSubmission) return; // Do not display on form submission
             if(Settings.disable) return;
 
+            if(e.currentTarget == window) return;
+
             var preventDefault = false;
             var formDataAfter = [];
             $("form").each(function() {
@@ -1775,15 +1777,15 @@
             var formDataAfterKeys     = Object.keys(formDataAfter);
             var formDataBeforeEntries = Object.entries(formDataBefore);
             var formDataAfterEntries  = Object.entries(formDataAfter);
-            function compare(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
-            function compareKeys(a, b) {
+            function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+            function sameKeys(a, b) {
 
                 var aKeys = Object.keys(a).sort();
                 var bKeys = Object.keys(b).sort();
                 return JSON.stringify(aKeys) === JSON.stringify(bKeys);
             }
 
-            if(!compareKeys(formDataBeforeKeys, formDataAfterKeys)) preventDefault = true;
+            if(!sameKeys(formDataBeforeKeys, formDataAfterKeys)) preventDefault = true;
             else {
 
                 for (var [fieldName,fieldValueAfter] of Object.entries(formDataAfter)) {
@@ -1794,7 +1796,9 @@
                         if(!fieldValueAfter instanceof File) preventDefault = true;
                         else if (fieldValueBefore.size != fieldValueAfter.size) preventDefault = true;
 
-                    } else if(fieldValueBefore != fieldValueAfter) preventDefault = true;
+                    } else if(fieldValueBefore != fieldValueAfter) {
+                        preventDefault = true;
+                    }
                 }
             }
 
