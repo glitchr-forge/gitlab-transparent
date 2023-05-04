@@ -547,7 +547,10 @@
                     return null;
                 }
 
-                if(!form.checkValidity()) return null;
+                if(!$(el).hasClass("skip-validation") && !form.checkValidity()) {
+                    console.error("Invalid form submission.", el);
+                    return null;
+                }
 
                 var pat  = /^https?:\/\//i;
                 if (pat.test(href)) return [method, new URL(href), form];
@@ -589,7 +592,10 @@
                         return null;
                     }
 
-                    if(!form.checkValidity()) return null;
+                    if(!$(el).hasClass("skip-validation") && !form.checkValidity()) {
+                        console.error("Invalid form submission.", el);
+                        return null;
+                    }
 
                     var pat  = /^https?:\/\//i;
                     if (pat.test(href)) return ["POST", new URL(pathname), form];
