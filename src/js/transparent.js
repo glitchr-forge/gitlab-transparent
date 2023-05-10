@@ -1600,11 +1600,22 @@
             }
 
             // Invalid html page returned
-            if(!responseText.includes("<html") || !responseText.includes("<body") || !responseText.includes("<head"))
-                return Transparent.rescue(dom);
+            if(request && request.getResponseHeader("Content-Type") == "text/html") {
 
-            if(status != 200) // Blatant error received..
+                if (!responseText.includes("<html") && !responseText.includes("<body") && !responseText.includes("<head"))
+                    return Transparent.rescue(dom);
+            }
+
+            if(status == 302) {
+
+                if(responseURL) location.href = responseURL;
+                else location.reload();
+
+            } else if(status != 200) {
+
+                // Blatant error received..
                 return Transparent.rescue(dom);
+            }
 
             // From here the page is valid..
             // so the new page is added to history..
