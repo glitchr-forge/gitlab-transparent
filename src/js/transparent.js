@@ -1454,6 +1454,7 @@
             e.type != Transparent.state.HASHCHANGE && !$(this).find(Settings.identifier).length) return;
 
         var form   = target != undefined && target.tagName == "FORM" ? target : undefined;
+        var formTrigger = undefined;
         formSubmission = false;
 
         if (form) {
@@ -1464,7 +1465,7 @@
             var formInput = undefined; // In case of form ambiguity (two form with same name, restrict the data to the target form, if not extends it to each element with standard name)
             if(formAmbiguity) formInput = $(form).find(":input, [name^='"+form.name+"\[']");
             else formInput = $("form[name='"+form.name+"'] :input, [name^='"+form.name+"\[']");
-                
+
             formInput.each(function() {
 
                 if(this.tagName == "BUTTON") {
@@ -1481,7 +1482,7 @@
 
             // Force page reload
             formSubmission = true; // mark as form submission
-
+            formTrigger = e.target;
             if ($(e.target).hasClass(Transparent.state.RELOAD)) return;
             if ($(form).hasClass(Transparent.state.RELOAD)) return;
 
@@ -1691,8 +1692,7 @@
             $(Transparent.html).prop("user-scroll", false); // make sure to avoid page jump during transition (cancelled in activeIn callback)
 
             // Submit ajax request..
-            if(form) form.dispatchEvent(new Event("submit"));
-
+            if(form) form.dispatchEvent(new SubmitEvent("submit", { submitter: formTrigger }));
             var xhr = new XMLHttpRequest();
             return jQuery.ajax({
                 url: url.href,
