@@ -425,6 +425,8 @@
             else console.debug("Transparent is running..");
         }
 
+        if(!isReady) dispatchEvent(new Event('transparent:'+Transparent.state.FIRST));
+
         isReady = true;
 
         dispatchEvent(new Event('transparent:'+Transparent.state.READY));
@@ -832,28 +834,29 @@
             Transparent.callback(function() {
 
                 Transparent.html.removeClass(Transparent.state.ACTIVEOUT);
-                if(!Transparent.html.hasClass(Transparent.state.POSTACTIVE)){
-
-                    Transparent.html.removeClass(Transparent.state.POSTACTIVE);
-                    dispatchEvent(new Event('transparent:'+Transparent.state.POSTACTIVE));
-                }
-
                 if(Transparent.html.hasClass(Transparent.state.LOADING)) {
 
-                    dispatchEvent(new Event('transparent:load'));
+                    dispatchEvent(new Event('transparent:'+Transparent.state.LOAD));
 
                     Object.values(Transparent.state).forEach(e => Transparent.html.removeClass(e));
                     Transparent.html.addClass(Transparent.state.ROOT + " " + Transparent.state.READY);
-
-                } else {
-
-                    Transparent.html.removeClass(Transparent.state.POSTACTIVE);
                 }
+                
+                Transparent.html.addClass(Transparent.state.POSTACTIVE);
+               
+                var active = Transparent.activeTime();
+                Transparent.callback(function() {
+                    
+                    Transparent.html.removeClass(Transparent.state.POSTACTIVE);
+                    dispatchEvent(new Event('transparent:'+Transparent.state.POSTACTIVE));
 
+                }, active.duration+active.delay);
+            
             }, active.duration);
 
         }.bind(this), active.delay);
     }
+
 
     Transparent.replaceCanvases = function(dom) {
 
