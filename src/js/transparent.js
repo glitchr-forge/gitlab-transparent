@@ -1431,6 +1431,7 @@
         return elementsXY;
     }
 
+    var ajaxSemaphore = false;
     var formSubmission = false;
     function __main__(e) {
 
@@ -1489,7 +1490,7 @@
             if ($(e.target).hasClass(Transparent.state.RELOAD)) return;
             if ($(form).hasClass(Transparent.state.RELOAD)) return;
 
-            if(e.type == "submit")
+            if(e.type == "submit") // NB: This doesn't work if a button is generated afterward.. 
                 $(form).find(':submit').attr('disabled', 'disabled');
         }
 
@@ -1511,6 +1512,7 @@
 
         e.preventDefault();
 
+        if (ajaxSemaphore) return;
         if (url == location) return;
 
         if((e.type == Transparent.state.CLICK || e.type == Transparent.state.HASHCHANGE) && url.pathname == location.pathname && url.search == location.search && type != "POST") {
@@ -1546,6 +1548,8 @@
 
         function handleResponse(uuid, status = 200, method = null, data = null, xhr = null, request = null) {
 
+            ajaxSemaphore = false;
+            
             var responseURL;
             responseURL = xhr !== null ? xhr.responseURL : url.href;
 
@@ -1587,6 +1591,7 @@
                 }
 
                 if(form) {
+                    
                     $(form).find(':submit').removeAttr('disabled');
                     form.reset();
                 }
@@ -1697,6 +1702,8 @@
             // Submit ajax request..
             if(form) form.dispatchEvent(new SubmitEvent("submit", { submitter: formTrigger }));
             var xhr = new XMLHttpRequest();
+
+            ajaxSemaphore = true;
             return jQuery.ajax({
                 url: url.href,
                 type: type,
