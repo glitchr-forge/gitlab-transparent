@@ -1,3 +1,10 @@
+// Modern browser: use passive event listeners where appropriate for better performance
+jQuery.event.special.touchstart = { setup: function( _, ns, handle ) { this.addEventListener("touchstart", handle, { passive: !ns.includes("noPreventDefault") }); } };
+jQuery.event.special.touchmove  = { setup: function( _, ns, handle ) { this.addEventListener("touchmove", handle, { passive: !ns.includes("noPreventDefault") }); } };
+jQuery.event.special.wheel      = { setup: function( _, ns, handle ) { this.addEventListener("wheel", handle, { passive: true }); } };
+jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addEventListener("mousewheel", handle, { passive: true }); } };
+
+// Transparent.js
 (function (root, factory) {
 
     if (typeof define === 'function' && define.amd) {
@@ -1495,10 +1502,16 @@
         }
 
         // Specific page exception
-        for(i = 0; i < Settings.exceptions.length; i++) {
-
-            exception = Settings.exceptions[i];
-            if (url.pathname.startsWith(exception)) return;
+        for (let i = 0; i < Settings.exceptions.length; i++) {
+            let exception = Settings.exceptions[i];
+            if (exception instanceof RegExp) {
+                if (exception.test(url.pathname)) return;
+            } else {
+                // Simple wildcard support: * matches any sequence of characters
+                let pattern = exception.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+                let regex = new RegExp('^' + pattern + '$');
+                if (regex.test(url.pathname)) return;
+            }
         }
 
         // Ressources files rejected
@@ -1532,8 +1545,9 @@
         if(e.metaKey && e.shiftKey) return window.open(url, '_blank').focus(); // Safari not focusing..
         if(e.metaKey || $(target).attr("target") == "_blank") return window.open(url, '_blank');
 
-        dispatchEvent(new Event('transparent:onbeforeunload'));
-        dispatchEvent(new Event('onbeforeunload'));
+        // right (still limited by browser policy):
+        dispatchEvent(new Event('transparent:beforeunload'));
+        dispatchEvent(new Event('beforeunload', { cancelable: true }));
 
         $(Transparent.html).prop("user-scroll", true);
         $(Transparent.html).stop();
@@ -1772,6 +1786,8 @@
 
         window.onbeforeunload = function(e) {
 
+            if(Settings.debug) console.log("Transparent onbeforeunload event called..");
+
             if(formSubmission) return; // Do not display on form submission
             if(Settings.disable) return;
 
@@ -1802,8 +1818,6 @@
 
             var formDataBeforeKeys    = Object.keys(formDataBefore);
             var formDataAfterKeys     = Object.keys(formDataAfter);
-            var formDataBeforeEntries = Object.entries(formDataBefore);
-            var formDataAfterEntries  = Object.entries(formDataAfter);
             function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
             function sameKeys(a, b) {
 
