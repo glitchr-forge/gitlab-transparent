@@ -315,7 +315,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             responseText = responseText.outerHTML;
 
         var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
-        if( ! (uuid in array) ) {
+        if (!array.includes(uuid)) {
 
             array.push(uuid);
             while(array.length > Settings["response_limit"])
@@ -873,7 +873,6 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         }.bind(this), active.delay);
     }
 
-
     Transparent.replaceCanvases = function(dom) {
 
         // Extract existing canvas to avoid redrawing them.. (time consuming)
@@ -1378,7 +1377,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
     Transparent.remToPixel     = function(rem)     { return parseFloat(rem) * parseFloat(getComputedStyle(document.documentElement).fontSize); }
     Transparent.emToPixel      = function(em, el)  { return parseFloat(em ) * parseFloat(getComputedStyle(el.parentElement).fontSize); }
-    Transparent.percentToPixel = function(p , el)  { return parseFloat(p  ) * el.outerWidth(); }
+    Transparent.percentToPixel = function(p , el)  { return parseFloat(p  ) * $(el).outerWidth(); }
     Transparent.parseToPixel   = function(str, el) {
 
         if(str === undefined) return undefined;
