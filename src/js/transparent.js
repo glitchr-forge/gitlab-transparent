@@ -26,6 +26,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         if(!newHash) newHash = "";
         if (newHash !== "" && (''+newHash).charAt(0) !== '#')
             newHash = '#' + newHash;
+
         var newURL = location.origin+location.pathname+newHash;
         var newHashElement = $(newHash);
 
@@ -161,7 +162,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
     var Transparent = window.Transparent = {};
     Transparent.version = '0.1.0';
-
+    
     var Settings = Transparent.settings = {
         "headers": {},
         "data": {},
@@ -442,11 +443,16 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         Transparent.addLayout();
         Transparent.lazyLoad();
 
-        Transparent.scrollToHash(location.hash, {}, function() {
+        const scrollTop = document.documentElement.scrollTop || document.body.scrollTop;
+        const scrollLeft = document.documentElement.scrollLeft || document.body.scrollLeft;
+        window.previousScroll = {top: scrollTop, left: scrollLeft};
 
-            Transparent.activeOut(() => Transparent.html.removeClass(Transparent.state.FIRST));
-        });
-
+        if($(Transparent.html).hasClass(Transparent.state.FIRST)) {
+            Transparent.scrollToHash(location.hash, {}, function() {
+                Transparent.activeOut(() => Transparent.html.removeClass(Transparent.state.FIRST));
+            });
+        }
+        
         return this;
     };
 
@@ -544,6 +550,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 var href = el.target.getAttribute("action");
                 if(!href) href = location.pathname + href;
 
+
                 if (href.startsWith("#")) href = location.pathname + href;
                 if (href.endsWith  ("#")) href = href.slice(0, -1);
 
@@ -558,6 +565,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
                 if(!$(el).hasClass("skip-validation") && !form.checkValidity()) {
                     console.error("Invalid form submission.", el);
+                    form.classList.add('was-validated');
                     return null;
                 }
 
@@ -603,6 +611,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
                     if(!$(el).hasClass("skip-validation") && !form.checkValidity()) {
                         console.error("Invalid form submission.", el);
+                        form.classList.add('was-validated');
                         return null;
                     }
 
@@ -843,7 +852,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 Transparent.html.removeClass(Transparent.state.ACTIVEOUT);
                 if(Transparent.html.hasClass(Transparent.state.LOADING)) {
 
-                    dispatchEvent(new Event('transparent:'+Transparent.state.LOAD));
+                    dispatchEvent(new Event('transparent:'+Transparent.state.LOADING));
 
                     Object.values(Transparent.state).forEach(e => Transparent.html.removeClass(e));
                     Transparent.html.addClass(Transparent.state.ROOT + " " + Transparent.state.READY);
@@ -952,69 +961,73 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
     Transparent.userScroll = function(el = undefined) { return $(el === undefined ? document.documentElement : el).closestScrollable().prop("user-scroll") ?? true; }
     Transparent.scrollTo = function(dict, el = window, callback = function() {})
     {
-        el = $(el).length ? $(el)[0] : window;
-        if (el === window  )
-            el = document.documentElement;
-        if (el === document)
-            el = document.documentElement;
+        setTimeout(function() {
 
-        var maxScrollX = $(el).prop("scrollWidth") - Math.round($(el).prop("clientWidth"));
-        if (maxScrollX == 0) maxScrollX = Math.round($(el).prop("clientWidth"));
-        var maxScrollY = $(el).prop("scrollHeight") - Math.round($(el).prop("clientHeight"));
-        if (maxScrollY == 0) maxScrollY = Math.round($(el).prop("clientHeight"));
+            el = $(el).length ? $(el)[0] : window;
+            if (el === window  )
+                el = document.documentElement;
+            if (el === document)
+                el = document.documentElement;
 
-        scrollTop  = Math.max(0, Math.min(dict["top"] ?? $(el).prop("scrollTop"), maxScrollY));
-        scrollLeft = Math.max(0, Math.min(dict["left"] ?? $(el).prop("scrollLeft"), maxScrollX));
+            var maxScrollX = $(el).prop("scrollWidth") - Math.round($(el).prop("clientWidth"));
+            if (maxScrollX == 0) maxScrollX = Math.round($(el).prop("clientWidth"));
+            var maxScrollY = $(el).prop("scrollHeight") - Math.round($(el).prop("clientHeight"));
+            if (maxScrollY == 0) maxScrollY = Math.round($(el).prop("clientHeight"));
 
-        speed    = parseFloat(dict["speed"] ?? 0);
-        easing   = dict["easing"] ?? "swing";
-        debounce = dict["debounce"] ?? 0;
+            scrollTop  = Math.max(0, Math.min(dict["top"] ?? $(el).prop("scrollTop"), maxScrollY));
+            scrollLeft = Math.max(0, Math.min(dict["left"] ?? $(el).prop("scrollLeft"), maxScrollX));
 
-        duration  = 1000*Transparent.parseDuration(dict["duration"] ?? 0);
-        durationX = 1000*Transparent.parseDuration(dict["duration-x"] ?? dict["duration"] ?? 0);
-        durationY = 1000*Transparent.parseDuration(dict["duration-y"] ?? dict["duration"] ?? 0);
+            speed    = parseFloat(dict["speed"] ?? 0);
+            easing   = dict["easing"] ?? "swing";
+            debounce = dict["debounce"] ?? 0;
 
-        if(speed) {
+            duration  = 1000*Transparent.parseDuration(dict["duration"] ?? 0);
+            durationX = 1000*Transparent.parseDuration(dict["duration-x"] ?? dict["duration"] ?? 0);
+            durationY = 1000*Transparent.parseDuration(dict["duration-y"] ?? dict["duration"] ?? 0);
 
-            var currentScrollX = $(el)[0].scrollLeft;
-            if(currentScrollX < scrollLeft || scrollLeft == 0) // Going to the right
-                distanceX = Math.abs(scrollLeft - currentScrollX);
-            else // Going back to 0 position
-                distanceX = currentScrollX;
+            if(speed) {
 
-            var currentScrollY = $(el)[0].scrollTop;
-            if(currentScrollY <= scrollTop || scrollTop == 0) // Going to the right
-                distanceY = Math.abs(scrollTop - currentScrollY);
-            else // Going back to 0 position
-                distanceY = currentScrollY;
+                var currentScrollX = $(el)[0].scrollLeft;
+                if(currentScrollX < scrollLeft || scrollLeft == 0) // Going to the right
+                    distanceX = Math.abs(scrollLeft - currentScrollX);
+                else // Going back to 0 position
+                    distanceX = currentScrollX;
 
-            durationX = speed ? 1000*distanceX/speed : durationX;
-            durationY = speed ? 1000*distanceY/speed : durationY;
-            duration = durationX+durationY;
-        }
+                var currentScrollY = $(el)[0].scrollTop;
+                if(currentScrollY <= scrollTop || scrollTop == 0) // Going to the right
+                    distanceY = Math.abs(scrollTop - currentScrollY);
+                else // Going back to 0 position
+                    distanceY = currentScrollY;
 
-        var callbackWrapper = function() {
+                durationX = speed ? 1000*distanceX/speed : durationX;
+                durationY = speed ? 1000*distanceY/speed : durationY;
+                duration = durationX+durationY;
+            }
 
-            el.dispatchEvent(new Event('scroll'));
-            callback();
+            var callbackWrapper = function() {
 
-            $(el).prop("user-scroll", true);
-        };
+                el.dispatchEvent(new Event('scroll'));
+                callback();
 
-        if(duration == 0) {
+                $(el).prop("user-scroll", true);
+            };
 
-            el.scrollTo(scrollLeft, scrollTop);
-            el.dispatchEvent(new Event('scroll'));
-            callback();
+            if(duration == 0) {
 
-            $(el).prop("user-scroll", true);
+                el.scrollTo(scrollLeft, scrollTop);
+                el.dispatchEvent(new Event('scroll'));
+                callback();
 
-        } else {
+                $(el).prop("user-scroll", true);
 
-            $(el).animate({scrollTop: scrollTop}, durationY, easing,
-                () => $(el).animate({scrollLeft: scrollLeft}, durationX, easing, Transparent.debounce(callbackWrapper, debounce))
-            );
-        }
+            } else {
+
+                $(el).stop(true).animate({scrollTop: scrollTop}, durationY, easing,
+                    () => $(el).stop(true).animate({scrollLeft: scrollLeft}, durationX, easing, Transparent.debounce(callbackWrapper, debounce))
+                );
+            }
+
+        }.bind(this), 1);
 
         return this;
     }
@@ -1200,6 +1213,14 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         window.previousHash     = window.location.hash;
         window.previousLocation = window.location.toString();
         if(callback === null) callback = function() {};
+
+        $(Transparent.html).data("autoscroll-prevent", false);
+        $(Transparent.html).off("wheel.autoscroll DOMMouseScroll.autoscroll mousewheel.autoscroll touchstart.autoscroll");
+        $(Transparent.html).on("wheel.autoscroll DOMMouseScroll.autoscroll mousewheel.autoscroll touchstart.autoscroll", function(e) {
+
+            $(this).prop("user-scroll", true);
+            $(this).stop();
+        });
 
         activeInRemainingTime = activeInRemainingTime - (Date.now() - activeInTime);
         setTimeout(function() {
@@ -1393,26 +1414,30 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
     Transparent.scrollToHash = function(hash = window.location.hash, options = {}, callback = function() {}, el = window)
     {
-        if (hash !== "") {
+        setTimeout(function() {
 
-            if ((''+hash).charAt(0) !== '#')
-                hash = '#' + hash;
+            if (hash !== "") {
 
-            var hashElement = $(hash)[0] ?? undefined;
-            if (hashElement !== undefined) {
+                if ((''+hash).charAt(0) !== '#')
+                    hash = '#' + hash;
 
-                var scrollTop  = hashElement.getBoundingClientRect().top  + document.documentElement.scrollTop - Transparent.getScrollPadding().top;
-                var scrollLeft = hashElement.getBoundingClientRect().left + document.documentElement.scrollLeft - Transparent.getScrollPadding().left;
+                var hashElement = $(hash)[0] ?? undefined;
+                if (hashElement !== undefined) {
 
-                options = Object.assign({duration: Settings["smoothscroll_duration"], speed: Settings["smoothscroll_speed"]}, options, {left:scrollLeft, top:scrollTop});
+                    var scrollTop  = hashElement.getBoundingClientRect().top  + document.documentElement.scrollTop - Transparent.getScrollPadding().top;
+                    var scrollLeft = hashElement.getBoundingClientRect().left + document.documentElement.scrollLeft - Transparent.getScrollPadding().left;
+
+                    options = Object.assign({duration: Settings["smoothscroll_duration"], speed: Settings["smoothscroll_speed"]}, options, {left:scrollLeft, top:scrollTop});
+                }
+
+                var bottomReach = document.body.scrollHeight - (window.scrollY + window.innerHeight) < 1;
+                var bottomOverflow = scrollTop > window.scrollY + window.innerHeight;
             }
 
-            var bottomReach = document.body.scrollHeight - (window.scrollY + window.innerHeight) < 1;
-            var bottomOverflow = scrollTop > window.scrollY + window.innerHeight;
-        }
-
-        if(hash === "" || (bottomReach && bottomOverflow)) callback({}, el);
-        else Transparent.scrollTo(options, el, callback);
+            if(hash === "" || (bottomReach && bottomOverflow)) callback({}, el);
+            else Transparent.scrollTo(options, el, callback);
+        
+        }.bind(this), 1); // minimal delay to ensure the element is rendered
 
         return this;
     }
@@ -1447,7 +1472,10 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
         // Determine link
         const link = Transparent.findLink(e);
-        if   (link == null) return;
+        if (link == null) {
+            e.preventDefault();
+            return;
+        }
 
         dispatchEvent(new CustomEvent('transparent:link', {link:link}));
 
@@ -1510,7 +1538,9 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 // Simple wildcard support: * matches any sequence of characters
                 let pattern = exception.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
                 let regex = new RegExp('^' + pattern + '$');
-                if (regex.test(url.pathname)) return;
+                if (regex.test(url.pathname)) {
+                    return;
+                }
             }
         }
 
@@ -1534,7 +1564,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             Transparent.scrollToHash(url.hash ?? "", {easing:Settings["smoothscroll_easing"], duration:Settings["smoothscroll_duration"], speed:Settings["smoothscroll_speed"]}, function() {
 
                 if (e.target != undefined && $(e.target).data("skip-hash") != true)
-                    window.replaceHash(url.hash);
+                    window.location.hash = url.hash;
 
             }, $(e.target).closestScrollable());
 
