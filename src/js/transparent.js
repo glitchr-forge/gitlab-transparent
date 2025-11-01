@@ -179,7 +179,8 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         "smoothscroll_duration": "200ms",
         "smoothscroll_speed"   : 0,
         "smoothscroll_easing"  : "swing",
-        "exceptions": []
+        "exceptions": [],
+        "headlock": [],
     };
 
     const State = Transparent.state = {
@@ -1223,17 +1224,59 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
         activeInRemainingTime = activeInRemainingTime - (Date.now() - activeInTime);
         setTimeout(function() {
-
+  
             // Transfert attributes
             Transparent.transferAttributes(dom);
+            function isHeadLocked(el) {
+                
+                // only for <script>, <link>, etc. that carry a URL
+                const raw = (el.getAttribute("src") || el.getAttribute("href") || "").trim();
+                if (!raw) return false;
+
+                // normalize to an absolute href string
+                let href = raw;
+                try { href = new URL(raw, location.href).href; } catch {}
+
+                return Settings.headlock.some((rule) => {
+                    if (rule instanceof RegExp) {
+                        return rule.test(href); // <= test against the string, not url.href
+                    }
+
+                    if (typeof rule === "string") {
+
+                        if (rule.includes("*")) {
+                            const pattern = "^" + rule
+                            .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+                            .replace(/\*/g, ".*") + "$";
+                            return new RegExp(pattern).test(href);
+                        }
+                        
+                        // No wildcard: treat as origin/prefix
+                        // If rule parses as a URL, compare origins; otherwise do simple prefix
+                        try {
+                            const r = new URL(rule, location.href);
+                            const u = new URL(href);
+                            // Match same origin, OR rule is a full URL prefix of href
+                            return (u.origin === r.origin) || href.startsWith(r.href);
+                        } catch {
+                            return href.startsWith(rule);
+                        }
+                    }
+
+                    return false;
+                });
+            }
 
             // Replace head..
             var head = $(dom).find("head");
             $("head").children().each(function() {
 
                 var el   = this;
+                if (isHeadLocked(el)) {
+                    return;
+                }
+                
                 var found = false;
-
                 head.children().each(function() {
 
                     found = this.isEqualNode(el);
@@ -1250,7 +1293,6 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
                 $("head").children().each(function() { found |= this.isEqualNode(el); });
                 if(!found) {
-
 
                     if(this.tagName != "SCRIPT" || Settings["global_code"] == true) {
 
