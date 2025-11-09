@@ -26,8 +26,8 @@ img[data-src]:not(.loaded) {
 {
 	animation: blink 5s infinite;
 
-	width:100vw;
-	height: 100vh;
+	width:75vw;
+	height: 75vh;
 
 	background-image:url("../images/error.svg");
 	background-position: center;
