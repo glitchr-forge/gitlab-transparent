@@ -578,7 +578,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             }
         }
 
-        closestEl = $(el).closest("a");
+        var closestEl = $(el).closest("a");
         if(!closestEl.length) closestEl = $(el).closest("button");
         if(!closestEl.length) closestEl = $(el).closest("input");
         if (closestEl.length) el = closestEl[0];
@@ -977,19 +977,19 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             var maxScrollY = $(el).prop("scrollHeight") - Math.round($(el).prop("clientHeight"));
             if (maxScrollY == 0) maxScrollY = Math.round($(el).prop("clientHeight"));
 
-            scrollTop  = Math.max(0, Math.min(dict["top"] ?? $(el).prop("scrollTop"), maxScrollY));
-            scrollLeft = Math.max(0, Math.min(dict["left"] ?? $(el).prop("scrollLeft"), maxScrollX));
+            var scrollTop  = Math.max(0, Math.min(dict["top"] ?? $(el).prop("scrollTop"), maxScrollY));
+            var scrollLeft = Math.max(0, Math.min(dict["left"] ?? $(el).prop("scrollLeft"), maxScrollX));
 
-            speed    = parseFloat(dict["speed"] ?? 0);
-            easing   = dict["easing"] ?? "swing";
-            debounce = dict["debounce"] ?? 0;
+            var speed    = parseFloat(dict["speed"] ?? 0);
+            var easing   = dict["easing"] ?? "swing";
+            var debounce = dict["debounce"] ?? 0;
 
-            duration  = 1000*Transparent.parseDuration(dict["duration"] ?? 0);
-            durationX = 1000*Transparent.parseDuration(dict["duration-x"] ?? dict["duration"] ?? 0);
-            durationY = 1000*Transparent.parseDuration(dict["duration-y"] ?? dict["duration"] ?? 0);
+            var duration  = 1000*Transparent.parseDuration(dict["duration"] ?? 0);
+            var durationX = 1000*Transparent.parseDuration(dict["duration-x"] ?? dict["duration"] ?? 0);
+            var durationY = 1000*Transparent.parseDuration(dict["duration-y"] ?? dict["duration"] ?? 0);
 
             if(speed) {
-
+ 
                 var currentScrollX = $(el)[0].scrollLeft;
                 if(currentScrollX < scrollLeft || scrollLeft == 0) // Going to the right
                     distanceX = Math.abs(scrollLeft - currentScrollX);
@@ -1322,7 +1322,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 var scrollableElements   = Transparent.getScrollableElement();
                 var scrollableElementsXY = Transparent.getResponsePosition(uuid);
 
-                for(i = 0; i < scrollableElements.length; i++) {
+                for(var i = 0; i < scrollableElements.length; i++) {
 
                     var el = scrollableElements[i];
                     var positionXY = undefined;
@@ -1460,7 +1460,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         var elementsXY = [];
         var elements = Transparent.getScrollableElement();
 
-        for(i = 0; i < elements.length; i++)
+        for(var i = 0; i < elements.length; i++)
             elementsXY.push([$(elements[i]).scrollTop(), $(elements[i]).scrollLeft()]);
 
         return elementsXY;
@@ -1600,7 +1600,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             var responseURL;
             responseURL = xhr !== null ? xhr.responseURL : url.href;
 
-            responseText  = Transparent.getResponseText(uuid);
+            var responseText  = Transparent.getResponseText(uuid);
 
             var fragmentPos = responseURL.indexOf("#");
             var strippedResponseUrl = (fragmentPos < 0 ? responseURL : responseURL.substring(0, fragmentPos)).trimEnd("/");
