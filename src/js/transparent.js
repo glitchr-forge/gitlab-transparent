@@ -1,3 +1,5 @@
+import $ from 'jquery';
+
 // Modern browser: use passive event listeners where appropriate for better performance
 jQuery.event.special.touchstart = { setup: function( _, ns, handle ) { this.addEventListener("touchstart", handle, { passive: !ns.includes("noPreventDefault") }); } };
 jQuery.event.special.touchmove  = { setup: function( _, ns, handle ) { this.addEventListener("touchmove", handle, { passive: !ns.includes("noPreventDefault") }); } };
@@ -12,6 +14,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
     } else if (typeof exports === 'object') {
         module.exports = factory();
     } else {
+        root = window;
         root.Transparent = factory();
     }
 
