@@ -893,7 +893,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             } else {
 
                 if(dom === undefined)
-                    console.alert("Response missing..");
+                    console.error("Response missing..");
 
                 var parent = Transparent.findElementFromParents(dom, $(this).parents(), 3);
                 if (parent === undefined) {
@@ -1492,8 +1492,10 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // Wait for transparent window event to be triggered
         if (!isReady) return;
 
-        if (e.type != Transparent.state.POPSTATE   &&
-            e.type != Transparent.state.HASHCHANGE && !$(this).find(Settings.identifier).length) return;
+        const $ctx = (e.type === Transparent.state.SUBMIT) ? $(document) : $(this);
+        if (e.type !== Transparent.state.POPSTATE   &&
+            e.type !== Transparent.state.HASHCHANGE &&
+            !$ctx.find(Settings.identifier).length) return;
 
         var form   = target != undefined && target.tagName == "FORM" ? target : undefined;
         var formTrigger = undefined;
@@ -1593,35 +1595,34 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             catch (e) { return false; }
         }
 
-        function handleResponse(uuid, status = 200, method = null, data = null, xhr = null, request = null) {
+        function handleResponse(uuid, status = 200, method = null, data = null, responseURL = null, contentType = null, fetchedResponseText = null) {
 
             ajaxSemaphore = false;
-            
-            var responseURL;
-            responseURL = xhr !== null ? xhr.responseURL : url.href;
+
+            responseURL = responseURL ?? url.href;
 
             var responseText  = Transparent.getResponseText(uuid);
 
-            var fragmentPos = responseURL.indexOf("#");
-            var strippedResponseUrl = (fragmentPos < 0 ? responseURL : responseURL.substring(0, fragmentPos)).trimEnd("/");
+            const fragmentPosResp = responseURL.indexOf("#");
+            var strippedResponseUrl = (fragmentPosResp < 0 ? responseURL : responseURL.substring(0, fragmentPosResp)).trimEnd("/");
 
-            var fragmentPos = url.href.indexOf("#");
-            var strippedUrlHref = (fragmentPos < 0 ? url.href : url.href.substring(0, fragmentPos)).trimEnd("/");
+            const fragmentPosReq = url.href.indexOf("#");
+            var strippedUrlHref = (fragmentPosReq < 0 ? url.href : url.href.substring(0, fragmentPosReq)).trimEnd("/");
             if( strippedUrlHref == strippedResponseUrl )
-                responseURL = url.href; // NB: xhr.responseURL strips away #fragments
+                responseURL = url.href; // NB: fetch response.url strips away #fragments
 
             if(!responseText) {
 
-                if(!request && responseText === null) {
+                if(!fetchedResponseText && responseText === null) {
 
                     setTimeout(function() { window.location.href = responseURL; }, Settings["throttle"]);
                     return;
                 }
 
-                responseText = request.responseText;
+                responseText = fetchedResponseText;
                 if(status >= 500) {
 
-                    console.error("Unexpected XHR response from "+uuid+": error code "+request.status);
+                    console.error("Unexpected response from "+uuid+": error code "+status);
                     console.error(sessionStorage);
                 }
 
@@ -1630,7 +1631,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             }
 
             var dom = new DOMParser().parseFromString(responseText, "text/html");
-            if(request && request.getResponseHeader("Content-Type") == "application/json") {
+            if(contentType && contentType.includes("application/json")) {
 
                 if(!isJsonResponse(responseText)) {
                     console.error("Invalid response received for "+ responseURL);
@@ -1656,7 +1657,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             }
 
             // Invalid html page returned
-            if(request && request.getResponseHeader("Content-Type") == "text/html") {
+            if(contentType && contentType.includes("text/html")) {
 
                 if (!responseText.includes("<html") && !responseText.includes("<body") && !responseText.includes("<head"))
                     return Transparent.rescue(dom);
@@ -1675,7 +1676,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
             // From here the page is valid..
             // so the new page is added to history..
-            if(xhr)
+            if(fetchedResponseText !== null)
                 history.pushState({uuid: uuid, status:status, method: method, data: {}, href: responseURL}, '', responseURL);
 
             // Page not recognized.. just go fetch by yourself.. no POST information transmitted..
@@ -1747,20 +1748,20 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             $(Transparent.html).prop("user-scroll", false); // make sure to avoid page jump during transition (cancelled in activeIn callback)
 
             // Submit ajax request..
+            ajaxSemaphore = true; // Raise before dispatching synthetic submit to prevent double-submission
             if(form) form.dispatchEvent(new SubmitEvent("submit", { submitter: formTrigger }));
-            var xhr = new XMLHttpRequest();
 
-            ajaxSemaphore = true;
-            return jQuery.ajax({
-                url: url.href,
-                type: type,
-                data: data,
-                contentType: false,
-                processData: false,
-                headers: Settings["headers"] || {},
-                xhr: function () { return xhr; },
-                success: function (html, status, request) { return handleResponse(uuid, request.status, type, data, xhr, request); },
-                error:   function (request, ajaxOptions, thrownError) { return handleResponse(uuid, request.status, type, data, xhr, request); }
+            return fetch(url.href, {
+                method: type,
+                body: type === "GET" ? undefined : data,
+                headers: Settings["headers"] || {}
+            })
+            .then(async (response) => {
+                const responseText = await response.text();
+                return handleResponse(uuid, response.status, type, data, response.url, response.headers.get("Content-Type"), responseText);
+            })
+            .catch(() => {
+                handleResponse(uuid, 500, type, data, url.href, null, null);
             });
         }
 
@@ -1780,8 +1781,8 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
         if(Settings.debug) console.debug("Transparent is disabled..");
 
-        var states    = Object.values(Transparent.state);
-        var htmlClass = Array.from(($("html").attr("class") || "").split(" ")).filter(x => !states.includes(x));
+        const statesSet = new Set(Object.values(Transparent.state));
+        const htmlClass = ($("html").attr("class") || "").split(" ").filter(x => !statesSet.has(x));
         Transparent.html.removeClass(states).addClass(htmlClass.join(" ")+" "+Transparent.state.ROOT+" "+Transparent.state.READY+" "+Transparent.state.DISABLE);
 
     } else {
@@ -1867,7 +1868,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                     var fieldValueBefore = formDataBefore[fieldName];
                     if(fieldValueBefore instanceof File) {
 
-                        if(!fieldValueAfter instanceof File) preventDefault = true;
+                        if(!(fieldValueAfter instanceof File)) preventDefault = true;
                         else if (fieldValueBefore.size != fieldValueAfter.size) preventDefault = true;
 
                     } else if(fieldValueBefore != fieldValueAfter) {
@@ -1888,7 +1889,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
         document.addEventListener('click', __main__, false);
 
-        $("form").on("submit", __main__);
+        $(document).on("submit", "form", __main__);
     }
 
 
