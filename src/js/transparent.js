@@ -989,7 +989,8 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             var durationY = 1000*Transparent.parseDuration(dict["duration-y"] ?? dict["duration"] ?? 0);
 
             if(speed) {
- 
+                var distanceX = 0, distanceY = 0;
+
                 var currentScrollX = $(el)[0].scrollLeft;
                 if(currentScrollX < scrollLeft || scrollLeft == 0) // Going to the right
                     distanceX = Math.abs(scrollLeft - currentScrollX);
