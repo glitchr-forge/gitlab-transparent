@@ -182,7 +182,48 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         "smoothscroll_duration": "200ms",
         "smoothscroll_speed"   : 0,
         "smoothscroll_easing"  : "swing",
-        "exceptions": []
+        "exceptions": [],
+        // headlock: list of url substrings/regex to preserve in <head> across page transitions
+        // (e.g. third-party widgets like Brevo that inject <style>/<link> dynamically).
+        // In addition, head nodes injected dynamically AFTER initial DOMContentLoaded are
+        // preserved automatically. Use data-headlock="false" on a head element to opt-out.
+        "headlock": []
+    };
+
+    // Set of <head> children present on initial load. Anything added after is treated
+    // as dynamically injected (e.g. Brevo widget) and preserved across transitions.
+    var originalHeadNodes = new WeakSet();
+    function snapshotHeadNodes() {
+        var head = document.head;
+        if(!head) return;
+        for(var i = 0; i < head.children.length; i++)
+            originalHeadNodes.add(head.children[i]);
+    }
+    if(document.readyState === "loading")
+        document.addEventListener("DOMContentLoaded", snapshotHeadNodes, { once: true });
+    else
+        snapshotHeadNodes();
+
+    Transparent.isHeadlocked = function(el) {
+        if(!el || el.nodeType !== 1) return false;
+        // Explicit opt-out
+        var attr = el.getAttribute && el.getAttribute("data-headlock");
+        if(attr === "false") return false;
+        // Explicit opt-in via attribute
+        if(attr !== null && attr !== undefined) return true;
+        // Dynamically injected after initial load
+        if(!originalHeadNodes.has(el)) return true;
+        // URL pattern match
+        var patterns = Settings["headlock"] || [];
+        if(!patterns.length) return false;
+        var url = el.getAttribute && (el.getAttribute("src") || el.getAttribute("href"));
+        if(!url) return false;
+        for(var i = 0; i < patterns.length; i++) {
+            var p = patterns[i];
+            if(p instanceof RegExp) { if(p.test(url)) return true; }
+            else if(typeof p === "string" && p.length && url.indexOf(p) !== -1) return true;
+        }
+        return false;
     };
 
     const State = Transparent.state = {
@@ -282,37 +323,6 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
     }
 
     Transparent.setResponse = function(uuid, responseText, scrollableXY = [], exceptionRaised = false)
-    {
-        if(isDomEntity(responseText))
-            responseText = responseText.outerHTML;
-
-        var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
-        array.push(uuid);
-
-        while(array.length > Settings["response_limit"])
-            sessionStorage.removeItem('transparent['+array.shift()+']');
-
-        try {
-
-            if(isLocalStorageNameSupported()) {
-
-                sessionStorage.setItem('transparent', JSON.stringify(array));
-                sessionStorage.setItem('transparent[response]['+uuid+']', responseText);
-                sessionStorage.setItem('transparent[position]['+uuid+']', JSON.stringify(scrollableXY));
-            }
-
-        } catch(e) {
-
-            if (e.name === 'QuotaExceededError')
-                sessionStorage.clear();
-
-            return exceptionRaised === false ? Transparent.setResponse(uuid, responseText, scrollableXY, true) : this;
-        }
-
-        return this;
-    }
-
-    Transparent.setResponse = function(uuid, responseText, scrollableXY, exceptionRaised = false)
     {
         if(isDomEntity(responseText))
             responseText = responseText.outerHTML;
@@ -943,7 +953,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         var head = $(dom).find("head").html();
         var body = $(dom).find("body").html();
 
-        if(head == undefined || body == "undefined") {
+        if(head == undefined || body == undefined) {
 
             $(Settings.identifier).html("<div class='error'></div>");
 
@@ -1245,6 +1255,9 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                     return !found;
                 });
 
+                // Preserve headlocked nodes (dynamically injected widgets, url-matched, etc.)
+                if(!found && Transparent.isHeadlocked(el)) found = true;
+
                 if(!found) this.remove();
             });
 
@@ -1481,7 +1494,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             return;
         }
 
-        dispatchEvent(new CustomEvent('transparent:link', {link:link}));
+        dispatchEvent(new CustomEvent('transparent:link', {detail: {link: link}}));
 
         const uuid   = uuidv4();
         const type   = link[0];
