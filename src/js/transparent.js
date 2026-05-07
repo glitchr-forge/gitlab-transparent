@@ -1,5 +1,3 @@
-import $ from 'jquery';
-
 // Modern browser: use passive event listeners where appropriate for better performance
 jQuery.event.special.touchstart = { setup: function( _, ns, handle ) { this.addEventListener("touchstart", handle, { passive: !ns.includes("noPreventDefault") }); } };
 jQuery.event.special.touchmove  = { setup: function( _, ns, handle ) { this.addEventListener("touchmove", handle, { passive: !ns.includes("noPreventDefault") }); } };
@@ -14,7 +12,6 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
     } else if (typeof exports === 'object') {
         module.exports = factory();
     } else {
-        root = window;
         root.Transparent = factory();
     }
 
@@ -199,10 +196,13 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         for(var i = 0; i < head.children.length; i++)
             originalHeadNodes.add(head.children[i]);
     }
-    if(document.readyState === "loading")
+    // Snapshot synchronously at module-eval time (scripts at end of <body> run before any
+    // async script — e.g. Brevo — can inject <style> tags, so the snapshot is clean).
+    // A DOMContentLoaded fallback is kept for the rare case where document.head is null
+    // (e.g. script loaded inside <head> before it finishes parsing).
+    snapshotHeadNodes();
+    if(!document.head)
         document.addEventListener("DOMContentLoaded", snapshotHeadNodes, { once: true });
-    else
-        snapshotHeadNodes();
 
     Transparent.isHeadlocked = function(el) {
         if(!el || el.nodeType !== 1) return false;
@@ -224,7 +224,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             else if(typeof p === "string" && p.length && url.indexOf(p) !== -1) return true;
         }
         return false;
-    };
+    }
 
     const State = Transparent.state = {
 
@@ -323,6 +323,37 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
     }
 
     Transparent.setResponse = function(uuid, responseText, scrollableXY = [], exceptionRaised = false)
+    {
+        if(isDomEntity(responseText))
+            responseText = responseText.outerHTML;
+
+        var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
+        array.push(uuid);
+
+        while(array.length > Settings["response_limit"])
+            sessionStorage.removeItem('transparent['+array.shift()+']');
+
+        try {
+
+            if(isLocalStorageNameSupported()) {
+
+                sessionStorage.setItem('transparent', JSON.stringify(array));
+                sessionStorage.setItem('transparent[response]['+uuid+']', responseText);
+                sessionStorage.setItem('transparent[position]['+uuid+']', JSON.stringify(scrollableXY));
+            }
+
+        } catch(e) {
+
+            if (e.name === 'QuotaExceededError')
+                sessionStorage.clear();
+
+            return exceptionRaised === false ? Transparent.setResponse(uuid, responseText, scrollableXY, true) : this;
+        }
+
+        return this;
+    }
+
+    Transparent.setResponse = function(uuid, responseText, scrollableXY, exceptionRaised = false)
     {
         if(isDomEntity(responseText))
             responseText = responseText.outerHTML;
@@ -588,7 +619,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             }
         }
 
-        var closestEl = $(el).closest("a");
+        closestEl = $(el).closest("a");
         if(!closestEl.length) closestEl = $(el).closest("button");
         if(!closestEl.length) closestEl = $(el).closest("input");
         if (closestEl.length) el = closestEl[0];
@@ -903,7 +934,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             } else {
 
                 if(dom === undefined)
-                    console.error("Response missing..");
+                    console.alert("Response missing..");
 
                 var parent = Transparent.findElementFromParents(dom, $(this).parents(), 3);
                 if (parent === undefined) {
@@ -953,7 +984,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         var head = $(dom).find("head").html();
         var body = $(dom).find("body").html();
 
-        if(head == undefined || body == undefined) {
+        if(head == undefined || body == "undefined") {
 
             $(Settings.identifier).html("<div class='error'></div>");
 
@@ -967,7 +998,6 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             Transparent.evalScript($("body")[0]);
         }
 
-        Transparent.scrollTo({top:0, left:0, duration:0});
         Transparent.activeOut();
     }
 
@@ -987,19 +1017,18 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             var maxScrollY = $(el).prop("scrollHeight") - Math.round($(el).prop("clientHeight"));
             if (maxScrollY == 0) maxScrollY = Math.round($(el).prop("clientHeight"));
 
-            var scrollTop  = Math.max(0, Math.min(dict["top"] ?? $(el).prop("scrollTop"), maxScrollY));
-            var scrollLeft = Math.max(0, Math.min(dict["left"] ?? $(el).prop("scrollLeft"), maxScrollX));
+            scrollTop  = Math.max(0, Math.min(dict["top"] ?? $(el).prop("scrollTop"), maxScrollY));
+            scrollLeft = Math.max(0, Math.min(dict["left"] ?? $(el).prop("scrollLeft"), maxScrollX));
 
-            var speed    = parseFloat(dict["speed"] ?? 0);
-            var easing   = dict["easing"] ?? "swing";
-            var debounce = dict["debounce"] ?? 0;
+            speed    = parseFloat(dict["speed"] ?? 0);
+            easing   = dict["easing"] ?? "swing";
+            debounce = dict["debounce"] ?? 0;
 
-            var duration  = 1000*Transparent.parseDuration(dict["duration"] ?? 0);
-            var durationX = 1000*Transparent.parseDuration(dict["duration-x"] ?? dict["duration"] ?? 0);
-            var durationY = 1000*Transparent.parseDuration(dict["duration-y"] ?? dict["duration"] ?? 0);
+            duration  = 1000*Transparent.parseDuration(dict["duration"] ?? 0);
+            durationX = 1000*Transparent.parseDuration(dict["duration-x"] ?? dict["duration"] ?? 0);
+            durationY = 1000*Transparent.parseDuration(dict["duration-y"] ?? dict["duration"] ?? 0);
 
             if(speed) {
-                var distanceX = 0, distanceY = 0;
 
                 var currentScrollX = $(el)[0].scrollLeft;
                 if(currentScrollX < scrollLeft || scrollLeft == 0) // Going to the right
@@ -1257,7 +1286,6 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
                 // Preserve headlocked nodes (dynamically injected widgets, url-matched, etc.)
                 if(!found && Transparent.isHeadlocked(el)) found = true;
-
                 if(!found) this.remove();
             });
 
@@ -1336,7 +1364,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 var scrollableElements   = Transparent.getScrollableElement();
                 var scrollableElementsXY = Transparent.getResponsePosition(uuid);
 
-                for(var i = 0; i < scrollableElements.length; i++) {
+                for(i = 0; i < scrollableElements.length; i++) {
 
                     var el = scrollableElements[i];
                     var positionXY = undefined;
@@ -1474,7 +1502,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         var elementsXY = [];
         var elements = Transparent.getScrollableElement();
 
-        for(var i = 0; i < elements.length; i++)
+        for(i = 0; i < elements.length; i++)
             elementsXY.push([$(elements[i]).scrollTop(), $(elements[i]).scrollLeft()]);
 
         return elementsXY;
@@ -1494,7 +1522,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             return;
         }
 
-        dispatchEvent(new CustomEvent('transparent:link', {detail: {link: link}}));
+        dispatchEvent(new CustomEvent('transparent:link', {link:link}));
 
         const uuid   = uuidv4();
         const type   = link[0];
@@ -1506,10 +1534,8 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // Wait for transparent window event to be triggered
         if (!isReady) return;
 
-        const $ctx = (e.type === Transparent.state.SUBMIT) ? $(document) : $(this);
-        if (e.type !== Transparent.state.POPSTATE   &&
-            e.type !== Transparent.state.HASHCHANGE &&
-            !$ctx.find(Settings.identifier).length) return;
+        if (e.type != Transparent.state.POPSTATE   &&
+            e.type != Transparent.state.HASHCHANGE && !$(this).find(Settings.identifier).length) return;
 
         var form   = target != undefined && target.tagName == "FORM" ? target : undefined;
         var formTrigger = undefined;
@@ -1609,34 +1635,35 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             catch (e) { return false; }
         }
 
-        function handleResponse(uuid, status = 200, method = null, data = null, responseURL = null, contentType = null, fetchedResponseText = null) {
+        function handleResponse(uuid, status = 200, method = null, data = null, xhr = null, request = null) {
 
             ajaxSemaphore = false;
+            
+            var responseURL;
+            responseURL = xhr !== null ? xhr.responseURL : url.href;
 
-            responseURL = responseURL ?? url.href;
+            responseText  = Transparent.getResponseText(uuid);
 
-            var responseText  = Transparent.getResponseText(uuid);
+            var fragmentPos = responseURL.indexOf("#");
+            var strippedResponseUrl = (fragmentPos < 0 ? responseURL : responseURL.substring(0, fragmentPos)).trimEnd("/");
 
-            const fragmentPosResp = responseURL.indexOf("#");
-            var strippedResponseUrl = (fragmentPosResp < 0 ? responseURL : responseURL.substring(0, fragmentPosResp)).trimEnd("/");
-
-            const fragmentPosReq = url.href.indexOf("#");
-            var strippedUrlHref = (fragmentPosReq < 0 ? url.href : url.href.substring(0, fragmentPosReq)).trimEnd("/");
+            var fragmentPos = url.href.indexOf("#");
+            var strippedUrlHref = (fragmentPos < 0 ? url.href : url.href.substring(0, fragmentPos)).trimEnd("/");
             if( strippedUrlHref == strippedResponseUrl )
-                responseURL = url.href; // NB: fetch response.url strips away #fragments
+                responseURL = url.href; // NB: xhr.responseURL strips away #fragments
 
             if(!responseText) {
 
-                if(!fetchedResponseText && responseText === null) {
+                if(!request && responseText === null) {
 
                     setTimeout(function() { window.location.href = responseURL; }, Settings["throttle"]);
                     return;
                 }
 
-                responseText = fetchedResponseText;
+                responseText = request.responseText;
                 if(status >= 500) {
 
-                    console.error("Unexpected response from "+uuid+": error code "+status);
+                    console.error("Unexpected XHR response from "+uuid+": error code "+request.status);
                     console.error(sessionStorage);
                 }
 
@@ -1645,7 +1672,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             }
 
             var dom = new DOMParser().parseFromString(responseText, "text/html");
-            if(contentType && contentType.includes("application/json")) {
+            if(request && request.getResponseHeader("Content-Type") == "application/json") {
 
                 if(!isJsonResponse(responseText)) {
                     console.error("Invalid response received for "+ responseURL);
@@ -1671,7 +1698,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             }
 
             // Invalid html page returned
-            if(contentType && contentType.includes("text/html")) {
+            if(request && request.getResponseHeader("Content-Type") == "text/html") {
 
                 if (!responseText.includes("<html") && !responseText.includes("<body") && !responseText.includes("<head"))
                     return Transparent.rescue(dom);
@@ -1690,7 +1717,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
             // From here the page is valid..
             // so the new page is added to history..
-            if(fetchedResponseText !== null)
+            if(xhr)
                 history.pushState({uuid: uuid, status:status, method: method, data: {}, href: responseURL}, '', responseURL);
 
             // Page not recognized.. just go fetch by yourself.. no POST information transmitted..
@@ -1762,20 +1789,20 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             $(Transparent.html).prop("user-scroll", false); // make sure to avoid page jump during transition (cancelled in activeIn callback)
 
             // Submit ajax request..
-            ajaxSemaphore = true; // Raise before dispatching synthetic submit to prevent double-submission
             if(form) form.dispatchEvent(new SubmitEvent("submit", { submitter: formTrigger }));
+            var xhr = new XMLHttpRequest();
 
-            return fetch(url.href, {
-                method: type,
-                body: type === "GET" ? undefined : data,
-                headers: Settings["headers"] || {}
-            })
-            .then(async (response) => {
-                const responseText = await response.text();
-                return handleResponse(uuid, response.status, type, data, response.url, response.headers.get("Content-Type"), responseText);
-            })
-            .catch(() => {
-                handleResponse(uuid, 500, type, data, url.href, null, null);
+            ajaxSemaphore = true;
+            return jQuery.ajax({
+                url: url.href,
+                type: type,
+                data: data,
+                contentType: false,
+                processData: false,
+                headers: Settings["headers"] || {},
+                xhr: function () { return xhr; },
+                success: function (html, status, request) { return handleResponse(uuid, request.status, type, data, xhr, request); },
+                error:   function (request, ajaxOptions, thrownError) { return handleResponse(uuid, request.status, type, data, xhr, request); }
             });
         }
 
@@ -1795,8 +1822,8 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
         if(Settings.debug) console.debug("Transparent is disabled..");
 
-        const statesSet = new Set(Object.values(Transparent.state));
-        const htmlClass = ($("html").attr("class") || "").split(" ").filter(x => !statesSet.has(x));
+        var states    = Object.values(Transparent.state);
+        var htmlClass = Array.from(($("html").attr("class") || "").split(" ")).filter(x => !states.includes(x));
         Transparent.html.removeClass(states).addClass(htmlClass.join(" ")+" "+Transparent.state.ROOT+" "+Transparent.state.READY+" "+Transparent.state.DISABLE);
 
     } else {
@@ -1882,7 +1909,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                     var fieldValueBefore = formDataBefore[fieldName];
                     if(fieldValueBefore instanceof File) {
 
-                        if(!(fieldValueAfter instanceof File)) preventDefault = true;
+                        if(!fieldValueAfter instanceof File) preventDefault = true;
                         else if (fieldValueBefore.size != fieldValueAfter.size) preventDefault = true;
 
                     } else if(fieldValueBefore != fieldValueAfter) {
@@ -1903,7 +1930,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
         document.addEventListener('click', __main__, false);
 
-        $(document).on("submit", "form", __main__);
+        $("form").on("submit", __main__);
     }
 
 
