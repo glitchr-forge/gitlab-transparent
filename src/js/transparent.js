@@ -184,7 +184,11 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // (e.g. third-party widgets like Brevo that inject <style>/<link> dynamically).
         // In addition, head nodes injected dynamically AFTER initial DOMContentLoaded are
         // preserved automatically. Use data-headlock="false" on a head element to opt-out.
-        "headlock": []
+        "headlock": [
+            "brevo",
+            "conversations-widget",
+            /brevo/i
+        ]
     };
 
     // Set of <head> children present on initial load. Anything added after is treated
@@ -213,10 +217,12 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         if(attr !== null && attr !== undefined) return true;
         // Dynamically injected after initial load
         if(!originalHeadNodes.has(el)) return true;
-        // URL pattern match
+        // URL pattern match (src/href attributes)
         var patterns = Settings["headlock"] || [];
         if(!patterns.length) return false;
         var url = el.getAttribute && (el.getAttribute("src") || el.getAttribute("href"));
+        // <style> elements have no src/href — match against CSS textContent instead
+        if(!url && el.tagName === 'STYLE') url = el.textContent || '';
         if(!url) return false;
         for(var i = 0; i < patterns.length; i++) {
             var p = patterns[i];
@@ -1281,6 +1287,12 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 head.children().each(function() {
 
                     found = this.isEqualNode(el);
+                    // Also match identical <style> tags by content (Brevo styles are identical across pages)
+                    if(!found && el.tagName === 'STYLE' && this.tagName === 'STYLE' && 
+                       el.textContent && this.textContent && 
+                       el.textContent.length > 100 && this.textContent.length === el.textContent.length) {
+                        found = this.textContent === el.textContent;
+                    }
                     return !found;
                 });
 
@@ -1297,14 +1309,34 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 $("head").children().each(function() { found |= this.isEqualNode(el); });
                 if(!found) {
 
+                    if(this.tagName == "SCRIPT" && Settings["global_code"] != true) {
 
-                    if(this.tagName != "SCRIPT" || Settings["global_code"] == true) {
-
-                        $("head").append(this.cloneNode(true));
+                        // For inline scripts (without src), create and execute
+                        if(!this.src || this.src === '') {
+                            var script = document.createElement("script");
+                            script.text = this.innerHTML;
+                            var i = -1, attrs = this.attributes, attr;
+                            var N = attrs.length;
+                            while ( ++i < N ) {
+                                if(attrs[i].name !== 'src') {
+                                    script.setAttribute( attrs[i].name, attrs[i].value );
+                                }
+                            }
+                            $("head").append(script);
+                            originalHeadNodes.add(script);
+                        } else {
+                            $("head").append(this);
+                            originalHeadNodes.add(this);
+                        }
 
                     } else {
 
-                        $("head").append(this);
+                        var clonedEl = this.cloneNode(true);
+                        $("head").append(clonedEl);
+                        // Register as an "original" node so it falls through to URL-pattern
+                        // matching on future transitions — prevents layout CSS added by
+                        // Transparent itself from being auto-headlocked as third-party content.
+                        originalHeadNodes.add(clonedEl);
                     }
                 }
             });
@@ -1318,10 +1350,27 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 $("body").children().each(function() { found |= this.isEqualNode(el); });
                 if(!found) {
 
-                    if(this.tagName != "SCRIPT" || Settings["global_code"] == true) {
-                        $("body").append(this.cloneNode(true));
+                    if(this.tagName == "SCRIPT" && Settings["global_code"] != true) {
+
+                        // For inline scripts (without src), create and execute
+                        if(!this.src || this.src === '') {
+                            var script = document.createElement("script");
+                            script.text = this.innerHTML;
+                            var i = -1, attrs = this.attributes, attr;
+                            var N = attrs.length;
+                            while ( ++i < N ) {
+                                if(attrs[i].name !== 'src') {
+                                    script.setAttribute( attrs[i].name, attrs[i].value );
+                                }
+                            }
+                            $("body").append(script);
+                        } else {
+                            $("body").append(this);
+                        }
+
                     } else {
-                        $("body").append(this);
+
+                        $("body").append(this.cloneNode(true));
                     }
                 }
             });
