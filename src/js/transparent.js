@@ -1279,6 +1279,15 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
             // Replace head..
             var head = $(dom).find("head");
+
+            // Snapshot hrefs of already-loaded stylesheets so we can detect new ones
+            // added by the head merge and wait for them to finish loading before
+            // making #page visible (prevents FOUC on cold-cache layout transitions).
+            var _existingStyleHrefs = {};
+            $("head").children("link[rel='stylesheet']").each(function() {
+                var h = this.getAttribute("href"); if(h) _existingStyleHrefs[h] = true;
+            });
+
             $("head").children().each(function() {
 
                 var el   = this;
@@ -1339,6 +1348,13 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                         originalHeadNodes.add(clonedEl);
                     }
                 }
+            });
+
+            // Collect link[rel="stylesheet"] elements inserted by the head merge above
+            var _newStyleLinks = [];
+            $("head").children("link[rel='stylesheet']").each(function() {
+                var h = this.getAttribute("href");
+                if(h && !_existingStyleHrefs[h]) _newStyleLinks.push(this);
             });
 
             var bodyScript = $(dom).find("body > script");
@@ -1435,18 +1451,41 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 }
             }
 
-            $('head').append(function() {
-
-                $(Settings.identifier).append(function() {
-
-                        // Callback if needed, or any other actions
-                        callback();
-
-                        // Trigger onload event
-                        dispatchEvent(new Event('transparent:load'));
-                        dispatchEvent(new Event('load'));
-                });
-            });
+            // Wait for any newly added layout stylesheets to finish loading before
+            // calling callback() / activeOut() — otherwise #page becomes visible while
+            // the new CSS is still being parsed, causing a flash of unstyled content.
+            (function() {
+                function doCallback() {
+                    $('head').append(function() {
+                        $(Settings.identifier).append(function() {
+                            callback();
+                            dispatchEvent(new Event('transparent:load'));
+                            dispatchEvent(new Event('load'));
+                        });
+                    });
+                }
+                if(_newStyleLinks.length === 0) {
+                    doCallback();
+                } else {
+                    var remaining = _newStyleLinks.length;
+                    var fired = false;
+                    // Safety valve: if a stylesheet fails or stalls, don't block forever.
+                    var guard = setTimeout(function() {
+                        if(!fired) { fired = true; doCallback(); }
+                    }, 3000);
+                    _newStyleLinks.forEach(function(link) {
+                        function onDone() {
+                            if(--remaining <= 0 && !fired) {
+                                fired = true;
+                                clearTimeout(guard);
+                                doCallback();
+                            }
+                        }
+                        link.addEventListener('load',  onDone, {once:true});
+                        link.addEventListener('error', onDone, {once:true});
+                    });
+                }
+            })();
 
         }.bind(this), activeInRemainingTime > 0 ? activeInRemainingTime : 1);
     }
@@ -1809,6 +1848,24 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
             if($(dom).find("html").hasClass(Transparent.state.RELOAD) || $(dom).find("html").hasClass(Transparent.state.DISABLE))
                 return window.location.reload();
+
+            // Kick off preloads for stylesheets the new page needs but aren't yet in <head>.
+            // They download in parallel during the activeIn animation so onLoad() finds them
+            // already cached — eliminating FOUC on cold-cache layout transitions.
+            (function() {
+                var loaded = {};
+                $("head").children("link[rel='stylesheet']").each(function() {
+                    var h = this.getAttribute("href"); if(h) loaded[h] = true;
+                });
+                $(dom).find("head").children("link[rel='stylesheet']").each(function() {
+                    var h = this.getAttribute("href");
+                    if(!h || loaded[h]) return;
+                    if($("head").find("link[rel='preload'][href='" + h.replace(/'/g, "\\'") + "']").length) return;
+                    var pl = document.createElement("link");
+                    pl.rel = "preload"; pl.as = "style"; pl.href = h;
+                    document.head.appendChild(pl);
+                });
+            })();
 
             return Transparent.onLoad(uuid, dom, function() {
 
