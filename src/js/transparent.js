@@ -181,18 +181,14 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         "smoothscroll_easing"  : "swing",
         "exceptions": [],
         // headlock: list of url substrings/regex to preserve in <head> across page transitions
-        // (e.g. third-party widgets like Brevo that inject <style>/<link> dynamically).
+        // (e.g. third-party widgets that inject <style>/<link> dynamically).
         // In addition, head nodes injected dynamically AFTER initial DOMContentLoaded are
         // preserved automatically. Use data-headlock="false" on a head element to opt-out.
-        "headlock": [
-            "brevo",
-            "conversations-widget",
-            /brevo/i
-        ]
+        "headlock": []
     };
 
     // Set of <head> children present on initial load. Anything added after is treated
-    // as dynamically injected (e.g. Brevo widget) and preserved across transitions.
+    // as dynamically injected and preserved across transitions.
     var originalHeadNodes = new WeakSet();
     function snapshotHeadNodes() {
         var head = document.head;
@@ -201,7 +197,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             originalHeadNodes.add(head.children[i]);
     }
     // Snapshot synchronously at module-eval time (scripts at end of <body> run before any
-    // async script — e.g. Brevo — can inject <style> tags, so the snapshot is clean).
+    // async script can inject <style> tags, so the snapshot is clean).
     // A DOMContentLoaded fallback is kept for the rare case where document.head is null
     // (e.g. script loaded inside <head> before it finishes parsing).
     snapshotHeadNodes();
@@ -250,9 +246,9 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         CLICK      : "click",
 
         PREACTIVE  : "pre-active",
-        ACTIVEIN   : "active-in",
+        FADEIN     : "fade-in",
         ACTIVE     : "active",
-        ACTIVEOUT  : "active-out",
+        FADEOUT    : "fade-out",
         POSTACTIVE : "post-active",
 
         NOTIFICATION: "notification"
@@ -499,7 +495,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
         if($(Transparent.html).hasClass(Transparent.state.FIRST)) {
             Transparent.scrollToHash(location.hash, {}, function() {
-                Transparent.activeOut(() => Transparent.html.removeClass(Transparent.state.FIRST));
+                Transparent.fadeOut(() => Transparent.html.removeClass(Transparent.state.FIRST));
             });
         }
         
@@ -840,9 +836,10 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
         return {delay:delay, duration:duration};
     }
-    var activeInTime = 0;
-    var activeInRemainingTime = 0;
-    Transparent.activeIn = function(activeCallback = function() {}) {
+
+    var fadeInTime = 0;
+    var fadeInRemainingTime = 0;
+    Transparent.fadeIn = function(activeCallback = function() {}) {
 
         if(!Transparent.html.hasClass(Transparent.state.PREACTIVE)) {
             Transparent.html.addClass(Transparent.state.PREACTIVE);
@@ -850,18 +847,18 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         }
 
         var active = Transparent.activeTime();
-        activeInTime = Date.now();
-        activeInRemainingTime = active.delay+active.duration;
+        fadeInTime = Date.now();
+        fadeInRemainingTime = active.delay+active.duration;
 
         Transparent.html.removeClass(Transparent.state.PREACTIVE);
-        if(!Transparent.html.hasClass(Transparent.state.ACTIVEIN)) {
-            Transparent.html.addClass(Transparent.state.ACTIVEIN);
-            dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVEIN));
+        if(!Transparent.html.hasClass(Transparent.state.FADEIN)) {
+            Transparent.html.addClass(Transparent.state.FADEIN);
+            dispatchEvent(new Event('transparent:'+Transparent.state.FADEIN));
         }
 
         Transparent.callback(function() {
 
-            Transparent.html.removeClass(Transparent.state.ACTIVEIN);
+            Transparent.html.removeClass(Transparent.state.FADEIN);
             if(!Transparent.html.hasClass(Transparent.state.ACTIVE)) {
                 Transparent.html.addClass(Transparent.state.ACTIVE);
                 dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVE));
@@ -871,23 +868,23 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             Transparent.callback(function() {
 
                 activeCallback();
-                activeInRemainingTime = 0;
+                fadeInRemainingTime = 0;
 
             }.bind(this), active.duration);
 
         }.bind(this), active.delay);
     }
 
-    Transparent.activeOut = function(activeCallback = function() {}) {
+    Transparent.fadeOut = function(activeCallback = function() {}) {
 
         if(!Transparent.html.hasClass(Transparent.state.ACTIVE)) {
             Transparent.html.addClass(Transparent.state.ACTIVE);
             dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVE));
         }
 
-        if(!Transparent.html.hasClass(Transparent.state.ACTIVEOUT)) {
-            Transparent.html.addClass(Transparent.state.ACTIVEOUT);
-            dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVEOUT));
+        if(!Transparent.html.hasClass(Transparent.state.FADEOUT)) {
+            Transparent.html.addClass(Transparent.state.FADEOUT);
+            dispatchEvent(new Event('transparent:'+Transparent.state.FADEOUT));
         }
 
         var active = Transparent.activeTime();
@@ -899,7 +896,9 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             var active = Transparent.activeTime();
             Transparent.callback(function() {
 
-                Transparent.html.removeClass(Transparent.state.ACTIVEOUT);
+                Transparent.html.removeClass(Transparent.state.FADEOUT);
+                ajaxSemaphore = false;
+
                 if(Transparent.html.hasClass(Transparent.state.LOADING)) {
 
                     dispatchEvent(new Event('transparent:'+Transparent.state.LOADING));
@@ -907,7 +906,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                     Object.values(Transparent.state).forEach(e => Transparent.html.removeClass(e));
                     Transparent.html.addClass(Transparent.state.ROOT + " " + Transparent.state.READY);
                 }
-                
+
                 Transparent.html.addClass(Transparent.state.POSTACTIVE);
                
                 var active = Transparent.activeTime();
@@ -1004,7 +1003,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             Transparent.evalScript($("body")[0]);
         }
 
-        Transparent.activeOut();
+        Transparent.fadeOut();
     }
 
     Transparent.userScroll = function(el = undefined) { return $(el === undefined ? document.documentElement : el).closestScrollable().prop("user-scroll") ?? true; }
@@ -1271,7 +1270,6 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             $(this).stop();
         });
 
-        activeInRemainingTime = activeInRemainingTime - (Date.now() - activeInTime);
         setTimeout(function() {
 
             // Transfert attributes
@@ -1296,7 +1294,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 head.children().each(function() {
 
                     found = this.isEqualNode(el);
-                    // Also match identical <style> tags by content (Brevo styles are identical across pages)
+                    // Also match identical <style> tags by content
                     if(!found && el.tagName === 'STYLE' && this.tagName === 'STYLE' && 
                        el.textContent && this.textContent && 
                        el.textContent.length > 100 && this.textContent.length === el.textContent.length) {
@@ -1452,7 +1450,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             }
 
             // Wait for any newly added layout stylesheets to finish loading before
-            // calling callback() / activeOut() — otherwise #page becomes visible while
+            // calling callback() / fadeOut() — otherwise #page becomes visible while
             // the new CSS is still being parsed, causing a flash of unstyled content.
             (function() {
                 function doCallback() {
@@ -1487,7 +1485,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 }
             })();
 
-        }.bind(this), activeInRemainingTime > 0 ? activeInRemainingTime : 1);
+        }.bind(this), 1);
     }
 
     function uuidv4() {
@@ -1716,7 +1714,25 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         $(Transparent.html).stop();
 
         Transparent.html.addClass(Transparent.state.LOADING);
-        Transparent.activeIn();
+
+        var fadeInDone = false;
+        var pendingResponseArgs = null;
+
+        function tryDispatch(args) {
+            if (args !== undefined) pendingResponseArgs = args;
+            if (fadeInDone && pendingResponseArgs !== null)
+                handleResponse(...pendingResponseArgs);
+        }
+
+        // Lock navigation for the full transition (fadeIn + page swap + fadeOut).
+        // Released inside Transparent.fadeOut's final cleanup, covering both the
+        // AJAX path and the popstate/cached-response path.
+        ajaxSemaphore = true;
+
+        Transparent.fadeIn(function() {
+            fadeInDone = true;
+            tryDispatch();
+        });
 
         function isJsonResponse(str) {
             try { JSON.parse(str); return true; }
@@ -1725,8 +1741,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
         function handleResponse(uuid, status = 200, method = null, data = null, xhr = null, request = null) {
 
-            ajaxSemaphore = false;
-            
+
             var responseURL;
             responseURL = xhr !== null ? xhr.responseURL : url.href;
 
@@ -1782,6 +1797,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                     else location.reload();
                 }
 
+                ajaxSemaphore = false;
                 return dispatchEvent(new Event('load'));
             }
 
@@ -1850,13 +1866,14 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 return window.location.reload();
 
             // Kick off preloads for stylesheets the new page needs but aren't yet in <head>.
-            // They download in parallel during the activeIn animation so onLoad() finds them
+            // They download in parallel during the fadeIn animation so onLoad() finds them
             // already cached — eliminating FOUC on cold-cache layout transitions.
             (function() {
                 var loaded = {};
                 $("head").children("link[rel='stylesheet']").each(function() {
                     var h = this.getAttribute("href"); if(h) loaded[h] = true;
                 });
+
                 $(dom).find("head").children("link[rel='stylesheet']").each(function() {
                     var h = this.getAttribute("href");
                     if(!h || loaded[h]) return;
@@ -1869,7 +1886,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
             return Transparent.onLoad(uuid, dom, function() {
 
-                Transparent.activeOut(function() {
+                Transparent.fadeOut(function() {
 
                     Transparent.html
                         .removeClass(switchLayout)
@@ -1892,13 +1909,12 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             if(history.state)
                 Transparent.setResponse(history.state.uuid, Transparent.html[0], Transparent.getScrollableElementXY());
 
-            $(Transparent.html).prop("user-scroll", false); // make sure to avoid page jump during transition (cancelled in activeIn callback)
+            $(Transparent.html).prop("user-scroll", false); // make sure to avoid page jump during transition (cancelled in fadeIn callback)
 
             // Submit ajax request..
             if(form) form.dispatchEvent(new SubmitEvent("submit", { submitter: formTrigger }));
             var xhr = new XMLHttpRequest();
 
-            ajaxSemaphore = true;
             return jQuery.ajax({
                 url: url.href,
                 type: type,
@@ -1907,12 +1923,12 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 processData: false,
                 headers: Settings["headers"] || {},
                 xhr: function () { return xhr; },
-                success: function (html, status, request) { return handleResponse(uuid, request.status, type, data, xhr, request); },
-                error:   function (request, ajaxOptions, thrownError) { return handleResponse(uuid, request.status, type, data, xhr, request); }
+                success: function (html, status, request) { return tryDispatch([uuid, request.status, type, data, xhr, request]); },
+                error:   function (request, ajaxOptions, thrownError) { return tryDispatch([uuid, request.status, type, data, xhr, request]); }
             });
         }
 
-        return handleResponse(history.state.uuid, history.state.status, history.state.method, history.state.data);
+        return tryDispatch([history.state.uuid, history.state.status, history.state.method, history.state.data]);
     }
 
     // Update history if not refreshing page or different page (avoid double pushState)
@@ -2027,7 +2043,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             if(Settings.debug || preventDefault) {
 
                 if(preventDefault) Transparent.html.addClass(Transparent.state.READY);
-                if(preventDefault) Transparent.activeOut();
+                if(preventDefault) Transparent.fadeOut();
                 if(preventDefault) dispatchEvent(new Event('load'));
 
                 return "Dude, are you sure you want to leave? Think of the kittens!";
