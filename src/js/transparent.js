@@ -228,6 +228,29 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         return false;
     }
 
+    // ─── NAVIGATION TRACE LOG ───────────────────────────────────────
+    // Gated on Settings.debug. Set 'debug': true in Transparent.ready({...})
+    // to surface a per-step trace prefixed with "[TX]" in the console.
+    // Cheap when disabled — single boolean check, no allocation.
+    function _tx(tag, extra) {
+        if (!Settings || !Settings.debug) return;
+        try {
+            var cls = document.documentElement.className;
+            var t = performance.now().toFixed(1);
+            var here = (document.querySelector("#page") || document.documentElement);
+            var lay = here.getAttribute && (here.getAttribute("data-layout") || "?");
+            var path = location.pathname;
+            console.log("%c[TX]", "color:#0a0;font-weight:bold",
+                "+" + t + "ms", tag,
+                "path=" + path,
+                "layout=" + lay,
+                "ajaxSem=" + (typeof ajaxSemaphore === "undefined" ? "?" : ajaxSemaphore),
+                "classes=[" + cls + "]",
+                extra || "");
+        } catch(e) {}
+    }
+    // ────────────────────────────────────────────────────────────────
+
     const State = Transparent.state = {
 
         ROOT       : "transparent",
@@ -246,9 +269,9 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         CLICK      : "click",
 
         PREACTIVE  : "pre-active",
-        FADEIN     : "fade-in",
+        FADEIN   : "fade-in",
         ACTIVE     : "active",
-        FADEOUT    : "fade-out",
+        FADEOUT  : "fade-out",
         POSTACTIVE : "post-active",
 
         NOTIFICATION: "notification"
@@ -836,11 +859,10 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
         return {delay:delay, duration:duration};
     }
-
     var fadeInTime = 0;
     var fadeInRemainingTime = 0;
     Transparent.fadeIn = function(activeCallback = function() {}) {
-
+        _tx("fadeIn ENTRY");
         if(!Transparent.html.hasClass(Transparent.state.PREACTIVE)) {
             Transparent.html.addClass(Transparent.state.PREACTIVE);
             dispatchEvent(new Event('transparent:'+Transparent.state.PREACTIVE));
@@ -876,7 +898,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
     }
 
     Transparent.fadeOut = function(activeCallback = function() {}) {
-
+        _tx("fadeOut ENTRY");
         if(!Transparent.html.hasClass(Transparent.state.ACTIVE)) {
             Transparent.html.addClass(Transparent.state.ACTIVE);
             dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVE));
@@ -897,8 +919,6 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             Transparent.callback(function() {
 
                 Transparent.html.removeClass(Transparent.state.FADEOUT);
-                ajaxSemaphore = false;
-
                 if(Transparent.html.hasClass(Transparent.state.LOADING)) {
 
                     dispatchEvent(new Event('transparent:'+Transparent.state.LOADING));
@@ -906,7 +926,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                     Object.values(Transparent.state).forEach(e => Transparent.html.removeClass(e));
                     Transparent.html.addClass(Transparent.state.ROOT + " " + Transparent.state.READY);
                 }
-
+                
                 Transparent.html.addClass(Transparent.state.POSTACTIVE);
                
                 var active = Transparent.activeTime();
@@ -1272,6 +1292,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
         setTimeout(function() {
 
+            _tx("onLoad BODY (after 1ms)");
             // Transfert attributes
             Transparent.transferAttributes(dom);
 
@@ -1295,8 +1316,8 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
                     found = this.isEqualNode(el);
                     // Also match identical <style> tags by content
-                    if(!found && el.tagName === 'STYLE' && this.tagName === 'STYLE' && 
-                       el.textContent && this.textContent && 
+                    if(!found && el.tagName === 'STYLE' && this.tagName === 'STYLE' &&
+                       el.textContent && this.textContent &&
                        el.textContent.length > 100 && this.textContent.length === el.textContent.length) {
                         found = this.textContent === el.textContent;
                     }
@@ -1318,7 +1339,8 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
                     if(this.tagName == "SCRIPT" && Settings["global_code"] != true) {
 
-                        // For inline scripts (without src), create and execute
+                        // For inline scripts (without src), recreate so the browser will execute.
+                        // Simply re-appending the same <script> node doesn't execute it.
                         if(!this.src || this.src === '') {
                             var script = document.createElement("script");
                             script.text = this.innerHTML;
@@ -1348,13 +1370,6 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 }
             });
 
-            // Collect link[rel="stylesheet"] elements inserted by the head merge above
-            var _newStyleLinks = [];
-            $("head").children("link[rel='stylesheet']").each(function() {
-                var h = this.getAttribute("href");
-                if(h && !_existingStyleHrefs[h]) _newStyleLinks.push(this);
-            });
-
             var bodyScript = $(dom).find("body > script");
             bodyScript.each(function() {
 
@@ -1366,7 +1381,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
                     if(this.tagName == "SCRIPT" && Settings["global_code"] != true) {
 
-                        // For inline scripts (without src), create and execute
+                        // Same inline-script recreation as for <head>.
                         if(!this.src || this.src === '') {
                             var script = document.createElement("script");
                             script.text = this.innerHTML;
@@ -1401,7 +1416,13 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             // Make sure name/layout keep the same after a page change (tolerance for POST or GET requests)
             if(oldPage.attr("data-layout") != undefined && page.attr("data-layout") != undefined) {
 
-                var switchLayout = Transparent.state.SWITCH.replace("X", page.attr("data-layout")).replace("Y", oldPage.attr("data-layout"));
+                // X = prevLayout, Y = newLayout — must match the formula in handleResponse
+                // (line ~1852: SWITCH.replace("X", prevLayout).replace("Y", newLayout)).
+                // If these disagreed, the cleanup filter below would not recognize the
+                // switchLayout class that handleResponse added to <html> and would strip
+                // it before its CSS transition could play — visible as a race only in
+                // whichever direction the project's CSS actually styles.
+                var switchLayout = Transparent.state.SWITCH.replace("X", oldPage.attr("data-layout")).replace("Y", page.attr("data-layout"));
                 page.attr("data-layout-prev", oldPage.attr("data-layout"));
             }
 
@@ -1410,10 +1431,13 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             var  oldHtmlClass = Array.from(($(Transparent.html).attr("class") || "").split(" "));
             var removeHtmlClass = oldHtmlClass.filter(x => !htmlClass.includes(x) && switchLayout != x && !states.includes(x));
 
+            _tx("onLoad classMgmt", "switchLayout=" + switchLayout + " remove=[" + removeHtmlClass.join(",") + "] add=[" + htmlClass.join(",") + "]");
             Transparent.html.removeClass(removeHtmlClass).addClass(htmlClass);
+            _tx("onLoad PAGE_SWAP_BEGIN", "oldLayout=" + (oldPage.attr("data-layout")||"?") + " newLayout=" + (page.attr("data-layout")||"?"));
             $(page).insertBefore(oldPage);
 
             oldPage.remove();
+            _tx("onLoad PAGE_SWAP_DONE");
 
             if(Settings["global_code"] == true) Transparent.evalScript($(page)[0]);
             document.dispatchEvent(new Event('DOMContentLoaded'));
@@ -1449,11 +1473,19 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 }
             }
 
+            // Collect link[rel="stylesheet"] elements inserted by the head merge above
+            var _newStyleLinks = [];
+            $("head").children("link[rel='stylesheet']").each(function() {
+                var h = this.getAttribute("href");
+                if(h && !_existingStyleHrefs[h]) _newStyleLinks.push(this);
+            });
+
             // Wait for any newly added layout stylesheets to finish loading before
             // calling callback() / fadeOut() — otherwise #page becomes visible while
             // the new CSS is still being parsed, causing a flash of unstyled content.
             (function() {
                 function doCallback() {
+                    _tx("doCallback FIRES → callback() (which starts fadeOut)");
                     $('head').append(function() {
                         $(Settings.identifier).append(function() {
                             callback();
@@ -1462,20 +1494,38 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                         });
                     });
                 }
-                if(_newStyleLinks.length === 0) {
+                // For cached stylesheets, the browser may fire `load` synchronously on
+                // DOM insertion — BEFORE we can attach a listener — so listener-only
+                // waits get stuck on the 3 s guard. `.sheet !== null` indicates the
+                // CSSStyleSheet is already parsed and ready, which is the right
+                // condition to count it as "done." Cross-origin sheets still expose
+                // `.sheet` even though `.cssRules` throws — `.sheet !== null` is
+                // portable.
+                function isStyleLoaded(link) {
+                    try { return link.sheet !== null; } catch(e) { return true; }
+                }
+                var pending = _newStyleLinks.filter(function(l) { return !isStyleLoaded(l); });
+                _tx("stylesheet-wait BEGIN", "newLinks=" + _newStyleLinks.length + " cachedSkipped=" + (_newStyleLinks.length - pending.length) + " pending=" + pending.length);
+                if(pending.length === 0) {
+                    _tx("stylesheet-wait IMMEDIATE → doCallback");
                     doCallback();
                 } else {
-                    var remaining = _newStyleLinks.length;
+                    var remaining = pending.length;
                     var fired = false;
                     // Safety valve: if a stylesheet fails or stalls, don't block forever.
                     var guard = setTimeout(function() {
-                        if(!fired) { fired = true; doCallback(); }
+                        if(!fired) {
+                            _tx("stylesheet-wait GUARD fired (3s)", "remaining=" + remaining);
+                            fired = true; doCallback();
+                        }
                     }, 3000);
-                    _newStyleLinks.forEach(function(link) {
-                        function onDone() {
+                    pending.forEach(function(link) {
+                        function onDone(e) {
+                            _tx("stylesheet-wait link.load", "remaining=" + (remaining-1) + " href=" + link.getAttribute("href"));
                             if(--remaining <= 0 && !fired) {
                                 fired = true;
                                 clearTimeout(guard);
+                                _tx("stylesheet-wait ALL_LOADED → doCallback");
                                 doCallback();
                             }
                         }
@@ -1597,7 +1647,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
     var ajaxSemaphore = false;
     var formSubmission = false;
     function __main__(e) {
-
+        _tx("__main__ ENTRY", "event=" + e.type + (e.target && e.target.tagName ? " target=" + e.target.tagName : ""));
         // Disable transparent JS (e.g. during development..)
         if(Settings.disable) return;
 
@@ -1714,25 +1764,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         $(Transparent.html).stop();
 
         Transparent.html.addClass(Transparent.state.LOADING);
-
-        var fadeInDone = false;
-        var pendingResponseArgs = null;
-
-        function tryDispatch(args) {
-            if (args !== undefined) pendingResponseArgs = args;
-            if (fadeInDone && pendingResponseArgs !== null)
-                handleResponse(...pendingResponseArgs);
-        }
-
-        // Lock navigation for the full transition (fadeIn + page swap + fadeOut).
-        // Released inside Transparent.fadeOut's final cleanup, covering both the
-        // AJAX path and the popstate/cached-response path.
-        ajaxSemaphore = true;
-
-        Transparent.fadeIn(function() {
-            fadeInDone = true;
-            tryDispatch();
-        });
+        Transparent.fadeIn();
 
         function isJsonResponse(str) {
             try { JSON.parse(str); return true; }
@@ -1740,8 +1772,10 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         }
 
         function handleResponse(uuid, status = 200, method = null, data = null, xhr = null, request = null) {
+            _tx("handleResponse ENTRY", "status=" + status + " method=" + method);
 
-
+            ajaxSemaphore = false;
+            
             var responseURL;
             responseURL = xhr !== null ? xhr.responseURL : url.href;
 
@@ -1797,7 +1831,6 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                     else location.reload();
                 }
 
-                ajaxSemaphore = false;
                 return dispatchEvent(new Event('load'));
             }
 
@@ -1858,6 +1891,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 Transparent.html.addClass(Transparent.state.SAME);
 
             var switchLayout = Transparent.state.SWITCH.replace("X", prevLayout).replace("Y", newLayout);
+            _tx("handleResponse switchLayout", "prev=" + prevLayout + " new=" + newLayout + " adds=." + switchLayout);
             Transparent.html.addClass(switchLayout);
 
             dispatchEvent(new Event('transparent:'+switchLayout));
@@ -1915,6 +1949,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             if(form) form.dispatchEvent(new SubmitEvent("submit", { submitter: formTrigger }));
             var xhr = new XMLHttpRequest();
 
+            ajaxSemaphore = true;
             return jQuery.ajax({
                 url: url.href,
                 type: type,
@@ -1923,12 +1958,12 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 processData: false,
                 headers: Settings["headers"] || {},
                 xhr: function () { return xhr; },
-                success: function (html, status, request) { return tryDispatch([uuid, request.status, type, data, xhr, request]); },
-                error:   function (request, ajaxOptions, thrownError) { return tryDispatch([uuid, request.status, type, data, xhr, request]); }
+                success: function (html, status, request) { _tx("ajax SUCCESS", "status=" + request.status); return handleResponse(uuid, request.status, type, data, xhr, request); },
+                error:   function (request, ajaxOptions, thrownError) { _tx("ajax ERROR", "status=" + request.status); return handleResponse(uuid, request.status, type, data, xhr, request); }
             });
         }
 
-        return tryDispatch([history.state.uuid, history.state.status, history.state.method, history.state.data]);
+        return handleResponse(history.state.uuid, history.state.status, history.state.method, history.state.data);
     }
 
     // Update history if not refreshing page or different page (avoid double pushState)
