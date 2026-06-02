@@ -1486,11 +1486,19 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             (function() {
                 function doCallback() {
                     _tx("doCallback FIRES → callback() (which starts fadeOut)");
-                    $('head').append(function() {
-                        $(Settings.identifier).append(function() {
-                            callback();
-                            dispatchEvent(new Event('transparent:load'));
-                            dispatchEvent(new Event('load'));
+                    // requestAnimationFrame here guarantees the browser has had one
+                    // full frame to apply the new page's stylesheets and re-layout
+                    // before fadeOut starts. Without it, fadeOut can animate the
+                    // loader away while the new page is still rendered with the
+                    // previous layout's styles — the article→home flicker the
+                    // [TX] trace masked via instrumentation overhead.
+                    requestAnimationFrame(function() {
+                        $('head').append(function() {
+                            $(Settings.identifier).append(function() {
+                                callback();
+                                dispatchEvent(new Event('transparent:load'));
+                                dispatchEvent(new Event('load'));
+                            });
                         });
                     });
                 }
