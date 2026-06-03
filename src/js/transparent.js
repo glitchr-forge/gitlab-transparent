@@ -274,11 +274,47 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         FADEOUT  : "fade-out",
         POSTACTIVE : "post-active",
 
-        NOTIFICATION: "notification"
+        NOTIFICATION: "notification",
+        OFFLINE     : "offline"
     };
 
     var isReady    = false;
     var rescueMode = false;
+
+    // ─── OFFLINE DETECTION ──────────────────────────────────────────
+    // Two-source signal:
+    //   1. window 'online'/'offline' events fired by the browser when the
+    //      OS-level connectivity changes (Wi-Fi off, airplane mode, etc.)
+    //   2. AJAX network errors during navigation — if a request fails with
+    //      status 0 (and wasn't aborted), the device probably can't reach
+    //      the server even though navigator.onLine may still be true.
+    // The `html.offline` class is the public surface — the project's CSS
+    // styles the YouTube-style "Offline" banner from there. Custom events
+    // `transparent:offline` and `transparent:online` give JS hooks too.
+    var isOnline = (typeof navigator !== "undefined") ? navigator.onLine !== false : true;
+    Transparent.isOnline = function() { return isOnline; }
+    function setOnlineStatus(online) {
+        if (online === isOnline) return;  // no change
+        isOnline = online;
+        if (online) {
+            $($(document).find("html")[0]).removeClass(State.OFFLINE);
+            dispatchEvent(new Event("transparent:online"));
+        } else {
+            $($(document).find("html")[0]).addClass(State.OFFLINE);
+            dispatchEvent(new Event("transparent:offline"));
+        }
+    }
+    if (typeof window !== "undefined") {
+        window.addEventListener("online",  function() { setOnlineStatus(true); });
+        window.addEventListener("offline", function() { setOnlineStatus(false); });
+    }
+    // Apply initial state synchronously so first-paint reflects offline if applicable.
+    if (!isOnline) {
+        // Use the document element directly here — Transparent.html isn't initialized yet at module-eval time.
+        var _htmlEl = document.documentElement;
+        if (_htmlEl && _htmlEl.classList) _htmlEl.classList.add(State.OFFLINE);
+    }
+    // ────────────────────────────────────────────────────────────────
 
     Transparent.html = $($(document).find("html")[0]);
     Transparent.html.addClass(Transparent.state.ROOT+ " " + Transparent.state.LOADING + " " + Transparent.state.FIRST);
@@ -861,6 +897,15 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
     }
     var fadeInTime = 0;
     var fadeInRemainingTime = 0;
+    // Schedule fn for after the currently in-flight fadeIn animation has
+    // finished. Used by handleResponse's three reload/redirect paths to
+    // ensure the loader is at full opacity before the browser unloads.
+    function _waitForFadeIn(fn) {
+        var elapsed = Date.now() - fadeInTime;
+        var remaining = fadeInRemainingTime - elapsed;
+        if (remaining > 0) setTimeout(fn, remaining + 30);
+        else fn();
+    }
     Transparent.fadeIn = function(activeCallback = function() {}) {
         _tx("fadeIn ENTRY");
         if(!Transparent.html.hasClass(Transparent.state.PREACTIVE)) {
@@ -1026,7 +1071,22 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         Transparent.fadeOut();
     }
 
-    Transparent.userScroll = function(el = undefined) { return $(el === undefined ? document.documentElement : el).closestScrollable().prop("user-scroll") ?? true; }
+    Transparent.userScroll = function(el = undefined) {
+        // Defensive: closestScrollable() can return a value without .prop
+        // when called from event handlers on transient DOM (e.g. ajaxer
+        // result containers, sticky-scrollpercent triggers fired during
+        // infinite-scroll while the page is transitioning). The app-defer.js
+        // wrapper around $.fn.closestScrollable is supposed to enforce the
+        // jQuery return, but races with timing-sensitive callers can still
+        // hit this. Default to true ("user is scrolling, don't autoscroll").
+        try {
+            var $target  = $(el === undefined ? document.documentElement : el);
+            if (!$target || !$target.length) return true;
+            var $scroll  = $target.closestScrollable && $target.closestScrollable();
+            if (!$scroll || typeof $scroll.prop !== "function") return true;
+            return $scroll.prop("user-scroll") ?? true;
+        } catch (e) { return true; }
+    }
     Transparent.scrollTo = function(dict, el = window, callback = function() {})
     {
         setTimeout(function() {
@@ -1290,9 +1350,28 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             $(this).stop();
         });
 
+        // Defer the DOM swap until #page's opacity transition has had a
+        // chance to finish. Read the transition-duration from getComputedStyle
+        // (closure-local — no module state shared between navigations) so
+        // this stays in sync with whatever the project's CSS uses. Without
+        // this delay, a fast/cached AJAX response can land the swap while
+        // #page is still partway through the LOADING-induced fade-out,
+        // making the content change visible to the user (the original
+        // flicker).
+        var _swapDelay = 1;
+        try {
+            var _pageEl = $(Settings.identifier)[0];
+            if (_pageEl) {
+                var _dur = 1000 * Transparent.parseDuration(
+                    window.getComputedStyle(_pageEl).transitionDuration || "0"
+                );
+                if (_dur > 1) _swapDelay = _dur;
+            }
+        } catch(e) {}
+
         setTimeout(function() {
 
-            _tx("onLoad BODY (after 1ms)");
+            _tx("onLoad BODY (after " + _swapDelay + "ms)");
             // Transfert attributes
             Transparent.transferAttributes(dom);
 
@@ -1543,7 +1622,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 }
             })();
 
-        }.bind(this), 1);
+        }.bind(this), _swapDelay);
     }
 
     function uuidv4() {
@@ -1747,6 +1826,17 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         if (ajaxSemaphore) return;
         if (url == location) return;
 
+        // Block navigation when offline. Project CSS / JS can react to
+        // html.offline + the transparent:offline event to surface a banner.
+        // The event is re-dispatched here on each attempted navigation so a
+        // listener can briefly flash/highlight the banner to acknowledge the
+        // click instead of doing nothing silently.
+        if (!isOnline || (typeof navigator !== "undefined" && navigator.onLine === false)) {
+            setOnlineStatus(false);
+            dispatchEvent(new Event("transparent:offline"));
+            return;
+        }
+
         if((e.type == Transparent.state.CLICK || e.type == Transparent.state.HASHCHANGE) && url.pathname == location.pathname && url.search == location.search && type != "POST") {
 
             if(!url.hash) return;
@@ -1866,12 +1956,18 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 history.pushState({uuid: uuid, status:status, method: method, data: {}, href: responseURL}, '', responseURL);
 
             // Page not recognized.. just go fetch by yourself.. no POST information transmitted..
-            if(!Transparent.isPage(dom))
-                return window.location.href = url;
+            // Defer the redirect until fadeIn settles, same reasoning as the
+            // html.reload path above.
+            if(!Transparent.isPage(dom)) {
+                _waitForFadeIn(function() { window.location.href = url; });
+                return;
+            }
 
             // Layout not compatible.. needs to be reloaded (exception when POST is detected..)
-            if(!Transparent.isCompatiblePage(dom, method, data))
-                return window.location.href = url;
+            if(!Transparent.isCompatiblePage(dom, method, data)) {
+                _waitForFadeIn(function() { window.location.href = url; });
+                return;
+            }
 
             // Mark layout as known
             if(!Transparent.isKnownLayout(dom)) {
@@ -1904,8 +2000,18 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
             dispatchEvent(new Event('transparent:'+switchLayout));
 
-            if($(dom).find("html").hasClass(Transparent.state.RELOAD) || $(dom).find("html").hasClass(Transparent.state.DISABLE))
-                return window.location.reload();
+            if($(dom).find("html").hasClass(Transparent.state.RELOAD) || $(dom).find("html").hasClass(Transparent.state.DISABLE)) {
+                // Defer the reload until fadeIn has finished, so the loader is
+                // at full opacity when the browser unloads. Without this, a
+                // fast AJAX response can fire reload() while fadeIn is still
+                // mid-animation: the browser swaps to a page that starts with
+                // .active (loader at 100%), and the user perceives a snap
+                // from in-progress opacity to full. Reading as "fade-out then
+                // fade-in" because the partial loader receded as the browser
+                // swapped frames.
+                _waitForFadeIn(function() { window.location.reload(); });
+                return;
+            }
 
             // Kick off preloads for stylesheets the new page needs but aren't yet in <head>.
             // They download in parallel during the fadeIn animation so onLoad() finds them
@@ -1967,7 +2073,17 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 headers: Settings["headers"] || {},
                 xhr: function () { return xhr; },
                 success: function (html, status, request) { _tx("ajax SUCCESS", "status=" + request.status); return handleResponse(uuid, request.status, type, data, xhr, request); },
-                error:   function (request, ajaxOptions, thrownError) { _tx("ajax ERROR", "status=" + request.status); return handleResponse(uuid, request.status, type, data, xhr, request); }
+                error:   function (request, ajaxOptions, thrownError) {
+                    _tx("ajax ERROR", "status=" + request.status + " textStatus=" + ajaxOptions);
+                    // status=0 with non-abort textStatus typically means the device
+                    // couldn't reach the server: dropped connection, DNS failure,
+                    // captive portal, etc. Flip to offline so the project's banner
+                    // surfaces even if navigator.onLine still reports true.
+                    if (request.status === 0 && ajaxOptions !== "abort") {
+                        setOnlineStatus(false);
+                    }
+                    return handleResponse(uuid, request.status, type, data, xhr, request);
+                }
             });
         }
 
