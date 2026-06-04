@@ -179,7 +179,43 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         "smoothscroll_duration": "200ms",
         "smoothscroll_speed"   : 0,
         "smoothscroll_easing"  : "swing",
-        "exceptions": []
+        "exceptions": [],
+        // headlock: list of URL substrings or regex patterns to preserve in
+        // <head> across page transitions (e.g. third-party widgets that
+        // inject <style>/<link> dynamically). Anything matching is treated
+        // as "locked" and never removed during the head merge.
+        //
+        // In addition, head nodes injected dynamically AFTER initial
+        // DOMContentLoaded are auto-preserved (snapshotted on load → not
+        // in the set → preserved).
+        //
+        // Per-element overrides:
+        //   <link data-headlock="false"> → opt-out (allow normal removal)
+        //   <link data-headlock="true">  → opt-in (always preserve)
+        //
+        // Ported from upstream 1.0.82's `headlock` design (cleaner API than
+        // the previous hardcoded SCRIPT/STYLE-never-remove heuristic).
+        "headlock": [],
+        // ── View Transitions API ────────────────────────────────────────────
+        // When true, the DOM swap is wrapped in document.startViewTransition()
+        // so the browser captures an OLD snapshot, applies the swap callback,
+        // then crossfades to the NEW state natively. Falls back transparently
+        // to the CSS-only transition path on browsers without VT support
+        // (Firefox < 144, Safari < 18.2, old Chromium). Per-element morph
+        // is opt-in via CSS:
+        //
+        //   #page { view-transition-name: page; }
+        //   .article-hero img { view-transition-name: article-hero; }
+        //
+        // Pairs the named element across the swap so the browser animates
+        // its position/size change instead of crossfading the snapshots.
+        //
+        // skip_transition_for_cache: when true, in-DOM cache hits bypass VT
+        // entirely (for Turbo-style instant-back UX). Default false because
+        // VT's 200ms crossfade is fast enough that the consistency win
+        // outweighs the saved frames.
+        "use_view_transitions": false,
+        "skip_transition_for_cache": false
     };
 
     const State = Transparent.state = {
@@ -243,35 +279,69 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
     // MutationObserver auto-tags elements added by ANY route, so even
     // body-script appends or head-script appends elsewhere in this library
     // stay correctly classified.
-    Transparent._serverElements = new WeakSet();
-    Transparent._isServerElement = function(el) {
-        return Transparent._serverElements.has(el);
-    };
-    Transparent._markServerElement = function(el) {
-        if (el && el.nodeType === 1) Transparent._serverElements.add(el);
-    };
-    Transparent._snapshotServerElements = function() {
+    // Ported from upstream 1.0.82 — `headlock` design.
+    //
+    // Replaces the previous hardcoded "never remove SCRIPT/STYLE" rule
+    // with a finer-grained API: snapshot the initial head children, then
+    // on the next swap, *preserve* anything that's either (a) not in the
+    // snapshot (= dynamically injected after load), or (b) matches a
+    // configured URL pattern in Settings.headlock, or (c) has a
+    // data-headlock attribute (true/non-empty = lock, "false" = unlock).
+    //
+    // Two key wins over the previous local impl:
+    //   1. The previous impl never removed any <script>/<style> at all,
+    //      which caused per-page stylesheets to leak across navigations
+    //      (e.g. layout1's inline <style> persisting on layout2). The new
+    //      design only locks dynamically-injected ones.
+    //   2. Project code can pass `headlock: ["brevo.com", "googletag", /hotjar/]`
+    //      in Transparent.ready({...}) to explicitly opt-in third-party
+    //      URLs by substring or regex.
+    var originalHeadNodes = new WeakSet();
+    function snapshotHeadNodes() {
         if (document.head) {
             for (var i = 0; i < document.head.children.length; i++) {
-                Transparent._markServerElement(document.head.children[i]);
+                originalHeadNodes.add(document.head.children[i]);
             }
         }
-        if (document.body) {
-            for (var j = 0; j < document.body.children.length; j++) {
-                Transparent._markServerElement(document.body.children[j]);
-            }
+    }
+    // Snapshot synchronously at module-eval time. Defer scripts run after
+    // the parser has built the <head> but before async third-party loaders
+    // execute, so the snapshot captures the server-rendered <head> cleanly.
+    // The DOMContentLoaded fallback handles the rare case where the script
+    // ran before <head> was complete (e.g. in-head non-defer placement).
+    snapshotHeadNodes();
+    if (!document.head) {
+        document.addEventListener("DOMContentLoaded", snapshotHeadNodes, { once: true });
+    }
+
+    Transparent.isHeadlocked = function(el) {
+        if (!el || el.nodeType !== 1) return false;
+        // Explicit attribute opt-out wins over everything else.
+        var attr = el.getAttribute && el.getAttribute("data-headlock");
+        if (attr === "false") return false;
+        // Explicit attribute opt-in (any non-"false" value).
+        if (attr !== null && attr !== undefined) return true;
+        // Auto-lock anything injected after the initial snapshot — by
+        // definition, third-party widgets and their CSS.
+        if (!originalHeadNodes.has(el)) return true;
+        // URL-pattern matching: src for <script>/<link>/<iframe>, href for
+        // <link>, or full textContent for inline <style> blocks. Substring
+        // matches on strings; .test() matches on RegExp.
+        var patterns = Settings["headlock"] || [];
+        if (!patterns.length) return false;
+        var url = el.getAttribute && (el.getAttribute("src") || el.getAttribute("href"));
+        if (!url && el.tagName === 'STYLE') url = el.textContent || '';
+        if (!url) return false;
+        for (var i = 0; i < patterns.length; i++) {
+            var p = patterns[i];
+            if (p instanceof RegExp) { if (p.test(url)) return true; }
+            else if (typeof p === "string" && p.length && url.indexOf(p) !== -1) return true;
         }
+        return false;
     };
-    // Snapshot immediately (in case the library is loaded after </head>),
-    // and again at DOMContentLoaded (catches any synchronous <script>
-    // appends that happen between module load and DOMContentLoaded). All
-    // async/runtime third-party injections happen LATER, so they stay
-    // outside the set — which is exactly what we want.
-    Transparent._snapshotServerElements();
 
     window.addEventListener("DOMContentLoaded", function()
     {
-        Transparent._snapshotServerElements();
         Transparent.loader = $($(document).find(Settings.loader)[0] ?? Transparent.html);
         Transparent.lazyLoad();
     });
@@ -1143,8 +1213,23 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                         image.onload = function() {
                             this.classList.add("loaded");
                             this.classList.remove("loading");
+                            this.classList.remove("error");
                             if(lazybox) lazybox.classList.add("loaded");
                             if(lazybox) lazybox.classList.remove("loading");
+                            if(lazybox) lazybox.classList.remove("error");
+                        };
+
+                        // Error handler for broken / missing images (404, ACL,
+                        // DNS failure, malformed URL). Without this, lazy-loaded
+                        // images that fail just stay invisible. The .error
+                        // class lets project CSS render a placeholder.
+                        image.onerror = function() {
+                            this.classList.add("error");
+                            this.classList.remove("loading");
+                            this.classList.remove("loaded");
+                            if(lazybox) lazybox.classList.add("error");
+                            if(lazybox) lazybox.classList.remove("loading");
+                            if(lazybox) lazybox.classList.remove("loaded");
                         };
 
                         if(lazybox) lazybox.classList.add("loading");
@@ -1273,45 +1358,60 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         });
 
         activeInRemainingTime = activeInRemainingTime - (Date.now() - activeInTime);
-        setTimeout(function() {
+
+        // Whole-swap body extracted so we can dispatch it either through
+        // document.startViewTransition() for browsers that support it (with
+        // Settings.use_view_transitions on), or directly for the legacy path.
+        // Identical behavior in both branches — VT just wraps it so the
+        // browser captures OLD/NEW snapshots and crossfades natively.
+        var _doSwapBody = function() {
 
             // Transfert attributes
             Transparent.transferAttributes(dom);
 
+            // ── Track-reload check ──────────────────────────────────────
+            // Mirrors Turbo's <... data-turbo-track="reload"> mechanism.
+            // Put `data-track="reload"` on critical <script> / <link>
+            // bundles in <head>. On nav, if the set of tracked URLs
+            // differs between current and new HTML, force a full reload
+            // instead of an SPA swap — because the user's loaded JS/CSS
+            // no longer matches what the server is serving (e.g. after
+            // a deploy that bumped asset hashes). The browser then
+            // re-downloads everything cleanly.
+            //
+            // Match key: tagName + src/href (or textContent for inline).
+            // Same logic as Turbo: the SET of tracked URLs must match.
+            (function checkTrackedReload() {
+                function trackedSrcs(root) {
+                    var srcs = [];
+                    var els = root.querySelectorAll('[data-track="reload"]');
+                    for (var i = 0; i < els.length; i++) {
+                        var el = els[i];
+                        var src = el.getAttribute('src') || el.getAttribute('href') ||
+                                  (el.textContent || '').slice(0, 200);
+                        if (src) srcs.push(el.tagName + ':' + src);
+                    }
+                    return srcs.sort();
+                }
+                var currentSrcs = trackedSrcs(document.head);
+                if (!currentSrcs.length) return; // nothing tracked → skip
+                var newDoc = dom.documentElement ? dom : (dom[0] || dom);
+                var newHead = newDoc.head || newDoc.querySelector('head');
+                if (!newHead) return;
+                var newSrcs = trackedSrcs(newHead);
+                // Compare as JSON of sorted arrays — order-independent.
+                if (JSON.stringify(currentSrcs) === JSON.stringify(newSrcs)) return;
+                if (Settings.debug) {
+                    console.log('Transparent track-reload: asset mismatch, forcing reload',
+                                { current: currentSrcs, new: newSrcs });
+                }
+                // Full reload to the requested URL.
+                window.location.href = window.location.toString();
+            })();
+
             // Replace head..
             var head = $(dom).find("head");
             $("head").children().each(function() {
-
-                // NEVER remove <script> or <style> from head during merge.
-                //
-                // Brevo's inline <script> in initial HTML runs SYNCHRONOUSLY
-                // during parse and injects an additional `<script async
-                // src="conversations-widget.brevo.com/...">` into head BEFORE
-                // any defer'd scripts (including this one) execute. The
-                // WeakSet snapshot captures this injected script as if it
-                // were server-rendered, so the merge would remove it on
-                // every nav. Same pattern for GA, Intercom, Crisp, Hotjar.
-                //
-                // It's also functionally useless to remove these:
-                //   - <script> tags already executed; removing the tag does
-                //     NOT unload the loaded JS. It just confuses widgets
-                //     that re-scan the DOM for their own loader state.
-                //   - <style> rules already cascaded; removing the tag pulls
-                //     the styles, breaking third-party-injected CSS.
-                // Page-specific resources are <link rel="stylesheet">, <meta>,
-                // <title>, <link rel="canonical"> — those still get swap
-                // behavior via the rest of this loop.
-                //
-                // The next-loop (add-new-elements) still ADDS new <script>
-                // and <style> tags from the new page if they aren't already
-                // present, so per-page inline scripts/styles still work.
-                if (this.tagName === 'SCRIPT' || this.tagName === 'STYLE') return;
-
-                // PRESERVE third-party-injected non-script/style elements
-                // (rare but possible — e.g. dynamically-added <link> for
-                // an SDK). The WeakSet only contains elements that came
-                // from a server HTML response.
-                if (!Transparent._isServerElement(this)) return;
 
                 var el   = this;
                 var found = false;
@@ -1322,6 +1422,14 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                     return !found;
                 });
 
+                // Preserve headlocked nodes: anything injected dynamically
+                // after initial load (auto), URL-pattern matches in
+                // Settings.headlock, or explicit data-headlock="true".
+                // This is the win over the previous "never remove SCRIPT/
+                // STYLE" rule — per-page server-rendered <style> blocks
+                // (e.g. layout1 inline CSS) still get swapped, only
+                // third-party / dynamically-injected ones are locked.
+                if(!found && Transparent.isHeadlocked(el)) found = true;
                 if(!found) this.remove();
             });
 
@@ -1338,13 +1446,15 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
                         var clone = this.cloneNode(true);
                         $("head").append(clone);
-                        // Tag as server-rendered: came from new page's HTML.
-                        Transparent._markServerElement(clone);
+                        // Register the new node as "original" so it falls
+                        // through to URL-pattern matching on the next swap
+                        // (and isn't auto-locked as third-party content).
+                        originalHeadNodes.add(clone);
 
                     } else {
 
                         $("head").append(this);
-                        Transparent._markServerElement(this);
+                        originalHeadNodes.add(this);
                     }
                 }
             });
@@ -1359,12 +1469,9 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 if(!found) {
 
                     if(this.tagName != "SCRIPT" || Settings["global_code"] == true) {
-                        var clone = this.cloneNode(true);
-                        $("body").append(clone);
-                        Transparent._markServerElement(clone);
+                        $("body").append(this.cloneNode(true));
                     } else {
                         $("body").append(this);
-                        Transparent._markServerElement(this);
                     }
                 }
             });
@@ -1442,7 +1549,28 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 });
             });
 
-        }.bind(this), activeInRemainingTime > 0 ? activeInRemainingTime : 1);
+        }.bind(this);
+
+        // Dispatch the swap. With VT enabled AND supported, wrap in
+        // document.startViewTransition() so the browser captures OLD/NEW
+        // snapshots and crossfades natively. The setTimeout wait is for
+        // the CSS fade-out to complete BEFORE VT begins, so VT captures
+        // the already-faded state cleanly. Errors inside the callback
+        // don't abort the swap — fall back to direct execution.
+        var _vtEnabled = Settings["use_view_transitions"]
+                         && typeof document.startViewTransition === "function";
+        setTimeout(function() {
+            if (_vtEnabled) {
+                try {
+                    document.startViewTransition(_doSwapBody);
+                } catch (e) {
+                    if (Settings.debug) console.warn("Transparent VT failed, falling back:", e);
+                    _doSwapBody();
+                }
+            } else {
+                _doSwapBody();
+            }
+        }, activeInRemainingTime > 0 ? activeInRemainingTime : 1);
     }
 
     function uuidv4() {
