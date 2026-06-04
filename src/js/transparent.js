@@ -179,77 +179,8 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         "smoothscroll_duration": "200ms",
         "smoothscroll_speed"   : 0,
         "smoothscroll_easing"  : "swing",
-        "exceptions": [],
-        // headlock: list of url substrings/regex to preserve in <head> across page transitions
-        // (e.g. third-party widgets that inject <style>/<link> dynamically).
-        // In addition, head nodes injected dynamically AFTER initial DOMContentLoaded are
-        // preserved automatically. Use data-headlock="false" on a head element to opt-out.
-        "headlock": []
+        "exceptions": []
     };
-
-    // Set of <head> children present on initial load. Anything added after is treated
-    // as dynamically injected and preserved across transitions.
-    var originalHeadNodes = new WeakSet();
-    function snapshotHeadNodes() {
-        var head = document.head;
-        if(!head) return;
-        for(var i = 0; i < head.children.length; i++)
-            originalHeadNodes.add(head.children[i]);
-    }
-    // Snapshot synchronously at module-eval time (scripts at end of <body> run before any
-    // async script can inject <style> tags, so the snapshot is clean).
-    // A DOMContentLoaded fallback is kept for the rare case where document.head is null
-    // (e.g. script loaded inside <head> before it finishes parsing).
-    snapshotHeadNodes();
-    if(!document.head)
-        document.addEventListener("DOMContentLoaded", snapshotHeadNodes, { once: true });
-
-    Transparent.isHeadlocked = function(el) {
-        if(!el || el.nodeType !== 1) return false;
-        // Explicit opt-out
-        var attr = el.getAttribute && el.getAttribute("data-headlock");
-        if(attr === "false") return false;
-        // Explicit opt-in via attribute
-        if(attr !== null && attr !== undefined) return true;
-        // Dynamically injected after initial load
-        if(!originalHeadNodes.has(el)) return true;
-        // URL pattern match (src/href attributes)
-        var patterns = Settings["headlock"] || [];
-        if(!patterns.length) return false;
-        var url = el.getAttribute && (el.getAttribute("src") || el.getAttribute("href"));
-        // <style> elements have no src/href — match against CSS textContent instead
-        if(!url && el.tagName === 'STYLE') url = el.textContent || '';
-        if(!url) return false;
-        for(var i = 0; i < patterns.length; i++) {
-            var p = patterns[i];
-            if(p instanceof RegExp) { if(p.test(url)) return true; }
-            else if(typeof p === "string" && p.length && url.indexOf(p) !== -1) return true;
-        }
-        return false;
-    }
-
-    // ─── NAVIGATION TRACE LOG ───────────────────────────────────────
-    // Gated on Settings.debug. Set 'debug': true in Transparent.ready({...})
-    // to surface a per-step trace prefixed with "[TX]" in the console.
-    // Cheap when disabled — single boolean check, no allocation.
-    function _tx(tag, extra) {
-        if (!Settings || !Settings.debug) return;
-        try {
-            var cls = document.documentElement.className;
-            var t = performance.now().toFixed(1);
-            var here = (document.querySelector("#page") || document.documentElement);
-            var lay = here.getAttribute && (here.getAttribute("data-layout") || "?");
-            var path = location.pathname;
-            console.log("%c[TX]", "color:#0a0;font-weight:bold",
-                "+" + t + "ms", tag,
-                "path=" + path,
-                "layout=" + lay,
-                "ajaxSem=" + (typeof ajaxSemaphore === "undefined" ? "?" : ajaxSemaphore),
-                "classes=[" + cls + "]",
-                extra || "");
-        } catch(e) {}
-    }
-    // ────────────────────────────────────────────────────────────────
 
     const State = Transparent.state = {
 
@@ -269,52 +200,16 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         CLICK      : "click",
 
         PREACTIVE  : "pre-active",
-        FADEIN   : "fade-in",
+        ACTIVEIN   : "active-in",
         ACTIVE     : "active",
-        FADEOUT  : "fade-out",
+        ACTIVEOUT  : "active-out",
         POSTACTIVE : "post-active",
 
-        NOTIFICATION: "notification",
-        OFFLINE     : "offline"
+        NOTIFICATION: "notification"
     };
 
     var isReady    = false;
     var rescueMode = false;
-
-    // ─── OFFLINE DETECTION ──────────────────────────────────────────
-    // Two-source signal:
-    //   1. window 'online'/'offline' events fired by the browser when the
-    //      OS-level connectivity changes (Wi-Fi off, airplane mode, etc.)
-    //   2. AJAX network errors during navigation — if a request fails with
-    //      status 0 (and wasn't aborted), the device probably can't reach
-    //      the server even though navigator.onLine may still be true.
-    // The `html.offline` class is the public surface — the project's CSS
-    // styles the YouTube-style "Offline" banner from there. Custom events
-    // `transparent:offline` and `transparent:online` give JS hooks too.
-    var isOnline = (typeof navigator !== "undefined") ? navigator.onLine !== false : true;
-    Transparent.isOnline = function() { return isOnline; }
-    function setOnlineStatus(online) {
-        if (online === isOnline) return;  // no change
-        isOnline = online;
-        if (online) {
-            $($(document).find("html")[0]).removeClass(State.OFFLINE);
-            dispatchEvent(new Event("transparent:online"));
-        } else {
-            $($(document).find("html")[0]).addClass(State.OFFLINE);
-            dispatchEvent(new Event("transparent:offline"));
-        }
-    }
-    if (typeof window !== "undefined") {
-        window.addEventListener("online",  function() { setOnlineStatus(true); });
-        window.addEventListener("offline", function() { setOnlineStatus(false); });
-    }
-    // Apply initial state synchronously so first-paint reflects offline if applicable.
-    if (!isOnline) {
-        // Use the document element directly here — Transparent.html isn't initialized yet at module-eval time.
-        var _htmlEl = document.documentElement;
-        if (_htmlEl && _htmlEl.classList) _htmlEl.classList.add(State.OFFLINE);
-    }
-    // ────────────────────────────────────────────────────────────────
 
     Transparent.html = $($(document).find("html")[0]);
     Transparent.html.addClass(Transparent.state.ROOT+ " " + Transparent.state.LOADING + " " + Transparent.state.FIRST);
@@ -324,8 +219,59 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVE));
     }
 
+    // ── Server-rendered element tracking ───────────────────────────────────
+    //
+    // SPA head/body merging removes elements not present in the new page's
+    // HTML response — correct for server-rendered tags (per-page CSS,
+    // <meta>, page-specific <script>), but it ALSO nukes anything that a
+    // third-party loader injected at runtime: Brevo's chat widget <style>
+    // and <div>, Google Analytics tags, Intercom, Crisp, Hotjar, etc.
+    // These elements are never in any page's HTML response, so the merge
+    // removes them on every nav → user sees the chat widget lose all its
+    // CSS and explode to full screen (visible in the user's screenshot of
+    // navigating /articles → /).
+    //
+    // Fix: maintain a WeakSet of elements known to be server-rendered. The
+    // initial document's head + body children are server-rendered. Anything
+    // we ADD via the SPA merge later is also server-rendered (it came from
+    // a server HTML response). Anything else — third-party script
+    // injections that happen AFTER snapshot — is never added to the set
+    // and is therefore preserved across navs.
+    //
+    // WeakSet means removed elements get garbage-collected → no leak.
+    //
+    // MutationObserver auto-tags elements added by ANY route, so even
+    // body-script appends or head-script appends elsewhere in this library
+    // stay correctly classified.
+    Transparent._serverElements = new WeakSet();
+    Transparent._isServerElement = function(el) {
+        return Transparent._serverElements.has(el);
+    };
+    Transparent._markServerElement = function(el) {
+        if (el && el.nodeType === 1) Transparent._serverElements.add(el);
+    };
+    Transparent._snapshotServerElements = function() {
+        if (document.head) {
+            for (var i = 0; i < document.head.children.length; i++) {
+                Transparent._markServerElement(document.head.children[i]);
+            }
+        }
+        if (document.body) {
+            for (var j = 0; j < document.body.children.length; j++) {
+                Transparent._markServerElement(document.body.children[j]);
+            }
+        }
+    };
+    // Snapshot immediately (in case the library is loaded after </head>),
+    // and again at DOMContentLoaded (catches any synchronous <script>
+    // appends that happen between module load and DOMContentLoaded). All
+    // async/runtime third-party injections happen LATER, so they stay
+    // outside the set — which is exactly what we want.
+    Transparent._snapshotServerElements();
+
     window.addEventListener("DOMContentLoaded", function()
     {
+        Transparent._snapshotServerElements();
         Transparent.loader = $($(document).find(Settings.loader)[0] ?? Transparent.html);
         Transparent.lazyLoad();
     });
@@ -554,7 +500,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
         if($(Transparent.html).hasClass(Transparent.state.FIRST)) {
             Transparent.scrollToHash(location.hash, {}, function() {
-                Transparent.fadeOut(() => Transparent.html.removeClass(Transparent.state.FIRST));
+                Transparent.activeOut(() => Transparent.html.removeClass(Transparent.state.FIRST));
             });
         }
         
@@ -895,37 +841,28 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
         return {delay:delay, duration:duration};
     }
-    var fadeInTime = 0;
-    var fadeInRemainingTime = 0;
-    // Schedule fn for after the currently in-flight fadeIn animation has
-    // finished. Used by handleResponse's three reload/redirect paths to
-    // ensure the loader is at full opacity before the browser unloads.
-    function _waitForFadeIn(fn) {
-        var elapsed = Date.now() - fadeInTime;
-        var remaining = fadeInRemainingTime - elapsed;
-        if (remaining > 0) setTimeout(fn, remaining + 30);
-        else fn();
-    }
-    Transparent.fadeIn = function(activeCallback = function() {}) {
-        _tx("fadeIn ENTRY");
+    var activeInTime = 0;
+    var activeInRemainingTime = 0;
+    Transparent.activeIn = function(activeCallback = function() {}) {
+
         if(!Transparent.html.hasClass(Transparent.state.PREACTIVE)) {
             Transparent.html.addClass(Transparent.state.PREACTIVE);
             dispatchEvent(new Event('transparent:'+Transparent.state.PREACTIVE));
         }
 
         var active = Transparent.activeTime();
-        fadeInTime = Date.now();
-        fadeInRemainingTime = active.delay+active.duration;
+        activeInTime = Date.now();
+        activeInRemainingTime = active.delay+active.duration;
 
         Transparent.html.removeClass(Transparent.state.PREACTIVE);
-        if(!Transparent.html.hasClass(Transparent.state.FADEIN)) {
-            Transparent.html.addClass(Transparent.state.FADEIN);
-            dispatchEvent(new Event('transparent:'+Transparent.state.FADEIN));
+        if(!Transparent.html.hasClass(Transparent.state.ACTIVEIN)) {
+            Transparent.html.addClass(Transparent.state.ACTIVEIN);
+            dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVEIN));
         }
 
         Transparent.callback(function() {
 
-            Transparent.html.removeClass(Transparent.state.FADEIN);
+            Transparent.html.removeClass(Transparent.state.ACTIVEIN);
             if(!Transparent.html.hasClass(Transparent.state.ACTIVE)) {
                 Transparent.html.addClass(Transparent.state.ACTIVE);
                 dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVE));
@@ -935,23 +872,23 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             Transparent.callback(function() {
 
                 activeCallback();
-                fadeInRemainingTime = 0;
+                activeInRemainingTime = 0;
 
             }.bind(this), active.duration);
 
         }.bind(this), active.delay);
     }
 
-    Transparent.fadeOut = function(activeCallback = function() {}) {
-        _tx("fadeOut ENTRY");
+    Transparent.activeOut = function(activeCallback = function() {}) {
+
         if(!Transparent.html.hasClass(Transparent.state.ACTIVE)) {
             Transparent.html.addClass(Transparent.state.ACTIVE);
             dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVE));
         }
 
-        if(!Transparent.html.hasClass(Transparent.state.FADEOUT)) {
-            Transparent.html.addClass(Transparent.state.FADEOUT);
-            dispatchEvent(new Event('transparent:'+Transparent.state.FADEOUT));
+        if(!Transparent.html.hasClass(Transparent.state.ACTIVEOUT)) {
+            Transparent.html.addClass(Transparent.state.ACTIVEOUT);
+            dispatchEvent(new Event('transparent:'+Transparent.state.ACTIVEOUT));
         }
 
         var active = Transparent.activeTime();
@@ -963,7 +900,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             var active = Transparent.activeTime();
             Transparent.callback(function() {
 
-                Transparent.html.removeClass(Transparent.state.FADEOUT);
+                Transparent.html.removeClass(Transparent.state.ACTIVEOUT);
                 if(Transparent.html.hasClass(Transparent.state.LOADING)) {
 
                     dispatchEvent(new Event('transparent:'+Transparent.state.LOADING));
@@ -1068,25 +1005,10 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             Transparent.evalScript($("body")[0]);
         }
 
-        Transparent.fadeOut();
+        Transparent.activeOut();
     }
 
-    Transparent.userScroll = function(el = undefined) {
-        // Defensive: closestScrollable() can return a value without .prop
-        // when called from event handlers on transient DOM (e.g. ajaxer
-        // result containers, sticky-scrollpercent triggers fired during
-        // infinite-scroll while the page is transitioning). The app-defer.js
-        // wrapper around $.fn.closestScrollable is supposed to enforce the
-        // jQuery return, but races with timing-sensitive callers can still
-        // hit this. Default to true ("user is scrolling, don't autoscroll").
-        try {
-            var $target  = $(el === undefined ? document.documentElement : el);
-            if (!$target || !$target.length) return true;
-            var $scroll  = $target.closestScrollable && $target.closestScrollable();
-            if (!$scroll || typeof $scroll.prop !== "function") return true;
-            return $scroll.prop("user-scroll") ?? true;
-        } catch (e) { return true; }
-    }
+    Transparent.userScroll = function(el = undefined) { return $(el === undefined ? document.documentElement : el).closestScrollable().prop("user-scroll") ?? true; }
     Transparent.scrollTo = function(dict, el = window, callback = function() {})
     {
         setTimeout(function() {
@@ -1350,43 +1272,46 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             $(this).stop();
         });
 
-        // Defer the DOM swap until #page's opacity transition has had a
-        // chance to finish. Read the transition-duration from getComputedStyle
-        // (closure-local — no module state shared between navigations) so
-        // this stays in sync with whatever the project's CSS uses. Without
-        // this delay, a fast/cached AJAX response can land the swap while
-        // #page is still partway through the LOADING-induced fade-out,
-        // making the content change visible to the user (the original
-        // flicker).
-        var _swapDelay = 1;
-        try {
-            var _pageEl = $(Settings.identifier)[0];
-            if (_pageEl) {
-                var _dur = 1000 * Transparent.parseDuration(
-                    window.getComputedStyle(_pageEl).transitionDuration || "0"
-                );
-                if (_dur > 1) _swapDelay = _dur;
-            }
-        } catch(e) {}
-
+        activeInRemainingTime = activeInRemainingTime - (Date.now() - activeInTime);
         setTimeout(function() {
 
-            _tx("onLoad BODY (after " + _swapDelay + "ms)");
             // Transfert attributes
             Transparent.transferAttributes(dom);
 
             // Replace head..
             var head = $(dom).find("head");
-
-            // Snapshot hrefs of already-loaded stylesheets so we can detect new ones
-            // added by the head merge and wait for them to finish loading before
-            // making #page visible (prevents FOUC on cold-cache layout transitions).
-            var _existingStyleHrefs = {};
-            $("head").children("link[rel='stylesheet']").each(function() {
-                var h = this.getAttribute("href"); if(h) _existingStyleHrefs[h] = true;
-            });
-
             $("head").children().each(function() {
+
+                // NEVER remove <script> or <style> from head during merge.
+                //
+                // Brevo's inline <script> in initial HTML runs SYNCHRONOUSLY
+                // during parse and injects an additional `<script async
+                // src="conversations-widget.brevo.com/...">` into head BEFORE
+                // any defer'd scripts (including this one) execute. The
+                // WeakSet snapshot captures this injected script as if it
+                // were server-rendered, so the merge would remove it on
+                // every nav. Same pattern for GA, Intercom, Crisp, Hotjar.
+                //
+                // It's also functionally useless to remove these:
+                //   - <script> tags already executed; removing the tag does
+                //     NOT unload the loaded JS. It just confuses widgets
+                //     that re-scan the DOM for their own loader state.
+                //   - <style> rules already cascaded; removing the tag pulls
+                //     the styles, breaking third-party-injected CSS.
+                // Page-specific resources are <link rel="stylesheet">, <meta>,
+                // <title>, <link rel="canonical"> — those still get swap
+                // behavior via the rest of this loop.
+                //
+                // The next-loop (add-new-elements) still ADDS new <script>
+                // and <style> tags from the new page if they aren't already
+                // present, so per-page inline scripts/styles still work.
+                if (this.tagName === 'SCRIPT' || this.tagName === 'STYLE') return;
+
+                // PRESERVE third-party-injected non-script/style elements
+                // (rare but possible — e.g. dynamically-added <link> for
+                // an SDK). The WeakSet only contains elements that came
+                // from a server HTML response.
+                if (!Transparent._isServerElement(this)) return;
 
                 var el   = this;
                 var found = false;
@@ -1394,17 +1319,9 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 head.children().each(function() {
 
                     found = this.isEqualNode(el);
-                    // Also match identical <style> tags by content
-                    if(!found && el.tagName === 'STYLE' && this.tagName === 'STYLE' &&
-                       el.textContent && this.textContent &&
-                       el.textContent.length > 100 && this.textContent.length === el.textContent.length) {
-                        found = this.textContent === el.textContent;
-                    }
                     return !found;
                 });
 
-                // Preserve headlocked nodes (dynamically injected widgets, url-matched, etc.)
-                if(!found && Transparent.isHeadlocked(el)) found = true;
                 if(!found) this.remove();
             });
 
@@ -1416,35 +1333,18 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 $("head").children().each(function() { found |= this.isEqualNode(el); });
                 if(!found) {
 
-                    if(this.tagName == "SCRIPT" && Settings["global_code"] != true) {
 
-                        // For inline scripts (without src), recreate so the browser will execute.
-                        // Simply re-appending the same <script> node doesn't execute it.
-                        if(!this.src || this.src === '') {
-                            var script = document.createElement("script");
-                            script.text = this.innerHTML;
-                            var i = -1, attrs = this.attributes, attr;
-                            var N = attrs.length;
-                            while ( ++i < N ) {
-                                if(attrs[i].name !== 'src') {
-                                    script.setAttribute( attrs[i].name, attrs[i].value );
-                                }
-                            }
-                            $("head").append(script);
-                            originalHeadNodes.add(script);
-                        } else {
-                            $("head").append(this);
-                            originalHeadNodes.add(this);
-                        }
+                    if(this.tagName != "SCRIPT" || Settings["global_code"] == true) {
+
+                        var clone = this.cloneNode(true);
+                        $("head").append(clone);
+                        // Tag as server-rendered: came from new page's HTML.
+                        Transparent._markServerElement(clone);
 
                     } else {
 
-                        var clonedEl = this.cloneNode(true);
-                        $("head").append(clonedEl);
-                        // Register as an "original" node so it falls through to URL-pattern
-                        // matching on future transitions — prevents layout CSS added by
-                        // Transparent itself from being auto-headlocked as third-party content.
-                        originalHeadNodes.add(clonedEl);
+                        $("head").append(this);
+                        Transparent._markServerElement(this);
                     }
                 }
             });
@@ -1458,27 +1358,13 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 $("body").children().each(function() { found |= this.isEqualNode(el); });
                 if(!found) {
 
-                    if(this.tagName == "SCRIPT" && Settings["global_code"] != true) {
-
-                        // Same inline-script recreation as for <head>.
-                        if(!this.src || this.src === '') {
-                            var script = document.createElement("script");
-                            script.text = this.innerHTML;
-                            var i = -1, attrs = this.attributes, attr;
-                            var N = attrs.length;
-                            while ( ++i < N ) {
-                                if(attrs[i].name !== 'src') {
-                                    script.setAttribute( attrs[i].name, attrs[i].value );
-                                }
-                            }
-                            $("body").append(script);
-                        } else {
-                            $("body").append(this);
-                        }
-
+                    if(this.tagName != "SCRIPT" || Settings["global_code"] == true) {
+                        var clone = this.cloneNode(true);
+                        $("body").append(clone);
+                        Transparent._markServerElement(clone);
                     } else {
-
-                        $("body").append(this.cloneNode(true));
+                        $("body").append(this);
+                        Transparent._markServerElement(this);
                     }
                 }
             });
@@ -1495,13 +1381,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             // Make sure name/layout keep the same after a page change (tolerance for POST or GET requests)
             if(oldPage.attr("data-layout") != undefined && page.attr("data-layout") != undefined) {
 
-                // X = prevLayout, Y = newLayout — must match the formula in handleResponse
-                // (line ~1852: SWITCH.replace("X", prevLayout).replace("Y", newLayout)).
-                // If these disagreed, the cleanup filter below would not recognize the
-                // switchLayout class that handleResponse added to <html> and would strip
-                // it before its CSS transition could play — visible as a race only in
-                // whichever direction the project's CSS actually styles.
-                var switchLayout = Transparent.state.SWITCH.replace("X", oldPage.attr("data-layout")).replace("Y", page.attr("data-layout"));
+                var switchLayout = Transparent.state.SWITCH.replace("X", page.attr("data-layout")).replace("Y", oldPage.attr("data-layout"));
                 page.attr("data-layout-prev", oldPage.attr("data-layout"));
             }
 
@@ -1510,13 +1390,10 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             var  oldHtmlClass = Array.from(($(Transparent.html).attr("class") || "").split(" "));
             var removeHtmlClass = oldHtmlClass.filter(x => !htmlClass.includes(x) && switchLayout != x && !states.includes(x));
 
-            _tx("onLoad classMgmt", "switchLayout=" + switchLayout + " remove=[" + removeHtmlClass.join(",") + "] add=[" + htmlClass.join(",") + "]");
             Transparent.html.removeClass(removeHtmlClass).addClass(htmlClass);
-            _tx("onLoad PAGE_SWAP_BEGIN", "oldLayout=" + (oldPage.attr("data-layout")||"?") + " newLayout=" + (page.attr("data-layout")||"?"));
             $(page).insertBefore(oldPage);
 
             oldPage.remove();
-            _tx("onLoad PAGE_SWAP_DONE");
 
             if(Settings["global_code"] == true) Transparent.evalScript($(page)[0]);
             document.dispatchEvent(new Event('DOMContentLoaded'));
@@ -1552,77 +1429,20 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 }
             }
 
-            // Collect link[rel="stylesheet"] elements inserted by the head merge above
-            var _newStyleLinks = [];
-            $("head").children("link[rel='stylesheet']").each(function() {
-                var h = this.getAttribute("href");
-                if(h && !_existingStyleHrefs[h]) _newStyleLinks.push(this);
+            $('head').append(function() {
+
+                $(Settings.identifier).append(function() {
+
+                        // Callback if needed, or any other actions
+                        callback();
+
+                        // Trigger onload event
+                        dispatchEvent(new Event('transparent:load'));
+                        dispatchEvent(new Event('load'));
+                });
             });
 
-            // Wait for any newly added layout stylesheets to finish loading before
-            // calling callback() / fadeOut() — otherwise #page becomes visible while
-            // the new CSS is still being parsed, causing a flash of unstyled content.
-            (function() {
-                function doCallback() {
-                    _tx("doCallback FIRES → callback() (which starts fadeOut)");
-                    // requestAnimationFrame here guarantees the browser has had one
-                    // full frame to apply the new page's stylesheets and re-layout
-                    // before fadeOut starts. Without it, fadeOut can animate the
-                    // loader away while the new page is still rendered with the
-                    // previous layout's styles — the article→home flicker the
-                    // [TX] trace masked via instrumentation overhead.
-                    requestAnimationFrame(function() {
-                        $('head').append(function() {
-                            $(Settings.identifier).append(function() {
-                                callback();
-                                dispatchEvent(new Event('transparent:load'));
-                                dispatchEvent(new Event('load'));
-                            });
-                        });
-                    });
-                }
-                // For cached stylesheets, the browser may fire `load` synchronously on
-                // DOM insertion — BEFORE we can attach a listener — so listener-only
-                // waits get stuck on the 3 s guard. `.sheet !== null` indicates the
-                // CSSStyleSheet is already parsed and ready, which is the right
-                // condition to count it as "done." Cross-origin sheets still expose
-                // `.sheet` even though `.cssRules` throws — `.sheet !== null` is
-                // portable.
-                function isStyleLoaded(link) {
-                    try { return link.sheet !== null; } catch(e) { return true; }
-                }
-                var pending = _newStyleLinks.filter(function(l) { return !isStyleLoaded(l); });
-                _tx("stylesheet-wait BEGIN", "newLinks=" + _newStyleLinks.length + " cachedSkipped=" + (_newStyleLinks.length - pending.length) + " pending=" + pending.length);
-                if(pending.length === 0) {
-                    _tx("stylesheet-wait IMMEDIATE → doCallback");
-                    doCallback();
-                } else {
-                    var remaining = pending.length;
-                    var fired = false;
-                    // Safety valve: if a stylesheet fails or stalls, don't block forever.
-                    var guard = setTimeout(function() {
-                        if(!fired) {
-                            _tx("stylesheet-wait GUARD fired (3s)", "remaining=" + remaining);
-                            fired = true; doCallback();
-                        }
-                    }, 3000);
-                    pending.forEach(function(link) {
-                        function onDone(e) {
-                            _tx("stylesheet-wait link.load", "remaining=" + (remaining-1) + " href=" + link.getAttribute("href"));
-                            if(--remaining <= 0 && !fired) {
-                                fired = true;
-                                clearTimeout(guard);
-                                _tx("stylesheet-wait ALL_LOADED → doCallback");
-                                doCallback();
-                            }
-                        }
-                        link.addEventListener('load',  onDone, {once:true});
-                        link.addEventListener('error', onDone, {once:true});
-                    });
-                }
-            })();
-
-        }.bind(this), _swapDelay);
+        }.bind(this), activeInRemainingTime > 0 ? activeInRemainingTime : 1);
     }
 
     function uuidv4() {
@@ -1733,8 +1553,318 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
     var ajaxSemaphore = false;
     var formSubmission = false;
+
+    // ── User-typed form dirty tracking ──────────────────────────────────────
+    //
+    // True if the user has modified any form input via a real keystroke /
+    // click / select. False after a fresh navigation OR after a form submit.
+    // Used by onbeforeunload to decide whether to confirm.
+    //
+    // `e.isTrusted` filters out programmatic value mutations from JS init
+    // code (Select2 setting the hidden field after dropdown selection,
+    // Editor.js syncing JSON to a hidden <textarea>, datepicker init writing
+    // a normalized value, etc.). Without this filter, the previous value-
+    // comparison logic (formDataBefore vs formDataAfter) flagged every
+    // page-with-form as "dirty" by the time the user hit Ctrl+W, even
+    // when they hadn't typed anything.
+    var formDirty = false;
+    document.addEventListener('input', function(e) {
+        if (!e.isTrusted) return;
+        if (!e.target || !e.target.form) return;
+        formDirty = true;
+    }, true);
+    document.addEventListener('change', function(e) {
+        if (!e.isTrusted) return;
+        if (!e.target || !e.target.form) return;
+        formDirty = true;
+    }, true);
+    // Reset on user-initiated submit so the post-submit redirect doesn't
+    // double-prompt. The existing `formSubmission` flag already handles
+    // the synchronous prompt path; this clears state for any follow-up.
+    document.addEventListener('submit', function() { formDirty = false; }, true);
+
+    // ── Transparent.formMemory ──────────────────────────────────────────────
+    //
+    // Persistent draft store for forms — survives accidental close, refresh,
+    // power loss, browser crash. Keyed by URL + form identity (name or id).
+    //
+    // Save triggers:
+    //   - debounced (500ms) on user `input`/`change` events
+    //   - synchronously on beforeunload (last-resort capture for fields
+    //     mutated by JS like Editor.js / Select2 that don't fire trusted
+    //     `input` events)
+    //
+    // Restore: silently on initial DOMContentLoaded AND after each SPA swap
+    // (transparent.js re-dispatches DOMContentLoaded post-swap, line ~1375).
+    // Restored fields get `data-restored-from-draft=""` for optional
+    // project-level toast / styling.
+    //
+    // Clear: on form submit + on TTL expiry (7 days) + manually via
+    // `Transparent.formMemory.clear(form)`.
+    //
+    // Opt-out:
+    //   - `<form data-no-persist>` — entire form skipped
+    //   - `<input data-no-persist>` — single field skipped
+    //   - Auto-skipped: type="password", type="file", type="submit"/button,
+    //     and any hidden field whose name contains `_token` or `csrf`
+    //     (Symfony CSRF token field). These are never persisted.
+    //
+    // Editor.js compatibility: Editor.js reads its initial JSON from
+    // `data-edjs` attribute (not `.value`). On restore, if the field is a
+    // <textarea data-edjs>, we mirror the restored value into `data-edjs`
+    // too so Editor.js renders the draft when its init pass runs.
+    Transparent.formMemory = (function() {
+        var KEY_PREFIX  = 'tx-form-memory:';
+        var DEFAULT_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
+        var DEBOUNCE    = 500;
+
+        var saveTimers = new WeakMap();
+        var api = {
+            enabled : true,
+            ttl     : DEFAULT_TTL,
+            debounce: DEBOUNCE,
+        };
+
+        function shouldSkipField(field) {
+            if (!field.name) return true;
+            var type = (field.type || '').toLowerCase();
+            if (type === 'password' || type === 'file') return true;
+            if (type === 'submit' || type === 'button' || type === 'reset') return true;
+            if (field.hasAttribute && field.hasAttribute('data-no-persist')) return true;
+            // CSRF tokens — never persist. Matches Symfony's `_token` and
+            // any other token-named hidden input (`csrf`, `_csrf_token`, ...).
+            if (type === 'hidden') {
+                var n = field.name.toLowerCase();
+                if (n.indexOf('_token') !== -1 || n.indexOf('csrf') !== -1) return true;
+            }
+            return false;
+        }
+
+        function shouldSkipForm(form) {
+            if (!form) return true;
+            if (form.hasAttribute && form.hasAttribute('data-no-persist')) return true;
+            if (!form.name && !form.id) return true; // need identity for key
+            return false;
+        }
+
+        function getKey(form) {
+            return KEY_PREFIX + location.pathname + ':' + (form.name || form.id);
+        }
+
+        function readLS(key) {
+            try { return localStorage.getItem(key); } catch (e) { return null; }
+        }
+        function writeLS(key, val) {
+            try { localStorage.setItem(key, val); } catch (e) {
+                // Quota exceeded or storage disabled — fail silent. The
+                // user keeps their work in memory, just loses persistence.
+            }
+        }
+        function removeLS(key) {
+            try { localStorage.removeItem(key); } catch (e) {}
+        }
+
+        api.save = function(form) {
+            if (!api.enabled) return;
+            if (shouldSkipForm(form)) return;
+
+            var data = {};
+            var elements = form.elements;
+            for (var i = 0; i < elements.length; i++) {
+                var field = elements[i];
+                if (shouldSkipField(field)) continue;
+
+                var type = (field.type || '').toLowerCase();
+                if (type === 'checkbox' || type === 'radio') {
+                    if (!field.checked) continue;
+                    if (data[field.name] === undefined) {
+                        data[field.name] = field.value;
+                    } else if (Array.isArray(data[field.name])) {
+                        data[field.name].push(field.value);
+                    } else {
+                        data[field.name] = [data[field.name], field.value];
+                    }
+                } else if (field.tagName === 'SELECT' && field.multiple) {
+                    var sel = [];
+                    for (var j = 0; j < field.options.length; j++) {
+                        if (field.options[j].selected) sel.push(field.options[j].value);
+                    }
+                    data[field.name] = sel;
+                } else {
+                    data[field.name] = field.value;
+                }
+            }
+
+            if (Object.keys(data).length === 0) {
+                // No persistable fields with data — clear any stale entry
+                // rather than write an empty record (avoids restoring "all
+                // empty" later and overwriting newly-pre-filled fields).
+                removeLS(getKey(form));
+                return;
+            }
+
+            writeLS(getKey(form), JSON.stringify({ t: Date.now(), d: data }));
+        };
+
+        api.restore = function(form) {
+            if (!api.enabled) return;
+            if (shouldSkipForm(form)) return;
+
+            var key = getKey(form);
+            var raw = readLS(key);
+            if (!raw) return;
+
+            var entry;
+            try { entry = JSON.parse(raw); }
+            catch (e) { removeLS(key); return; }
+
+            if (!entry || !entry.t || !entry.d) { removeLS(key); return; }
+            if (Date.now() - entry.t > api.ttl) { removeLS(key); return; }
+
+            Object.keys(entry.d).forEach(function(name) {
+                var value = entry.d[name];
+                // Use attr-selector with CSS.escape to handle names like
+                // `Article[content]` that contain brackets.
+                var sel = '[name="' + (typeof CSS !== 'undefined' && CSS.escape
+                                       ? CSS.escape(name)
+                                       : name.replace(/(["\\\[\]])/g, '\\$1')) + '"]';
+                var fields = form.querySelectorAll(sel);
+                if (fields.length === 0) return;
+
+                for (var k = 0; k < fields.length; k++) {
+                    var field = fields[k];
+                    if (shouldSkipField(field)) continue;
+
+                    var type = (field.type || '').toLowerCase();
+                    if (type === 'checkbox' || type === 'radio') {
+                        field.checked = Array.isArray(value)
+                            ? (value.indexOf(field.value) !== -1)
+                            : (field.value === value);
+                    } else if (field.tagName === 'SELECT' && field.multiple) {
+                        if (Array.isArray(value)) {
+                            for (var m = 0; m < field.options.length; m++) {
+                                field.options[m].selected = (value.indexOf(field.options[m].value) !== -1);
+                            }
+                        }
+                    } else {
+                        field.value = value;
+                        // Editor.js mirrors: Editor.js reads its initial JSON
+                        // from the `data-edjs` attribute, not from .value. So
+                        // we have to mirror the restored value into the attr
+                        // for the upcoming Editor.js init pass to pick it up.
+                        if (field.tagName === 'TEXTAREA' && field.hasAttribute('data-edjs')) {
+                            field.setAttribute('data-edjs', value);
+                        }
+                    }
+                    field.setAttribute('data-restored-from-draft', '');
+                }
+            });
+        };
+
+        api.clear = function(form) {
+            if (!form) return;
+            if (shouldSkipForm(form)) return;
+            removeLS(getKey(form));
+        };
+
+        api.restoreAll = function() {
+            var forms = document.querySelectorAll('form');
+            for (var i = 0; i < forms.length; i++) api.restore(forms[i]);
+        };
+
+        api.saveAll = function() {
+            var forms = document.querySelectorAll('form');
+            for (var i = 0; i < forms.length; i++) api.save(forms[i]);
+        };
+
+        api.clearExpired = function() {
+            var ttl = api.ttl;
+            var now = Date.now();
+            try {
+                for (var i = localStorage.length - 1; i >= 0; i--) {
+                    var key = localStorage.key(i);
+                    if (!key || key.indexOf(KEY_PREFIX) !== 0) continue;
+                    var raw;
+                    try { raw = localStorage.getItem(key); }
+                    catch (e) { continue; }
+                    var entry = null;
+                    try { entry = JSON.parse(raw); } catch (e) {}
+                    if (!entry || !entry.t || (now - entry.t > ttl)) {
+                        removeLS(key);
+                    }
+                }
+            } catch (e) {}
+        };
+
+        // Debounced per-form save scheduler. WeakMap → no leak when forms
+        // get removed from the DOM (e.g., on SPA swap).
+        function debouncedSave(form) {
+            if (!form || shouldSkipForm(form)) return;
+            var existing = saveTimers.get(form);
+            if (existing) clearTimeout(existing);
+            saveTimers.set(form, setTimeout(function() {
+                api.save(form);
+            }, api.debounce));
+        }
+
+        // Event wiring. Capture phase + isTrusted gate matches the
+        // formDirty pattern above — programmatic field mutations from
+        // Select2/Editor.js init code don't trigger a save here, which is
+        // correct (those are not "user changes"; saving them would persist
+        // server-rendered defaults as if they were user input).
+        document.addEventListener('input', function(e) {
+            if (!e.isTrusted) return;
+            if (!e.target || !e.target.form) return;
+            debouncedSave(e.target.form);
+        }, true);
+        document.addEventListener('change', function(e) {
+            if (!e.isTrusted) return;
+            if (!e.target || !e.target.form) return;
+            debouncedSave(e.target.form);
+        }, true);
+
+        // Successful submit clears the draft. We listen in capture so we
+        // run before any user-side submit handler that might cancel.
+        document.addEventListener('submit', function(e) {
+            if (e.target && e.target.tagName === 'FORM') {
+                api.clear(e.target);
+            }
+        }, true);
+
+        // Last-resort save on page exit. Catches state mutated only by JS
+        // (Editor.js content syncs, Select2 hidden-field writes) that
+        // never fired trusted input/change events. Synchronous because
+        // beforeunload doesn't await microtasks.
+        window.addEventListener('beforeunload', function() {
+            if (!api.enabled) return;
+            // Only save if the user has actually typed something — same
+            // gate as the unload-confirm prompt above. If formDirty is
+            // false, drafts written from the debounced handler are stale
+            // and we don't want to refresh them on every page-close.
+            if (formDirty) api.saveAll();
+        });
+
+        // Initial restore. If we're already past DOMContentLoaded (defer
+        // scripts run after parsing but before DCL), run synchronously.
+        // For SPA navs, transparent.js re-dispatches DOMContentLoaded in
+        // _doSwap (around line 1375), so this same listener fires again
+        // on every swap — no extra wiring needed.
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', api.restoreAll);
+        } else {
+            api.restoreAll();
+        }
+        document.addEventListener('DOMContentLoaded', api.restoreAll);
+
+        // Cleanup expired entries — once at startup, deferred so it
+        // doesn't block first paint.
+        setTimeout(api.clearExpired, 2000);
+
+        return api;
+    })();
+
     function __main__(e) {
-        _tx("__main__ ENTRY", "event=" + e.type + (e.target && e.target.tagName ? " target=" + e.target.tagName : ""));
+
         // Disable transparent JS (e.g. during development..)
         if(Settings.disable) return;
 
@@ -1826,17 +1956,6 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         if (ajaxSemaphore) return;
         if (url == location) return;
 
-        // Block navigation when offline. Project CSS / JS can react to
-        // html.offline + the transparent:offline event to surface a banner.
-        // The event is re-dispatched here on each attempted navigation so a
-        // listener can briefly flash/highlight the banner to acknowledge the
-        // click instead of doing nothing silently.
-        if (!isOnline || (typeof navigator !== "undefined" && navigator.onLine === false)) {
-            setOnlineStatus(false);
-            dispatchEvent(new Event("transparent:offline"));
-            return;
-        }
-
         if((e.type == Transparent.state.CLICK || e.type == Transparent.state.HASHCHANGE) && url.pathname == location.pathname && url.search == location.search && type != "POST") {
 
             if(!url.hash) return;
@@ -1862,7 +1981,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         $(Transparent.html).stop();
 
         Transparent.html.addClass(Transparent.state.LOADING);
-        Transparent.fadeIn();
+        Transparent.activeIn();
 
         function isJsonResponse(str) {
             try { JSON.parse(str); return true; }
@@ -1870,7 +1989,6 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         }
 
         function handleResponse(uuid, status = 200, method = null, data = null, xhr = null, request = null) {
-            _tx("handleResponse ENTRY", "status=" + status + " method=" + method);
 
             ajaxSemaphore = false;
             
@@ -1956,18 +2074,12 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 history.pushState({uuid: uuid, status:status, method: method, data: {}, href: responseURL}, '', responseURL);
 
             // Page not recognized.. just go fetch by yourself.. no POST information transmitted..
-            // Defer the redirect until fadeIn settles, same reasoning as the
-            // html.reload path above.
-            if(!Transparent.isPage(dom)) {
-                _waitForFadeIn(function() { window.location.href = url; });
-                return;
-            }
+            if(!Transparent.isPage(dom))
+                return window.location.href = url;
 
             // Layout not compatible.. needs to be reloaded (exception when POST is detected..)
-            if(!Transparent.isCompatiblePage(dom, method, data)) {
-                _waitForFadeIn(function() { window.location.href = url; });
-                return;
-            }
+            if(!Transparent.isCompatiblePage(dom, method, data))
+                return window.location.href = url;
 
             // Mark layout as known
             if(!Transparent.isKnownLayout(dom)) {
@@ -1995,46 +2107,16 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 Transparent.html.addClass(Transparent.state.SAME);
 
             var switchLayout = Transparent.state.SWITCH.replace("X", prevLayout).replace("Y", newLayout);
-            _tx("handleResponse switchLayout", "prev=" + prevLayout + " new=" + newLayout + " adds=." + switchLayout);
             Transparent.html.addClass(switchLayout);
 
             dispatchEvent(new Event('transparent:'+switchLayout));
 
-            if($(dom).find("html").hasClass(Transparent.state.RELOAD) || $(dom).find("html").hasClass(Transparent.state.DISABLE)) {
-                // Defer the reload until fadeIn has finished, so the loader is
-                // at full opacity when the browser unloads. Without this, a
-                // fast AJAX response can fire reload() while fadeIn is still
-                // mid-animation: the browser swaps to a page that starts with
-                // .active (loader at 100%), and the user perceives a snap
-                // from in-progress opacity to full. Reading as "fade-out then
-                // fade-in" because the partial loader receded as the browser
-                // swapped frames.
-                _waitForFadeIn(function() { window.location.reload(); });
-                return;
-            }
-
-            // Kick off preloads for stylesheets the new page needs but aren't yet in <head>.
-            // They download in parallel during the fadeIn animation so onLoad() finds them
-            // already cached — eliminating FOUC on cold-cache layout transitions.
-            (function() {
-                var loaded = {};
-                $("head").children("link[rel='stylesheet']").each(function() {
-                    var h = this.getAttribute("href"); if(h) loaded[h] = true;
-                });
-
-                $(dom).find("head").children("link[rel='stylesheet']").each(function() {
-                    var h = this.getAttribute("href");
-                    if(!h || loaded[h]) return;
-                    if($("head").find("link[rel='preload'][href='" + h.replace(/'/g, "\\'") + "']").length) return;
-                    var pl = document.createElement("link");
-                    pl.rel = "preload"; pl.as = "style"; pl.href = h;
-                    document.head.appendChild(pl);
-                });
-            })();
+            if($(dom).find("html").hasClass(Transparent.state.RELOAD) || $(dom).find("html").hasClass(Transparent.state.DISABLE))
+                return window.location.reload();
 
             return Transparent.onLoad(uuid, dom, function() {
 
-                Transparent.fadeOut(function() {
+                Transparent.activeOut(function() {
 
                     Transparent.html
                         .removeClass(switchLayout)
@@ -2057,7 +2139,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             if(history.state)
                 Transparent.setResponse(history.state.uuid, Transparent.html[0], Transparent.getScrollableElementXY());
 
-            $(Transparent.html).prop("user-scroll", false); // make sure to avoid page jump during transition (cancelled in fadeIn callback)
+            $(Transparent.html).prop("user-scroll", false); // make sure to avoid page jump during transition (cancelled in activeIn callback)
 
             // Submit ajax request..
             if(form) form.dispatchEvent(new SubmitEvent("submit", { submitter: formTrigger }));
@@ -2072,18 +2154,8 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 processData: false,
                 headers: Settings["headers"] || {},
                 xhr: function () { return xhr; },
-                success: function (html, status, request) { _tx("ajax SUCCESS", "status=" + request.status); return handleResponse(uuid, request.status, type, data, xhr, request); },
-                error:   function (request, ajaxOptions, thrownError) {
-                    _tx("ajax ERROR", "status=" + request.status + " textStatus=" + ajaxOptions);
-                    // status=0 with non-abort textStatus typically means the device
-                    // couldn't reach the server: dropped connection, DNS failure,
-                    // captive portal, etc. Flip to offline so the project's banner
-                    // surfaces even if navigator.onLine still reports true.
-                    if (request.status === 0 && ajaxOptions !== "abort") {
-                        setOnlineStatus(false);
-                    }
-                    return handleResponse(uuid, request.status, type, data, xhr, request);
-                }
+                success: function (html, status, request) { return handleResponse(uuid, request.status, type, data, xhr, request); },
+                error:   function (request, ajaxOptions, thrownError) { return handleResponse(uuid, request.status, type, data, xhr, request); }
             });
         }
 
@@ -2114,99 +2186,33 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         window.onpopstate   = __main__; // Onpopstate pop out straight to previous page.. this creates a jump while changing pages with hash..
         window.onhashchange = __main__;
 
-        var formDataBefore = {};
-        $(window).on("load", function() {
-
-            formDataBefore = {};
-            $("form").each(function() {
-
-                var formData = new FormData();
-                var formInput = $("[name^='"+this.name+"\[']");
-                    formInput.each(function() {
-
-                        if(this.type == "file") {
-
-                            for(var i = 0; i < this.files.length; i++)
-                                formData.append(this.name+"["+i+"]", this.files[i].name+";"+this.files[i].size+";"+this.files[i].lastModified);
-
-                        } else formData.append(this.name, this.value);
-                    });
-
-                for (var [fieldName,fieldValue] of formData.entries()) {
-
-                    if(!fieldName.endsWith("[]") && fieldName != "undefined")
-                        formDataBefore[fieldName] = fieldValue;
-                }
-            });
-        });
-
+        // onbeforeunload: confirm only if the user has actually typed/edited
+        // a form input on this page. Pre-Turbo this used a snapshot-and-
+        // compare approach (formDataBefore vs formDataAfter) which gave
+        // false positives because JS init code mutates form values after
+        // load — Select2 writes selected text to hidden fields, Editor.js
+        // serializes its JSON to a <textarea>, datepicker normalizes
+        // formats, etc. — so by the time the user hit Ctrl+W the snapshot
+        // and the current state always differed, and the browser always
+        // prompted even on read-only pages.
+        //
+        // The replacement is the `formDirty` flag declared above, which is
+        // set only by trusted (user-originated) `input`/`change` events.
+        // No prompt unless the user genuinely typed something.
         window.onbeforeunload = function(e) {
 
             if(Settings.debug) console.log("Transparent onbeforeunload event called..");
 
             if(formSubmission) return; // Do not display on form submission
             if(Settings.disable) return;
-
             if(e.currentTarget == window) return;
+            if(!formDirty) return; // ← user hasn't modified anything; no prompt
 
-            var preventDefault = false;
-            var formDataAfter = [];
-            $("form").each(function() {
+            Transparent.html.addClass(Transparent.state.READY);
+            Transparent.activeOut();
+            dispatchEvent(new Event('load'));
 
-                var formData = new FormData();
-                var formInput = $("[name^='"+this.name+"\[']");
-                formInput.each(function() {
-
-                    if(this.type == "file") {
-
-                        for(var i = 0; i < this.files.length; i++)
-                            formData.append(this.name+"["+i+"]", this.files[i].name+";"+this.files[i].size+";"+this.files[i].lastModified);
-
-                    } else formData.append(this.name, this.value);
-                });
-
-                for (var [fieldName,fieldValue] of formData.entries()) {
-
-                    if(!fieldName.endsWith("[]") && fieldName != "undefined")
-                        formDataAfter[fieldName] = fieldValue;
-                }
-            });
-
-            var formDataBeforeKeys    = Object.keys(formDataBefore);
-            var formDataAfterKeys     = Object.keys(formDataAfter);
-            function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
-            function sameKeys(a, b) {
-
-                var aKeys = Object.keys(a).sort();
-                var bKeys = Object.keys(b).sort();
-                return JSON.stringify(aKeys) === JSON.stringify(bKeys);
-            }
-
-            if(!sameKeys(formDataBeforeKeys, formDataAfterKeys)) preventDefault = true;
-            else {
-
-                for (var [fieldName,fieldValueAfter] of Object.entries(formDataAfter)) {
-
-                    var fieldValueBefore = formDataBefore[fieldName];
-                    if(fieldValueBefore instanceof File) {
-
-                        if(!fieldValueAfter instanceof File) preventDefault = true;
-                        else if (fieldValueBefore.size != fieldValueAfter.size) preventDefault = true;
-
-                    } else if(fieldValueBefore != fieldValueAfter) {
-                        preventDefault = true;
-                    }
-                }
-            }
-
-            if(Settings.debug || preventDefault) {
-
-                if(preventDefault) Transparent.html.addClass(Transparent.state.READY);
-                if(preventDefault) Transparent.fadeOut();
-                if(preventDefault) dispatchEvent(new Event('load'));
-
-                return "Dude, are you sure you want to leave? Think of the kittens!";
-            }
+            return "Dude, are you sure you want to leave? Think of the kittens!";
         }
 
         document.addEventListener('click', __main__, false);
