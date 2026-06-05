@@ -430,10 +430,71 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         return this;
     }
 
+    // ── In-memory live-DOM cache ────────────────────────────────────────────
+    //
+    // Turbo-style: store cloned <html> Element nodes per uuid so popstate
+    // (back/forward) can short-circuit the XHR + sessionStorage round-trip
+    // + DOMParser.parseFromString cycle. Result: back/forward feels instant.
+    //
+    // Key vs sessionStorage flow:
+    //   - sessionStorage: outerHTML serialize (slow) → string (5-10MB
+    //     quota) → JSON read → DOMParser parse (slow). Whole cycle on
+    //     every popstate. Used as the fallback when the live cache misses.
+    //   - liveDomCache: cloneNode(true) of the rendered <html> element
+    //     stored in a Map<uuid, {node, scroll, ts}>. Bounded with LRU.
+    //     No serialization, no parsing — just the live DOM node ready
+    //     for the swap to consume.
+    //
+    // setResponse populates BOTH (live cache + sessionStorage). The
+    // sessionStorage write is kept so tab reloads and cross-process
+    // restores keep working. getLiveResponse() is the new fast-path API
+    // used by handleResponse before the DOMParser fallback.
+    Transparent._liveDomCache = new Map();
+    Transparent.liveDomCacheMax = 25;
+    Transparent.liveDomCacheTTL = 5 * 60 * 1000; // 5 min
+
+    Transparent.getLiveResponse = function(uuid) {
+        var entry = Transparent._liveDomCache.get(uuid);
+        if (!entry) return null;
+        if (Date.now() - entry.ts > Transparent.liveDomCacheTTL) {
+            Transparent._liveDomCache.delete(uuid);
+            return null;
+        }
+        // LRU bump: re-insert to move to the back of the iteration order.
+        Transparent._liveDomCache.delete(uuid);
+        Transparent._liveDomCache.set(uuid, entry);
+        // Return a CLONE so the caller's swap mutations don't poison
+        // the cache for future popstate hits. The clone is detached
+        // from any document so it's safe to pass to the swap.
+        return entry.node.cloneNode(true);
+    };
+
+    Transparent.setLiveResponse = function(uuid, htmlEl, scrollableXY) {
+        if (!htmlEl || htmlEl.nodeType !== 1) return;
+        Transparent._liveDomCache.set(uuid, {
+            node: htmlEl.cloneNode(true),
+            scroll: scrollableXY || [],
+            ts: Date.now()
+        });
+        // LRU evict — Map iteration order is insertion order.
+        while (Transparent._liveDomCache.size > Transparent.liveDomCacheMax) {
+            var firstKey = Transparent._liveDomCache.keys().next().value;
+            Transparent._liveDomCache.delete(firstKey);
+        }
+    };
+
+    Transparent.clearLiveResponse = function() {
+        Transparent._liveDomCache.clear();
+    };
+
     Transparent.setResponse = function(uuid, responseText, scrollableXY, exceptionRaised = false)
     {
-        if(isDomEntity(responseText))
+        // Populate live-DOM cache FIRST while we still have the node.
+        // The outerHTML conversion below loses the node identity.
+        if (isDomEntity(responseText)) {
+            Transparent.setLiveResponse(uuid, responseText, scrollableXY);
             responseText = responseText.outerHTML;
+        }
 
         var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
         if (!array.includes(uuid)) {
@@ -2152,7 +2213,26 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                     Transparent.setResponse(uuid, responseText);
             }
 
-            var dom = new DOMParser().parseFromString(responseText, "text/html");
+            // Try the in-memory live-DOM cache first. On popstate (back/forward)
+            // we just stored the outgoing page node via setLiveResponse, so the
+            // round-trip is: snapshot → cache → instant retrieve. No serialize,
+            // no DOMParser cost. Falls back to the parse path on miss (first-
+            // time nav, cache eviction, expired entry, etc.).
+            var dom = null;
+            if (Transparent.getLiveResponse) {
+                var liveNode = Transparent.getLiveResponse(uuid);
+                if (liveNode) {
+                    // The cache stores the full <html> element. Wrap it in a
+                    // minimal Document-shaped object that the swap path can
+                    // navigate the same way it navigates a DOMParser result.
+                    var docShell = document.implementation.createHTMLDocument('');
+                    docShell.replaceChild(liveNode, docShell.documentElement);
+                    dom = docShell;
+                }
+            }
+            if (!dom) {
+                dom = new DOMParser().parseFromString(responseText, "text/html");
+            }
             if(request && request.getResponseHeader("Content-Type") == "application/json") {
 
                 if(!isJsonResponse(responseText)) {
