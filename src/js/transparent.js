@@ -500,8 +500,14 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         if (!array.includes(uuid)) {
 
             array.push(uuid);
+            // Enforce the LRU cap. NB: entries are stored under
+            // `transparent[response][<uuid>]` / `transparent[position][<uuid>]`,
+            // so eviction must remove THOSE keys — the previous code removed
+            // `transparent[<uuid>]`, which never existed, leaving the real
+            // response/position blobs orphaned. They then accumulated past the
+            // cap until QuotaExceededError forced a full sessionStorage.clear().
             while(array.length > Settings["response_limit"])
-                sessionStorage.removeItem('transparent['+array.shift()+']');
+                removeResponseEntry(array.shift());
         }
 
         try {
@@ -515,13 +521,40 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
         } catch(e) {
 
+            // On quota, evict the oldest cached pages (targeted) and retry
+            // once, instead of nuking ALL sessionStorage — sessionStorage.clear()
+            // also wipes unrelated app state and the entire page cache.
+            if (e.name === 'QuotaExceededError' && exceptionRaised === false) {
+                evictOldestResponses(Math.max(1, Math.ceil(array.length / 2)));
+                return Transparent.setResponse(uuid, responseText, scrollableXY, true);
+            }
+            // Last resort if a single page is itself too big to ever fit.
             if (e.name === 'QuotaExceededError')
                 sessionStorage.clear();
 
-            return exceptionRaised === false ? Transparent.setResponse(uuid, responseText, scrollableXY, true) : this;
+            return this;
         }
 
         return this;
+    }
+
+    // Remove both blobs for a cached page uuid (response HTML + scroll position).
+    function removeResponseEntry(uuid) {
+        try {
+            sessionStorage.removeItem('transparent[response]['+uuid+']');
+            sessionStorage.removeItem('transparent[position]['+uuid+']');
+        } catch (e) {}
+    }
+
+    // Drop the N oldest cached pages and rewrite the index. Used to recover
+    // from a QuotaExceededError without discarding the whole cache.
+    function evictOldestResponses(count) {
+        try {
+            var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
+            for (var i = 0; i < count && array.length; i++)
+                removeResponseEntry(array.shift());
+            sessionStorage.setItem('transparent', JSON.stringify(array));
+        } catch (e) {}
     }
 
     Transparent.setResponseText = function(uuid, responseText, exceptionRaised = false)
@@ -1771,6 +1804,14 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
     // double-prompt. The existing `formSubmission` flag already handles
     // the synchronous prompt path; this clears state for any follow-up.
     document.addEventListener('submit', function() { formDirty = false; }, true);
+    // Reset on every navigation. transparent.js re-dispatches DOMContentLoaded
+    // after each SPA swap (see _doSwap, ~line 1567), so this fires on the
+    // initial load AND on each in-place navigation. Without it the flag leaks
+    // across SPA navigations: typing on page A, then navigating to a form
+    // page B, would leave formDirty=true and wrongly prompt on reload of B
+    // even though the user never touched B. A freshly-loaded page is never
+    // dirty until the user types on it (any restored draft is already saved).
+    document.addEventListener('DOMContentLoaded', function() { formDirty = false; });
 
     // ── Transparent.formMemory ──────────────────────────────────────────────
     //
@@ -2394,9 +2435,26 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         window.onpopstate   = __main__; // Onpopstate pop out straight to previous page.. this creates a jump while changing pages with hash..
         window.onhashchange = __main__;
 
-        // onbeforeunload: confirm only if the user has actually typed/edited
-        // a form input on this page. Pre-Turbo this used a snapshot-and-
-        // compare approach (formDataBefore vs formDataAfter) which gave
+        // onbeforeunload confirmation REMOVED. It produced spurious "are you
+        // sure you want to leave?" blocks on any page with a form even when the
+        // user never typed: the dirty flag was flipped by any trusted change
+        // event (a <select>/checkbox toggle, Select2/datepicker init firing a
+        // real change, browser autofill, …), and the `e.currentTarget == window`
+        // guard below is unreliable across browsers. More importantly it's now
+        // obsolete: Transparent.formMemory persists every form's content to
+        // localStorage (debounced on input + saved synchronously on unload) and
+        // restores it on the next load, so reloading or closing the tab never
+        // loses typed input. The draft save on beforeunload (in the formMemory
+        // IIFE above) is kept; only the blocking confirmation is gone.
+        var __onbeforeunload_disabled = function(e) {
+            if(Settings.debug) console.log("Transparent onbeforeunload (no-op; drafts auto-saved)");
+            if(formSubmission) return;
+            if(Settings.disable) return;
+            // No return value → browser never shows the leave/reload confirmation.
+        };
+
+        // Legacy snapshot-and-compare confirm (formDataBefore vs formDataAfter)
+        // gave
         // false positives because JS init code mutates form values after
         // load — Select2 writes selected text to hidden fields, Editor.js
         // serializes its JSON to a <textarea>, datepicker normalizes
@@ -2404,24 +2462,11 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // and the current state always differed, and the browser always
         // prompted even on read-only pages.
         //
-        // The replacement is the `formDirty` flag declared above, which is
-        // set only by trusted (user-originated) `input`/`change` events.
-        // No prompt unless the user genuinely typed something.
-        window.onbeforeunload = function(e) {
-
-            if(Settings.debug) console.log("Transparent onbeforeunload event called..");
-
-            if(formSubmission) return; // Do not display on form submission
-            if(Settings.disable) return;
-            if(e.currentTarget == window) return;
-            if(!formDirty) return; // ← user hasn't modified anything; no prompt
-
-            Transparent.html.addClass(Transparent.state.READY);
-            Transparent.activeOut();
-            dispatchEvent(new Event('load'));
-
-            return "Dude, are you sure you want to leave? Think of the kittens!";
-        }
+        // false positives because JS init code mutated form values after load.
+        // Both that and the formDirty replacement are gone: the content is
+        // already in localStorage (saved on input + on unload), so leaving the
+        // page never loses it and a confirmation only gets in the way.
+        window.onbeforeunload = __onbeforeunload_disabled;
 
         document.addEventListener('click', __main__, false);
 
