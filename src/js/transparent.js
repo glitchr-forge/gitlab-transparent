@@ -2098,6 +2098,11 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // Disable transparent JS (e.g. during development..)
         if(Settings.disable) return;
 
+        // Nested-overlay navigation owns its events (see Transparent.nest):
+        // while an overlay is open (or the state targets one), the host page
+        // underneath must not be swapped
+        if (Transparent.nest && Transparent.nest.owns(e)) return;
+
         // Determine link
         const link = Transparent.findLink(e);
         if (link == null) {
@@ -2473,6 +2478,208 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         $("form").on("submit", __main__);
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Nested navigation ("website within website").
+    //
+    // A link opts in with data-transparent-nest; the TARGET page opts in by
+    // answering with an `X-Transparent-Nest` response header. Only when BOTH
+    // agree is the page fetched and mounted into a fixed overlay container
+    // ABOVE the still-live host DOM (nothing is detached: closing is
+    // instant, no re-fetch). The overlay gets real, bookmarkable history
+    // entries; Transparent.closeNest() (or Back) pops them and reveals the
+    // untouched host page.
+    //
+    // Every other case falls through to a regular <a href> navigation:
+    // transparent disabled, header missing, fetch failure, direct visit.
+    // Forms inside the overlay deliberately submit natively (full page):
+    // the nested app keeps working, just not overlaid anymore.
+    // ─────────────────────────────────────────────────────────────────────
+    Transparent.nest = (function() {
+
+        var api = {};
+
+        var ATTRIBUTE = 'data-transparent-nest';
+        var HEADER = 'X-Transparent-Nest';
+        var CONTAINER_ID = 'transparent-nest';
+        var HTML_CLASS = 'nested';
+        var ASSET_MARK = 'data-transparent-nest-asset';
+
+        var hostTitle = null;      // host document title backup
+        var hostOverflow = null;   // body overflow backup
+        var closing = false;       // reentrance guard (closeNest vs popstate)
+
+        api.isOpen = function() {
+            return document.getElementById(CONTAINER_ID) != null;
+        };
+
+        api.getContainer = function() {
+            return document.getElementById(CONTAINER_ID);
+        };
+
+        // __main__ consults this before acting: popstate traffic related to
+        // an overlay belongs to the nest module, never to the page swapper
+        api.owns = function(e) {
+            if (e.type != 'popstate') return false;
+            return api.isOpen() || (e.state && e.state.nest) != null;
+        };
+
+        function mount(dom, href) {
+
+            var container = api.getContainer();
+            var fresh = container == null;
+            if (fresh) {
+                container = document.createElement('div');
+                container.id = CONTAINER_ID;
+                container.setAttribute('role', 'dialog');
+                container.setAttribute('aria-modal', 'true');
+            }
+
+            // strip previously injected head assets, then bring in the nested
+            // page's own <style>/<link rel=stylesheet> (CSS is global by
+            // nature - nested pages are expected to prefix their rules)
+            $('[' + ASSET_MARK + ']').remove();
+            $(dom).find('head style, head link[rel="stylesheet"]').each(function() {
+                var node = document.importNode(this, true);
+                node.setAttribute(ASSET_MARK, '');
+                document.head.appendChild(node);
+            });
+
+            container.innerHTML = '';
+            while (dom.body && dom.body.firstChild) {
+                container.appendChild(document.importNode(dom.body.firstChild, true));
+            }
+
+            if (fresh) {
+                hostTitle = document.title;
+                hostOverflow = document.body.style.overflow;
+                document.body.style.overflow = 'hidden';
+                document.body.appendChild(container);
+                Transparent.html.addClass(HTML_CLASS);
+            }
+
+            container.scrollTop = 0;
+            document.title = dom.title || document.title;
+
+            dispatchEvent(new CustomEvent('transparent:nest:' + (fresh ? 'open' : 'navigate'), { detail: { href: href } }));
+        }
+
+        function fetchNested(href, onMiss) {
+
+            var request = new XMLHttpRequest();
+            request.open('GET', href, true);
+            request.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+
+            request.onload = function() {
+
+                var nestable = request.status < 400 && request.getResponseHeader(HEADER) != null;
+                if (!nestable) return onMiss();
+
+                var dom = new DOMParser().parseFromString(request.responseText, 'text/html');
+                var responseURL = request.responseURL || href;
+
+                mount(dom, responseURL);
+                history.pushState({ nest: { href: responseURL } }, '', responseURL);
+            };
+            request.onerror = onMiss;
+            request.send();
+        }
+
+        api.open = function(href) {
+
+            if (api.isOpen()) return api.navigate(href);
+
+            fetchNested(href, function() { window.location.href = href; });
+        };
+
+        api.navigate = function(href) {
+            fetchNested(href, function() { window.location.href = href; });
+        };
+
+        api.close = function(goBack) {
+
+            var container = api.getContainer();
+            if (container == null) return;
+
+            closing = true;
+
+            container.remove();
+            $('[' + ASSET_MARK + ']').remove();
+            document.body.style.overflow = hostOverflow || '';
+            document.title = hostTitle || document.title;
+            Transparent.html.removeClass(HTML_CLASS);
+
+            // pop the nested history entry; the host page is live underneath
+            if (goBack !== false && history.state && history.state.nest) {
+                history.back();
+            }
+
+            dispatchEvent(new CustomEvent('transparent:nest:close'));
+            setTimeout(function() { closing = false; }, 0);
+        };
+
+        // capture phase: runs before __main__'s bubble-phase handler and
+        // before any click handler of the host page
+        document.addEventListener('click', function(e) {
+
+            if (Settings.disable) return;
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+            if (e.defaultPrevented) return;
+
+            var anchor = e.target.closest ? e.target.closest('a[href]') : null;
+            if (anchor == null || anchor.target == '_blank') return;
+
+            var url;
+            try { url = new URL(anchor.href, location.origin); } catch (_) { return; }
+            if (url.origin != location.origin) return;
+
+            var container = api.getContainer();
+
+            // inside an open overlay: every same-origin anchor navigates the
+            // overlay, never the host document behind it
+            if (container != null && container.contains(anchor)) {
+
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                api.navigate(url.href);
+                return;
+            }
+
+            // on the host page: only explicitly opted-in links open a nest
+            if (!anchor.hasAttribute(ATTRIBUTE)) return;
+
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            api.open(url.href);
+        }, true);
+
+        // Back/Forward across the overlay boundary; __main__ defers to
+        // api.owns() for every popstate the overlay is involved in
+        window.addEventListener('popstate', function(e) {
+
+            if (closing) return;
+
+            if (api.isOpen()) {
+                if (e.state && e.state.nest) {
+                    api.navigate(e.state.nest.href);   // between nested entries
+                } else {
+                    api.close(false);                  // back onto the host entry
+                }
+                return;
+            }
+
+            if (e.state && e.state.nest) {
+                // forward into a nested entry with no overlay mounted
+                // (e.g. after a reload): fall back to a real navigation
+                window.location.href = e.state.nest.href;
+            }
+        }, true);
+
+        return api;
+    })();
+
+    Transparent.openNest = Transparent.nest.open;
+    Transparent.closeNest = Transparent.nest.close;
+    Transparent.isNested = Transparent.nest.isOpen;
 
     return Transparent;
 });

@@ -35,3 +35,19 @@ img[data-src]:not(.loaded) {
 
 	animation: blinkOpacity 2s infinite;
 }
+
+/* ── Nested navigation (Transparent.nest) ─────────────────────────────── */
+#transparent-nest {
+	position: fixed;
+	inset: 0;
+	z-index: 100000;
+	overflow: auto;
+	background: rgba(15, 18, 22, 0.35);
+	backdrop-filter: blur(2px);
+	animation: transparent-nest-in 0.18s ease-out;
+}
+html.nested { overflow: hidden; }
+@keyframes transparent-nest-in {
+	from { opacity: 0; transform: translateY(8px); }
+	to   { opacity: 1; transform: none; }
+}
