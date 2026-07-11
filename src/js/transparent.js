@@ -2502,7 +2502,6 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         var HEADER = 'X-Transparent-Nest';
         var CONTAINER_ID = 'transparent-nest';
         var HTML_CLASS = 'nested';
-        var ASSET_MARK = 'data-transparent-nest-asset';
 
         var hostTitle = null;      // host document title backup
         var hostOverflow = null;   // body overflow backup
@@ -2523,7 +2522,13 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             return api.isOpen() || (e.state && e.state.nest) != null;
         };
 
-        function mount(dom, href) {
+        // The nested page renders inside a same-origin IFRAME: full CSS/JS
+        // isolation in both directions (the host's observers and global
+        // styles never touch the nested app and vice versa), its scripts
+        // run naturally, and closing is instant. srcdoc reuses the already
+        // fetched HTML - no second request; same-origin, so the nested page
+        // may reach window.parent.Transparent to close itself.
+        function mount(html, href) {
 
             var container = api.getContainer();
             var fresh = container == null;
@@ -2534,20 +2539,15 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 container.setAttribute('aria-modal', 'true');
             }
 
-            // strip previously injected head assets, then bring in the nested
-            // page's own <style>/<link rel=stylesheet> (CSS is global by
-            // nature - nested pages are expected to prefix their rules)
-            $('[' + ASSET_MARK + ']').remove();
-            $(dom).find('head style, head link[rel="stylesheet"]').each(function() {
-                var node = document.importNode(this, true);
-                node.setAttribute(ASSET_MARK, '');
-                document.head.appendChild(node);
-            });
+            var title = (html.match(/<title[^>]*>([^<]*)<\/title>/i) || [])[1];
 
-            container.innerHTML = '';
-            while (dom.body && dom.body.firstChild) {
-                container.appendChild(document.importNode(dom.body.firstChild, true));
+            var frame = container.querySelector('iframe');
+            if (frame == null) {
+                frame = document.createElement('iframe');
+                frame.setAttribute('title', title || 'nested');
+                container.appendChild(frame);
             }
+            frame.srcdoc = html;
 
             if (fresh) {
                 hostTitle = document.title;
@@ -2557,8 +2557,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 Transparent.html.addClass(HTML_CLASS);
             }
 
-            container.scrollTop = 0;
-            document.title = dom.title || document.title;
+            if (title) document.title = title;
 
             // fade the fresh content in (the .is-loading fade-out was applied
             // by fetchNested while the request was in flight)
@@ -2621,10 +2620,12 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             var settle = function(text, url) {
 
                 delete prefetched[href];
-                var dom = new DOMParser().parseFromString(text, 'text/html');
 
-                mount(dom, url);
-                history.pushState({ nest: { href: url } }, '', url);
+                var fresh = !api.isOpen();
+                mount(text, url);
+                if (fresh) {
+                    history.pushState({ nest: { href: url } }, '', url);
+                }
                 done();
             };
 
@@ -2664,7 +2665,6 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             closing = true;
 
             container.remove();
-            $('[' + ASSET_MARK + ']').remove();
             document.body.style.overflow = hostOverflow || '';
             document.title = hostTitle || document.title;
             Transparent.html.removeClass(HTML_CLASS);
@@ -2679,17 +2679,13 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         };
 
         // hover prefetch: by the time the click lands the page is usually
-        // already in the cache, so the overlay opens/navigates instantly
+        // already in the cache, so the overlay opens instantly
         document.addEventListener('mouseover', function(e) {
 
             if (Settings.disable || !e.target.closest) return;
 
-            var anchor = e.target.closest('a[href]');
+            var anchor = e.target.closest('a[' + ATTRIBUTE + '][href]');
             if (anchor == null) return;
-
-            var container = api.getContainer();
-            var eligible = anchor.hasAttribute(ATTRIBUTE) || (container != null && container.contains(anchor));
-            if (!eligible) return;
 
             try {
                 var url = new URL(anchor.href, location.origin);
@@ -2698,38 +2694,21 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         }, true);
 
         // capture phase: runs before __main__'s bubble-phase handler and
-        // before any click handler of the host page
+        // before any click handler of the host page. Links INSIDE the
+        // nested iframe belong to the iframe's own document - the host
+        // never sees them, the nested app navigates itself.
         document.addEventListener('click', function(e) {
 
             if (Settings.disable) return;
             if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
             if (e.defaultPrevented) return;
 
-            var anchor = e.target.closest ? e.target.closest('a[href]') : null;
+            var anchor = e.target.closest ? e.target.closest('a[' + ATTRIBUTE + '][href]') : null;
             if (anchor == null || anchor.target == '_blank') return;
 
             var url;
             try { url = new URL(anchor.href, location.origin); } catch (_) { return; }
             if (url.origin != location.origin) return;
-
-            var container = api.getContainer();
-
-            // inside an open overlay: every same-origin anchor navigates the
-            // overlay, never the host document behind it
-            if (container != null && container.contains(anchor)) {
-
-                e.preventDefault();
-                e.stopImmediatePropagation();
-                try { api.navigate(url.href); }
-                catch (err) {
-                    if (Settings.debug) console.error('Transparent.nest navigate failed', err);
-                    window.location.href = url.href;
-                }
-                return;
-            }
-
-            // on the host page: only explicitly opted-in links open a nest
-            if (!anchor.hasAttribute(ATTRIBUTE)) return;
 
             e.preventDefault();
             e.stopImmediatePropagation();
@@ -2740,16 +2719,14 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             }
         }, true);
 
-        // Back/Forward across the overlay boundary; __main__ defers to
-        // api.owns() for every popstate the overlay is involved in
+        // Back closes the overlay; __main__ defers to api.owns() for every
+        // popstate the overlay is involved in
         window.addEventListener('popstate', function(e) {
 
             if (closing) return;
 
             if (api.isOpen()) {
-                if (e.state && e.state.nest) {
-                    api.navigate(e.state.nest.href);   // between nested entries
-                } else {
+                if (!(e.state && e.state.nest)) {
                     api.close(false);                  // back onto the host entry
                 }
                 return;

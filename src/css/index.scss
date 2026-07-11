@@ -78,3 +78,5 @@ html.nest-loading body::before {
 	from { background-position: -50% 0; }
 	to   { background-position: 150% 0; }
 }
+
+#transparent-nest iframe { display: block; width: 100%; height: 100%; border: 0; background: transparent; }
