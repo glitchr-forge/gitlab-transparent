@@ -51,3 +51,11 @@ html.nested { overflow: hidden; }
 	from { opacity: 0; transform: translateY(8px); }
 	to   { opacity: 1; transform: none; }
 }
+
+#transparent-nest { transition: opacity 0.15s ease; }
+#transparent-nest.is-loading { opacity: 0.55; pointer-events: none; }
+#transparent-nest.is-entering { animation: transparent-nest-fade 0.2s ease-out; }
+@keyframes transparent-nest-fade {
+	from { opacity: 0.4; }
+	to   { opacity: 1; }
+}

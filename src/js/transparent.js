@@ -2560,10 +2560,21 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             container.scrollTop = 0;
             document.title = dom.title || document.title;
 
+            // fade the fresh content in (the .is-loading fade-out was applied
+            // by fetchNested while the request was in flight)
+            container.classList.remove('is-loading');
+            container.classList.add('is-entering');
+            setTimeout(function() { container.classList.remove('is-entering'); }, 200);
+
             dispatchEvent(new CustomEvent('transparent:nest:' + (fresh ? 'open' : 'navigate'), { detail: { href: href } }));
         }
 
-        function fetchNested(href, onMiss) {
+        // hover-prefetch cache: href -> {text, url, at}; entries are young
+        // (TTL) so an admin list never goes stale behind an edit
+        var prefetched = {};
+        var PREFETCH_TTL = 15000;
+
+        function fetchRaw(href, onHit, onMiss) {
 
             var request = new XMLHttpRequest();
             request.open('GET', href, true);
@@ -2574,14 +2585,45 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 var nestable = request.status < 400 && request.getResponseHeader(HEADER) != null;
                 if (!nestable) return onMiss();
 
-                var dom = new DOMParser().parseFromString(request.responseText, 'text/html');
-                var responseURL = request.responseURL || href;
-
-                mount(dom, responseURL);
-                history.pushState({ nest: { href: responseURL } }, '', responseURL);
+                onHit(request.responseText, request.responseURL || href);
             };
             request.onerror = onMiss;
             request.send();
+        }
+
+        api.prefetch = function(href) {
+
+            var entry = prefetched[href];
+            if (entry && (Date.now() - entry.at) < PREFETCH_TTL) return;
+
+            fetchRaw(href, function(text, url) {
+                prefetched[href] = { text: text, url: url, at: Date.now() };
+            }, function() {});
+        };
+
+        function fetchNested(href, onMiss) {
+
+            var container = api.getContainer();
+            if (container != null) container.classList.add('is-loading');
+
+            var settle = function(text, url) {
+
+                delete prefetched[href];
+                var dom = new DOMParser().parseFromString(text, 'text/html');
+
+                mount(dom, url);
+                history.pushState({ nest: { href: url } }, '', url);
+            };
+
+            var entry = prefetched[href];
+            if (entry && (Date.now() - entry.at) < PREFETCH_TTL) {
+                return settle(entry.text, entry.url);   // instant: already fetched on hover
+            }
+
+            fetchRaw(href, settle, function() {
+                if (container != null) container.classList.remove('is-loading');
+                onMiss();
+            });
         }
 
         api.open = function(href) {
@@ -2616,6 +2658,25 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             dispatchEvent(new CustomEvent('transparent:nest:close'));
             setTimeout(function() { closing = false; }, 0);
         };
+
+        // hover prefetch: by the time the click lands the page is usually
+        // already in the cache, so the overlay opens/navigates instantly
+        document.addEventListener('mouseover', function(e) {
+
+            if (Settings.disable || !e.target.closest) return;
+
+            var anchor = e.target.closest('a[href]');
+            if (anchor == null) return;
+
+            var container = api.getContainer();
+            var eligible = anchor.hasAttribute(ATTRIBUTE) || (container != null && container.contains(anchor));
+            if (!eligible) return;
+
+            try {
+                var url = new URL(anchor.href, location.origin);
+                if (url.origin == location.origin) api.prefetch(url.href);
+            } catch (_) {}
+        }, true);
 
         // capture phase: runs before __main__'s bubble-phase handler and
         // before any click handler of the host page
