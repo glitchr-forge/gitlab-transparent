@@ -2519,7 +2519,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // an overlay belongs to the nest module, never to the page swapper
         api.owns = function(e) {
             if (e.type != 'popstate') return false;
-            return api.isOpen() || (e.state && e.state.nest) != null;
+            return closing || api.isOpen() || (e.state && e.state.nest) != null;
         };
 
         // The nested page renders inside a same-origin IFRAME: full CSS/JS
@@ -2671,11 +2671,13 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
             // pop the nested history entry; the host page is live underneath
             if (goBack !== false && history.state && history.state.nest) {
-                history.back();
+                history.back();          // closing stays armed until that popstate lands
+                setTimeout(function() { closing = false; }, 500);  // backstop only
+            } else {
+                closing = false;
             }
 
             dispatchEvent(new CustomEvent('transparent:nest:close'));
-            setTimeout(function() { closing = false; }, 0);
         };
 
         // hover prefetch: by the time the click lands the page is usually
@@ -2723,7 +2725,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // popstate the overlay is involved in
         window.addEventListener('popstate', function(e) {
 
-            if (closing) return;
+            if (closing) { closing = false; return; }
 
             if (api.isOpen()) {
                 if (!(e.state && e.state.nest)) {
