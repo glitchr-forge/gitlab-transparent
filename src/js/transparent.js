@@ -2579,15 +2579,22 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             var request = new XMLHttpRequest();
             request.open('GET', href, true);
             request.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+            request.timeout = 20000;
 
             request.onload = function() {
 
                 var nestable = request.status < 400 && request.getResponseHeader(HEADER) != null;
                 if (!nestable) return onMiss();
 
-                onHit(request.responseText, request.responseURL || href);
+                // any mounting failure must never leave a dead click
+                try { onHit(request.responseText, request.responseURL || href); }
+                catch (err) {
+                    if (Settings.debug) console.error('Transparent.nest mount failed', err);
+                    onMiss();
+                }
             };
             request.onerror = onMiss;
+            request.ontimeout = onMiss;
             request.send();
         }
 
@@ -2605,6 +2612,11 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
             var container = api.getContainer();
             if (container != null) container.classList.add('is-loading');
+            // host-side feedback for the FIRST open (no overlay exists yet):
+            // progress cursor + slim top bar while the page is fetched
+            document.documentElement.classList.add('nest-loading');
+
+            var done = function() { document.documentElement.classList.remove('nest-loading'); };
 
             var settle = function(text, url) {
 
@@ -2613,15 +2625,22 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
                 mount(dom, url);
                 history.pushState({ nest: { href: url } }, '', url);
+                done();
             };
 
             var entry = prefetched[href];
             if (entry && (Date.now() - entry.at) < PREFETCH_TTL) {
-                return settle(entry.text, entry.url);   // instant: already fetched on hover
+                try { return settle(entry.text, entry.url); }   // instant: already fetched on hover
+                catch (err) {
+                    if (Settings.debug) console.error('Transparent.nest mount failed', err);
+                    done();
+                    return onMiss();
+                }
             }
 
             fetchRaw(href, settle, function() {
                 if (container != null) container.classList.remove('is-loading');
+                done();
                 onMiss();
             });
         }
@@ -2701,7 +2720,11 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
                 e.preventDefault();
                 e.stopImmediatePropagation();
-                api.navigate(url.href);
+                try { api.navigate(url.href); }
+                catch (err) {
+                    if (Settings.debug) console.error('Transparent.nest navigate failed', err);
+                    window.location.href = url.href;
+                }
                 return;
             }
 
@@ -2710,7 +2733,11 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
             e.preventDefault();
             e.stopImmediatePropagation();
-            api.open(url.href);
+            try { api.open(url.href); }
+            catch (err) {
+                if (Settings.debug) console.error('Transparent.nest open failed', err);
+                window.location.href = url.href;
+            }
         }, true);
 
         // Back/Forward across the overlay boundary; __main__ defers to
