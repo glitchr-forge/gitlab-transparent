@@ -2578,7 +2578,12 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             container.id = CONTAINER_ID;
             container.setAttribute('role', 'dialog');
             container.setAttribute('aria-modal', 'true');
-            container.classList.add('is-loading');
+            // starts at the base rule's opacity:0 - .is-loading is added
+            // a frame later (below) so the opacity:0->0.55 change is an
+            // observable style change the transition can actually animate,
+            // instead of both being applied in the same synchronous tick
+            // (which the browser would coalesce into a single, untransitioned
+            // paint - no "before" frame to transition from).
 
             var spinner = document.createElement('div');
             spinner.className = 'transparent-nest-spinner';
@@ -2589,6 +2594,12 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             document.body.style.overflow = 'hidden';
             document.body.appendChild(container);
             Transparent.html.addClass(HTML_CLASS);
+
+            requestAnimationFrame(function() {
+                requestAnimationFrame(function() {
+                    container.classList.add('is-loading');
+                });
+            });
 
             return container;
         }
@@ -2613,10 +2624,16 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             if (title) document.title = title;
 
             // fade the fresh content in (the .is-loading dim was applied by
-            // fetchNested/openShell while the request was in flight)
+            // fetchNested/openShell while the request was in flight).
+            // .is-entering is deliberately left on afterwards - it's just
+            // opacity:1, the correct resting state, not a one-shot animation
+            // trigger - removing it would fall through to the base rule's
+            // opacity:0 (needed for the very first open's transition-in) and
+            // make fully-loaded content invisible again. A subsequent
+            // navigate() call clears it before re-adding .is-loading (see
+            // fetchNested) so the loading dim still applies each time.
             container.classList.remove('is-loading');
             container.classList.add('is-entering');
-            setTimeout(function() { container.classList.remove('is-entering'); }, 300); // keep in sync with index.scss's is-entering animation-duration
 
             dispatchEvent(new CustomEvent('transparent:nest:' + (fresh ? 'open' : 'navigate'), { detail: { href: href } }));
         }
@@ -2666,7 +2683,13 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             // shell first, content later: the backdrop/spinner appears the
             // instant the click lands, the round-trip only fills it in
             var container = fresh ? openShell() : api.getContainer();
-            if (!fresh) container.classList.add('is-loading');
+            // .is-entering is left on permanently after a successful mount
+            // (see mount()) - clear it here so the loading dim is visible
+            // again for this subsequent in-overlay navigation, instead of
+            // .is-entering's later-in-stylesheet opacity:1 winning the
+            // cascade tie over .is-loading's opacity:0.55 while both are
+            // briefly present together.
+            if (!fresh) { container.classList.remove('is-entering'); container.classList.add('is-loading'); }
             // host-side feedback while the page is fetched (slim top bar)
             document.documentElement.classList.add('nest-loading');
 
@@ -2684,8 +2707,12 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             };
 
             var abort = function() {
+                // fresh: no content was ever shown, tear the shell down.
+                // !fresh: falling back to onMiss() (a real navigation) shortly,
+                // but restore .is-entering so the still-valid previous content
+                // doesn't sit at the base rule's opacity:0 in the meantime.
                 if (fresh) closeShell(container);
-                else container.classList.remove('is-loading');
+                else { container.classList.remove('is-loading'); container.classList.add('is-entering'); }
                 done();
                 onMiss();
             };

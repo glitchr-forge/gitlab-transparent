@@ -37,6 +37,18 @@ img[data-src]:not(.loaded) {
 }
 
 /* ── Nested navigation (Transparent.nest) ─────────────────────────────── */
+//
+// A SINGLE transition drives the whole opacity lifecycle (0 -> loading dim
+// -> full -> closed). Previously the entrance used a CSS *animation*
+// (transparent-nest-in, opacity 0->1) on the same property a *transition*
+// and class-based static opacity values (.is-loading's 0.55) also
+// targeted. Animations override the cascade for their duration and then
+// revert when they finish; with the transition rule also present, that
+// revert itself animated - net effect: fade up to 1, THEN fade back down
+// to 0.55 once the entrance animation ended (loading was still in
+// progress), then fade up to 1 again once real content arrived. Visibly
+// "blinking". A plain transition on one property, driven purely by class
+// toggles, can't produce that - there's only ever one target value.
 #transparent-nest {
 	position: fixed;
 	inset: 0;
@@ -44,27 +56,19 @@ img[data-src]:not(.loaded) {
 	overflow: auto;
 	background: rgba(15, 18, 22, 0.35);
 	backdrop-filter: blur(2px);
-	animation: transparent-nest-in 0.3s ease-out;
+	opacity: 0;
+	transform: translateY(8px);
+	transition: opacity 0.3s ease, transform 0.3s ease;
 }
 html.nested { overflow: hidden; }
-@keyframes transparent-nest-in {
-	from { opacity: 0; transform: translateY(8px); }
-	to   { opacity: 1; transform: none; }
-}
 
-/* 0.15s/0.2s here were too fast to register as an intentional transition
-   against an otherwise-static backdrop - felt like an abrupt snap rather
-   than a fade. 0.3s is still snappy but actually perceptible. Close's JS
-   timeout (Transparent.nest's CLOSE_TRANSITION_MS) is kept in lockstep
-   with this value - see transparent.js if this changes. */
-#transparent-nest { transition: opacity 0.3s ease; }
-#transparent-nest.is-loading { opacity: 0.55; pointer-events: none; }
-#transparent-nest.is-entering { animation: transparent-nest-fade 0.3s ease-out; }
+/* openShell() adds .is-loading one frame after insertion (requestAnimationFrame)
+   so the browser has a style flush to transition FROM (opacity:0 above) -
+   adding it in the same tick as element creation would skip the transition
+   entirely, since there'd be no observable "previous" frame to animate from. */
+#transparent-nest.is-loading { opacity: 0.55; transform: none; pointer-events: none; }
+#transparent-nest.is-entering { opacity: 1; transform: none; }
 #transparent-nest.is-closing { opacity: 0; pointer-events: none; }
-@keyframes transparent-nest-fade {
-	from { opacity: 0.4; }
-	to   { opacity: 1; }
-}
 
 /* shown the instant a nest link is clicked, before the HTML round-trip
    returns - replaces the old "static page + slim top bar only" cold-open
