@@ -112,6 +112,33 @@ html.nest-loading body::before {
 	to   { background-position: 150% 0; }
 }
 
+/* Native top progress bar (Settings.progress_bar, default true - see
+   transparent.js). `html.loading` spans the FULL duration of any page
+   transition transparentJS drives - real navigation, in-page AJAX swap,
+   or a nested overlay open/navigate - from the moment a click is
+   processed until the new content has fully swapped in. Previously
+   nothing rendered during that whole window unless a consumer wired up
+   its own separate indicator (the public site uses nprogress and
+   explicitly opts out below); every other consumer - including every
+   in-page admin navigation - had zero visual feedback: old content just
+   sat there, unchanged, for however long the fetch took. `.loading`
+   alone is deliberately NOT styled (would double up with nest-loading's
+   own bar during a fresh nest open, and would fire for the very first
+   page load too where `html.first` is also present and nothing should
+   show yet) - gated to fire only once the app is past its first paint. */
+html.progress-bar-native.ready:not(.first).loading body::before {
+	content: '';
+	position: fixed;
+	top: 0; left: 0;
+	height: 3px;
+	width: 100%;
+	z-index: 100001;
+	background: linear-gradient(90deg, transparent, #2563eb, transparent);
+	background-size: 50% 100%;
+	background-repeat: no-repeat;
+	animation: transparent-nest-bar 1s linear infinite;
+}
+
 /* Opaque, not transparent: the nested page's own transparentJS instance
    does real DOM swaps while navigating internally (menu clicks, edit/save),
    and for a brief moment between removing old content and inserting new,

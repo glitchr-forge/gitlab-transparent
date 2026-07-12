@@ -215,7 +215,20 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // VT's 200ms crossfade is fast enough that the consistency win
         // outweighs the saved frames.
         "use_view_transitions": false,
-        "skip_transition_for_cache": false
+        "skip_transition_for_cache": false,
+        // Native top progress bar, shown automatically via CSS whenever
+        // `html.loading` is set (i.e. for the ENTIRE duration of any page
+        // transition - real navigation, SPA swap, or a nested overlay open/
+        // navigate - not just the nest module's own open flow). This was
+        // long an opt-OUT-only config: consumers already passed
+        // `progress_bar: 'off'` in anticipation of a "native bar" that was
+        // never actually implemented - the old content just sat there with
+        // no visual feedback for however long the fetch took ("blank space
+        // and dead time"). true here means every consumer gets a working
+        // indicator by default; set to false/'off' to keep using a
+        // different indicator (e.g. nprogress) instead, matching how the
+        // public site's app-defer.js already opts out.
+        "progress_bar": true
     };
 
     const State = Transparent.state = {
@@ -633,6 +646,13 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             value = options[key];
             if (value !== undefined && options.hasOwnProperty(key)) Settings[key] = value;
         }
+
+        // CSS can't read Settings directly - mirror progress_bar onto a
+        // class so `html.progress-bar-native.loading` can gate the native
+        // bar in index.scss. Kept in sync on every configure() call (not
+        // just the initial ready()) in case a consumer flips it at runtime.
+        var progressBarEnabled = Settings["progress_bar"] !== false && Settings["progress_bar"] !== "off";
+        Transparent.html.toggleClass("progress-bar-native", progressBarEnabled);
 
         return this;
     };
@@ -2093,6 +2113,28 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         return api;
     })();
 
+    // `location.origin` is the literal string "null" inside a `srcdoc`
+    // iframe (location.href there is "about:srcdoc", an opaque-origin
+    // marker) - EVEN THOUGH the document is otherwise fully same-origin
+    // with its parent (script access, cookies, XHR/fetch CORS all work
+    // normally; this is purely a quirk of how srcdoc documents report
+    // their own location). Any same-origin check built on a plain
+    // `x.origin != location.origin` comparison is always true inside such
+    // a frame, no matter what x is - which silently broke the "is this a
+    // safe link to AJAX-fetch" guard in __main__: every same-origin link
+    // failed the check and fell through to a real, hard browser
+    // navigation instead of the AJAX swap. `Transparent.nest` mounts its
+    // overlay content via exactly this kind of iframe, so this bug fired
+    // on every single in-admin click. Falls back to the parent's origin
+    // when we're in this opaque-origin state and same-origin access to it
+    // is available (it always is for a non-sandboxed srcdoc iframe, which
+    // is the only kind this library ever creates) - otherwise behaves
+    // exactly like plain `location.origin`.
+    function currentOrigin() {
+        if (location.origin !== 'null') return location.origin;
+        try { return parent.location.origin; } catch (e) { return location.origin; }
+    }
+
     function __main__(e) {
 
         // Disable transparent JS (e.g. during development..)
@@ -2197,7 +2239,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         if (url.pathname.startsWith("/vendor")) return;
 
         // Unsecure url
-        if (url.origin != location.origin) return;
+        if (url.origin != currentOrigin()) return;
 
         e.preventDefault();
 
@@ -2900,8 +2942,8 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             if (anchor == null || anchor.target == '_blank') return;
 
             var url;
-            try { url = new URL(anchor.href, location.origin); } catch (_) { return; }
-            if (url.origin != location.origin) return;
+            try { url = new URL(anchor.href, currentOrigin()); } catch (_) { return; }
+            if (url.origin != currentOrigin()) return;
 
             e.preventDefault();
             e.stopImmediatePropagation();
