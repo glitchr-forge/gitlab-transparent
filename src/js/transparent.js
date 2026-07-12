@@ -2610,32 +2610,55 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
             var title = (html.match(/<title[^>]*>([^<]*)<\/title>/i) || [])[1];
 
-            var spinner = container.querySelector('.transparent-nest-spinner');
-            if (spinner) spinner.remove();
-
             var frame = container.querySelector('iframe');
             if (frame == null) {
                 frame = document.createElement('iframe');
                 frame.setAttribute('title', title || 'nested');
                 container.appendChild(frame);
             }
+
+            // Reveal only once the iframe has actually finished loading -
+            // NOT the instant srcdoc is assigned. srcdoc is just a string;
+            // the nested document still has to parse and fetch its own
+            // <script src>/<link> (Encore bundles, the admin package's own
+            // CSS, etc.), which can easily take longer than the initial
+            // HTML fetch this function is called from. Revealing early
+            // showed the iframe's own (opaque, per the earlier background-
+            // bleed-through fix) white background while that was still in
+            // flight - "the page goes white before the nested site finishes
+            // loading". The 'load' event fires once the iframe's document
+            // and all its sub-resources are done.
+            var revealed = false;
+            var reveal = function() {
+                if (revealed) return;
+                revealed = true;
+
+                var spinner = container.querySelector('.transparent-nest-spinner');
+                if (spinner) spinner.remove();
+
+                // fade the fresh content in (the .is-loading dim was applied
+                // by fetchNested/openShell while the request was in flight).
+                // .is-entering is deliberately left on afterwards - it's just
+                // opacity:1, the correct resting state, not a one-shot
+                // animation trigger - removing it would fall through to the
+                // base rule's opacity:0 (needed for the very first open's
+                // transition-in) and make fully-loaded content invisible
+                // again. A subsequent navigate() call clears it before
+                // re-adding .is-loading (see fetchNested) so the loading
+                // dim still applies each time.
+                container.classList.remove('is-loading');
+                container.classList.add('is-entering');
+
+                dispatchEvent(new CustomEvent('transparent:nest:' + (fresh ? 'open' : 'navigate'), { detail: { href: href } }));
+            };
+
+            frame.addEventListener('load', reveal, { once: true });
+            // safety net: don't leave the user staring at a spinner forever
+            // if 'load' never fires for some edge case
+            setTimeout(reveal, 4000);
+
             frame.srcdoc = html;
-
             if (title) document.title = title;
-
-            // fade the fresh content in (the .is-loading dim was applied by
-            // fetchNested/openShell while the request was in flight).
-            // .is-entering is deliberately left on afterwards - it's just
-            // opacity:1, the correct resting state, not a one-shot animation
-            // trigger - removing it would fall through to the base rule's
-            // opacity:0 (needed for the very first open's transition-in) and
-            // make fully-loaded content invisible again. A subsequent
-            // navigate() call clears it before re-adding .is-loading (see
-            // fetchNested) so the loading dim still applies each time.
-            container.classList.remove('is-loading');
-            container.classList.add('is-entering');
-
-            dispatchEvent(new CustomEvent('transparent:nest:' + (fresh ? 'open' : 'navigate'), { detail: { href: href } }));
         }
 
         // hover-prefetch cache: href -> {text, url, at}; entries are young
@@ -2772,7 +2795,17 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             // pop the nested history entry; the host page is live underneath
             if (goBack !== false && history.state && history.state.nest) {
                 history.back();          // closing stays armed until that popstate lands
-                setTimeout(function() { closing = false; }, 500);  // backstop only
+                // Backstop only - the popstate handler below is what normally
+                // clears `closing`. 500ms was cutting it close on a page with
+                // real weight (host page's own JS/CSS doing other work on the
+                // same event loop can delay when the browser actually fires
+                // the popstate). If the backstop fires FIRST, `closing`
+                // clears prematurely and the delayed popstate then reaches
+                // __main__ unguarded - treated as a real navigation, i.e.
+                // the host page does a full AJAX reload+fade right as the
+                // overlay closes. 3s is still far short of "stuck forever"
+                // but gives real pages much more headroom.
+                setTimeout(function() { closing = false; }, 3000);
             } else {
                 closing = false;
             }
