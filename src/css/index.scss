@@ -55,9 +55,27 @@ html.nested { overflow: hidden; }
 #transparent-nest { transition: opacity 0.15s ease; }
 #transparent-nest.is-loading { opacity: 0.55; pointer-events: none; }
 #transparent-nest.is-entering { animation: transparent-nest-fade 0.2s ease-out; }
+#transparent-nest.is-closing { opacity: 0; pointer-events: none; }
 @keyframes transparent-nest-fade {
 	from { opacity: 0.4; }
 	to   { opacity: 1; }
+}
+
+/* shown the instant a nest link is clicked, before the HTML round-trip
+   returns - replaces the old "static page + slim top bar only" cold-open
+   wait with immediate backdrop + spinner feedback */
+.transparent-nest-spinner {
+	position: absolute;
+	top: 50%; left: 50%;
+	width: 32px; height: 32px;
+	margin: -16px 0 0 -16px;
+	border-radius: 50%;
+	border: 3px solid rgba(255, 255, 255, 0.35);
+	border-top-color: #fff;
+	animation: transparent-nest-spin 0.7s linear infinite;
+}
+@keyframes transparent-nest-spin {
+	to { transform: rotate(360deg); }
 }
 
 /* first-open feedback: progress cursor + slim animated top bar on the host */

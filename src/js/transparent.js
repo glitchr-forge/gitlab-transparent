@@ -2508,7 +2508,10 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         var closing = false;       // reentrance guard (closeNest vs popstate)
 
         api.isOpen = function() {
-            return document.getElementById(CONTAINER_ID) != null;
+            var el = document.getElementById(CONTAINER_ID);
+            // a container mid-close-fade doesn't count as "open" - a fast
+            // re-open must be treated as fresh, not folded into the dying one
+            return el != null && !el.classList.contains('is-closing');
         };
 
         api.getContainer = function() {
@@ -2528,18 +2531,48 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // run naturally, and closing is instant. srcdoc reuses the already
         // fetched HTML - no second request; same-origin, so the nested page
         // may reach window.parent.Transparent to close itself.
-        function mount(html, href) {
+        // Creates the overlay shell (backdrop + spinner) and attaches it to
+        // the DOM SYNCHRONOUSLY on click, before the HTML round-trip even
+        // starts. Without this, the host page stayed visually static for
+        // the whole fetch (only a slim top progress bar hinted anything was
+        // happening) and the blur/dim backdrop only appeared once content
+        // was ready - on a cold, un-prefetched open this reads as "nothing
+        // happens, then suddenly a blurry panel pops in a second later".
+        function openShell() {
+
+            // a fast re-open racing an in-flight close animation wins:
+            // drop the dying node rather than leaving two #transparent-nest
+            // elements in the document at once
+            var stale = document.getElementById(CONTAINER_ID);
+            if (stale) stale.remove();
+
+            var container = document.createElement('div');
+            container.id = CONTAINER_ID;
+            container.setAttribute('role', 'dialog');
+            container.setAttribute('aria-modal', 'true');
+            container.classList.add('is-loading');
+
+            var spinner = document.createElement('div');
+            spinner.className = 'transparent-nest-spinner';
+            container.appendChild(spinner);
+
+            hostTitle = document.title;
+            hostOverflow = document.body.style.overflow;
+            document.body.style.overflow = 'hidden';
+            document.body.appendChild(container);
+            Transparent.html.addClass(HTML_CLASS);
+
+            return container;
+        }
+
+        function mount(html, href, fresh) {
 
             var container = api.getContainer();
-            var fresh = container == null;
-            if (fresh) {
-                container = document.createElement('div');
-                container.id = CONTAINER_ID;
-                container.setAttribute('role', 'dialog');
-                container.setAttribute('aria-modal', 'true');
-            }
 
             var title = (html.match(/<title[^>]*>([^<]*)<\/title>/i) || [])[1];
+
+            var spinner = container.querySelector('.transparent-nest-spinner');
+            if (spinner) spinner.remove();
 
             var frame = container.querySelector('iframe');
             if (frame == null) {
@@ -2549,18 +2582,10 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             }
             frame.srcdoc = html;
 
-            if (fresh) {
-                hostTitle = document.title;
-                hostOverflow = document.body.style.overflow;
-                document.body.style.overflow = 'hidden';
-                document.body.appendChild(container);
-                Transparent.html.addClass(HTML_CLASS);
-            }
-
             if (title) document.title = title;
 
-            // fade the fresh content in (the .is-loading fade-out was applied
-            // by fetchNested while the request was in flight)
+            // fade the fresh content in (the .is-loading dim was applied by
+            // fetchNested/openShell while the request was in flight)
             container.classList.remove('is-loading');
             container.classList.add('is-entering');
             setTimeout(function() { container.classList.remove('is-entering'); }, 200);
@@ -2609,10 +2634,12 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
         function fetchNested(href, onMiss) {
 
-            var container = api.getContainer();
-            if (container != null) container.classList.add('is-loading');
-            // host-side feedback for the FIRST open (no overlay exists yet):
-            // progress cursor + slim top bar while the page is fetched
+            var fresh = !api.isOpen();
+            // shell first, content later: the backdrop/spinner appears the
+            // instant the click lands, the round-trip only fills it in
+            var container = fresh ? openShell() : api.getContainer();
+            if (!fresh) container.classList.add('is-loading');
+            // host-side feedback while the page is fetched (slim top bar)
             document.documentElement.classList.add('nest-loading');
 
             var done = function() { document.documentElement.classList.remove('nest-loading'); };
@@ -2621,12 +2648,18 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
                 delete prefetched[href];
 
-                var fresh = !api.isOpen();
-                mount(text, url);
+                mount(text, url, fresh);
                 if (fresh) {
                     history.pushState({ nest: { href: url } }, '', url);
                 }
                 done();
+            };
+
+            var abort = function() {
+                if (fresh) closeShell(container);
+                else container.classList.remove('is-loading');
+                done();
+                onMiss();
             };
 
             var entry = prefetched[href];
@@ -2634,16 +2667,11 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 try { return settle(entry.text, entry.url); }   // instant: already fetched on hover
                 catch (err) {
                     if (Settings.debug) console.error('Transparent.nest mount failed', err);
-                    done();
-                    return onMiss();
+                    return abort();
                 }
             }
 
-            fetchRaw(href, settle, function() {
-                if (container != null) container.classList.remove('is-loading');
-                done();
-                onMiss();
-            });
+            fetchRaw(href, settle, abort);
         }
 
         api.open = function(href) {
@@ -2657,6 +2685,23 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             fetchNested(href, function() { window.location.href = href; });
         };
 
+        // Detaches the overlay after letting its opacity transition finish,
+        // instead of yanking it out mid-frame. A `backdrop-filter: blur()`
+        // layer removed in one synchronous DOM mutation can make the
+        // browser's compositor visibly "pop"/un-blur the revealed page over
+        // the next couple of frames - reads to the user as the host page
+        // itself fading, even though nothing about the host ever changed.
+        // Fading the overlay's opacity to 0 first (existing
+        // `#transparent-nest { transition: opacity .15s }` rule) and only
+        // then removing it keeps the visual change fully inside the overlay.
+        var CLOSE_TRANSITION_MS = 150;
+        function closeShell(container) {
+            container.classList.add('is-closing');
+            setTimeout(function() {
+                if (container.parentNode) container.remove();
+            }, CLOSE_TRANSITION_MS);
+        }
+
         api.close = function(goBack) {
 
             var container = api.getContainer();
@@ -2664,7 +2709,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
             closing = true;
 
-            container.remove();
+            closeShell(container);
             document.body.style.overflow = hostOverflow || '';
             document.title = hostTitle || document.title;
             Transparent.html.removeClass(HTML_CLASS);
