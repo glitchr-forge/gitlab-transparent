@@ -65,8 +65,13 @@ html.nested { overflow: hidden; }
 /* openShell() adds .is-loading one frame after insertion (requestAnimationFrame)
    so the browser has a style flush to transition FROM (opacity:0 above) -
    adding it in the same tick as element creation would skip the transition
-   entirely, since there'd be no observable "previous" frame to animate from. */
-#transparent-nest.is-loading { opacity: 0.55; transform: none; pointer-events: none; }
+   entirely, since there'd be no observable "previous" frame to animate from.
+   No pointer-events:none here (previous versions had it): that disabled
+   clicks on the OVERLAY AS A WHOLE, not just the spinner it was meant for -
+   with nothing left to intercept them, clicks fell straight through to the
+   host page underneath while the overlay was still visibly up. A loading
+   overlay should block interaction with the host, not let it leak through. */
+#transparent-nest.is-loading { opacity: 0.55; transform: none; }
 #transparent-nest.is-entering { opacity: 1; transform: none; }
 /* A pure opacity fade cross-dissolves the closing overlay WITH the host
    page underneath - both partially visible and blended together for the
@@ -74,7 +79,21 @@ html.nested { overflow: hidden; }
    not "this panel is closing". Adding a slight scale-down alongside the
    fade gives the overlay its own distinct closing motion (shrinks away)
    instead of dissolving into the host, while still revealing it. */
-#transparent-nest.is-closing { opacity: 0; transform: scale(0.98); pointer-events: none; }
+#transparent-nest.is-closing { opacity: 0; transform: scale(0.98); }
+
+/* mount() inserts the iframe (srcdoc set, fetch already resolved) BEFORE
+   waiting for it to actually finish loading - openShell()'s spinner is a
+   sibling appended earlier, so once the iframe lands it paints on top of
+   the spinner regardless of z-index (later DOM order wins ties in the same
+   stacking context), hiding it behind the iframe's own opaque white
+   background for the ENTIRE duration of the load+settle wait. Visible
+   result: spinner vanishes the instant content starts loading, replaced by
+   a wash of plain white at whatever opacity .is-loading/.is-closing happen
+   to be at - "the spinner disappears too early, then it's just white for a
+   while". Keeping the iframe invisible until content is actually revealed
+   (is-entering) leaves the dark blurred backdrop + centered spinner as the
+   only thing on screen for the entire wait, exactly as designed. */
+#transparent-nest.is-loading iframe { visibility: hidden; }
 
 /* shown the instant a nest link is clicked, before the HTML round-trip
    returns - replaces the old "static page + slim top bar only" cold-open
