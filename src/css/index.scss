@@ -68,7 +68,13 @@ html.nested { overflow: hidden; }
    entirely, since there'd be no observable "previous" frame to animate from. */
 #transparent-nest.is-loading { opacity: 0.55; transform: none; pointer-events: none; }
 #transparent-nest.is-entering { opacity: 1; transform: none; }
-#transparent-nest.is-closing { opacity: 0; pointer-events: none; }
+/* A pure opacity fade cross-dissolves the closing overlay WITH the host
+   page underneath - both partially visible and blended together for the
+   duration of the transition, which reads as "the whole page is fading",
+   not "this panel is closing". Adding a slight scale-down alongside the
+   fade gives the overlay its own distinct closing motion (shrinks away)
+   instead of dissolving into the host, while still revealing it. */
+#transparent-nest.is-closing { opacity: 0; transform: scale(0.98); pointer-events: none; }
 
 /* shown the instant a nest link is clicked, before the HTML round-trip
    returns - replaces the old "static page + slim top bar only" cold-open
