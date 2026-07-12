@@ -44,7 +44,7 @@ img[data-src]:not(.loaded) {
 	overflow: auto;
 	background: rgba(15, 18, 22, 0.35);
 	backdrop-filter: blur(2px);
-	animation: transparent-nest-in 0.18s ease-out;
+	animation: transparent-nest-in 0.3s ease-out;
 }
 html.nested { overflow: hidden; }
 @keyframes transparent-nest-in {
@@ -52,9 +52,14 @@ html.nested { overflow: hidden; }
 	to   { opacity: 1; transform: none; }
 }
 
-#transparent-nest { transition: opacity 0.15s ease; }
+/* 0.15s/0.2s here were too fast to register as an intentional transition
+   against an otherwise-static backdrop - felt like an abrupt snap rather
+   than a fade. 0.3s is still snappy but actually perceptible. Close's JS
+   timeout (Transparent.nest's CLOSE_TRANSITION_MS) is kept in lockstep
+   with this value - see transparent.js if this changes. */
+#transparent-nest { transition: opacity 0.3s ease; }
 #transparent-nest.is-loading { opacity: 0.55; pointer-events: none; }
-#transparent-nest.is-entering { animation: transparent-nest-fade 0.2s ease-out; }
+#transparent-nest.is-entering { animation: transparent-nest-fade 0.3s ease-out; }
 #transparent-nest.is-closing { opacity: 0; pointer-events: none; }
 @keyframes transparent-nest-fade {
 	from { opacity: 0.4; }
@@ -97,4 +102,11 @@ html.nest-loading body::before {
 	to   { background-position: 150% 0; }
 }
 
-#transparent-nest iframe { display: block; width: 100%; height: 100%; border: 0; background: transparent; }
+/* Opaque, not transparent: the nested page's own transparentJS instance
+   does real DOM swaps while navigating internally (menu clicks, edit/save),
+   and for a brief moment between removing old content and inserting new,
+   the iframe's rendered surface can have nothing opaque covering it. With
+   a transparent background that moment let the blurred/dimmed host page
+   underneath show straight through the iframe - visible as a flash back to
+   the host on every in-admin navigation, not just on open/close. */
+#transparent-nest iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }

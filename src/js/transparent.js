@@ -2616,7 +2616,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             // fetchNested/openShell while the request was in flight)
             container.classList.remove('is-loading');
             container.classList.add('is-entering');
-            setTimeout(function() { container.classList.remove('is-entering'); }, 200);
+            setTimeout(function() { container.classList.remove('is-entering'); }, 300); // keep in sync with index.scss's is-entering animation-duration
 
             dispatchEvent(new CustomEvent('transparent:nest:' + (fresh ? 'open' : 'navigate'), { detail: { href: href } }));
         }
@@ -2720,9 +2720,9 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // the next couple of frames - reads to the user as the host page
         // itself fading, even though nothing about the host ever changed.
         // Fading the overlay's opacity to 0 first (existing
-        // `#transparent-nest { transition: opacity .15s }` rule) and only
+        // `#transparent-nest { transition: opacity .3s }` rule) and only
         // then removing it keeps the visual change fully inside the overlay.
-        var CLOSE_TRANSITION_MS = 150;
+        var CLOSE_TRANSITION_MS = 300; // keep in sync with index.scss's #transparent-nest transition-duration
         function closeShell(container) {
             container.classList.add('is-closing');
             setTimeout(function() {
