@@ -2098,6 +2098,19 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // Disable transparent JS (e.g. during development..)
         if(Settings.disable) return;
 
+        // Respect a preventDefault() already issued by other code (inline
+        // onclick handlers returning false, other listeners, ...). Without
+        // this, a click whose default action was already handled elsewhere
+        // still fell through into findLink()+the full navigation pipeline -
+        // e.g. the admin overlay's close button (onclick returns false to
+        // call Transparent.closeNest()) was ALSO being treated as a click on
+        // its href="/" fallback link by the SAME transparentJS instance
+        // running inside the iframe, firing a redundant/conflicting
+        // in-iframe navigation to "/" right as the overlay was closing.
+        // Transparent.nest's own click listener already had this guard;
+        // __main__ (the general page-swap handler) didn't.
+        if (e.defaultPrevented) return;
+
         // Nested-overlay navigation owns its events (see Transparent.nest):
         // while an overlay is open (or the state targets one), the host page
         // underneath must not be swapped
@@ -2417,9 +2430,24 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
     }
 
     // Update history if not refreshing page or different page (avoid double pushState)
-    var href = history.state ? history.state.href : null;
-    if (href != location.origin + location.pathname + location.hash)
-        history.replaceState({uuid: uuidv4(), status: history.state ? history.state.status : 200, data:{}, method: history.state ? history.state.method : "GET", href: location.origin + location.pathname + location.hash}, '', location.origin + location.pathname + location.hash);
+    //
+    // Guarded: inside a `srcdoc` iframe (used by Transparent.nest to mount
+    // the overlay's content) the document's actual URL is "about:srcdoc",
+    // and Chrome refuses a replaceState() whose target URL doesn't resolve
+    // against that - it throws synchronously. Left unguarded, that
+    // uncaught exception aborted every remaining top-level statement in
+    // this module, including the __main__ click/popstate/submit listener
+    // registrations and the entire Transparent.nest definition further
+    // down - so transparentJS silently never wired up ANY interactivity
+    // inside the admin overlay; every click there fell through to a real
+    // full-page reload of the iframe instead of an SPA swap.
+    try {
+        var href = history.state ? history.state.href : null;
+        if (href != location.origin + location.pathname + location.hash)
+            history.replaceState({uuid: uuidv4(), status: history.state ? history.state.status : 200, data:{}, method: history.state ? history.state.method : "GET", href: location.origin + location.pathname + location.hash}, '', location.origin + location.pathname + location.hash);
+    } catch (e) {
+        if (Settings.debug) console.error('Transparent: initial replaceState failed (likely a srcdoc iframe) - continuing without it', e);
+    }
 
     if($("html").hasClass(Transparent.state.DISABLE))
         Settings.disable = true;
