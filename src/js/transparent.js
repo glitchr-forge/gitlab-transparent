@@ -2626,12 +2626,12 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             // showed the iframe's own (opaque, per the earlier background-
             // bleed-through fix) white background while that was still in
             // flight - "the page goes white before the nested site finishes
-            // loading". The 'load' event fires once the iframe's document
-            // and all its sub-resources are done.
+            // loading".
             var revealed = false;
             var reveal = function() {
                 if (revealed) return;
                 revealed = true;
+                container._pendingReveal = null;
 
                 var spinner = container.querySelector('.transparent-nest-spinner');
                 if (spinner) spinner.remove();
@@ -2652,14 +2652,72 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 dispatchEvent(new CustomEvent('transparent:nest:' + (fresh ? 'open' : 'navigate'), { detail: { href: href } }));
             };
 
-            frame.addEventListener('load', reveal, { once: true });
+            // Authoritative fast path: a nested page can call
+            // `parent.Transparent.notifyNestReady()` once IT knows it's
+            // visually complete (e.g. after its own deferred widget bundle's
+            // load promise resolves) - only the page itself truly knows
+            // when that is. api.notifyReady() (below) looks this up via
+            // container._pendingReveal and, if set, reveals immediately,
+            // pre-empting the heuristic fallback.
+            container._pendingReveal = reveal;
+
+            // Fallback for pages that don't call notifyNestReady(): the
+            // 'load' event fires once the document and the resources it
+            // DECLARED UP FRONT (script/link tags present in the initial
+            // HTML) are done - it does NOT wait for anything a page's own
+            // JS fetches or injects afterwards (dynamic import()/code-
+            // splitting, a lazy-loaded widget bundle, style-loader
+            // injecting <style> tags at runtime, etc.). So: after 'load',
+            // also watch the nested document for further DOM mutations (a
+            // MutationObserver) and only reveal once it's gone quiet for
+            // SETTLE_MS - catches MOST late content without needing an
+            // explicit signal, though content that arrives on its own
+            // delayed timer (not itself the direct result of a mutation
+            // burst right after load) can still slip through this specific
+            // heuristic - that's exactly what notifyNestReady() is for.
+            var SETTLE_MS = 250;
+            var MAX_WAIT_AFTER_LOAD_MS = 3000;
+            frame.addEventListener('load', function() {
+                var settleTimer = null;
+                var observer = null;
+                var finish = function() {
+                    if (observer) { try { observer.disconnect(); } catch (e) {} }
+                    clearTimeout(settleTimer);
+                    reveal();
+                };
+                var scheduleSettle = function() {
+                    clearTimeout(settleTimer);
+                    settleTimer = setTimeout(finish, SETTLE_MS);
+                };
+                try {
+                    var doc = frame.contentDocument;
+                    observer = new MutationObserver(scheduleSettle);
+                    observer.observe(doc.documentElement, { childList: true, subtree: true, attributes: true });
+                    scheduleSettle();
+                    setTimeout(finish, MAX_WAIT_AFTER_LOAD_MS); // hard cap regardless of ongoing mutations
+                } catch (e) {
+                    // cross-origin or any other access failure - fall back
+                    // to revealing right on 'load' rather than hanging
+                    reveal();
+                }
+            }, { once: true });
             // safety net: don't leave the user staring at a spinner forever
-            // if 'load' never fires for some edge case
-            setTimeout(reveal, 4000);
+            // if 'load' never fires at all for some edge case
+            setTimeout(reveal, 4000 + MAX_WAIT_AFTER_LOAD_MS);
 
             frame.srcdoc = html;
             if (title) document.title = title;
         }
+
+        // Called by the nested page itself - `parent.Transparent.notifyNestReady()`
+        // - once it knows it's visually complete. Authoritative: pre-empts
+        // the automatic load+settle heuristic in mount(). A no-op if there's
+        // no pending reveal (already revealed, or called outside a mount
+        // cycle), so it's always safe to call defensively.
+        api.notifyReady = function() {
+            var container = api.getContainer();
+            if (container && container._pendingReveal) container._pendingReveal();
+        };
 
         // hover-prefetch cache: href -> {text, url, at}; entries are young
         // (TTL) so an admin list never goes stale behind an edit
@@ -2858,7 +2916,23 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // popstate the overlay is involved in
         window.addEventListener('popstate', function(e) {
 
-            if (closing) { closing = false; return; }
+            // `closing` must stay true for the FULL synchronous dispatch of
+            // THIS popstate to every listener, not just until this listener
+            // has run. window.onpopstate (__main__) and this addEventListener
+            // handler both fire for the same event; which one the browser
+            // invokes first is not guaranteed to be consistent across engines
+            // (confirmed differs between Chromium and WebKit - Safari runs
+            // this listener BEFORE __main__'s check). If `closing` is reset
+            // synchronously here, a __main__ that runs after this listener
+            // (same event, WebKit's actual order) sees an already-cleared
+            // flag and processes the close-induced popstate as a real
+            // navigation - the host page does a full AJAX reload+fade right
+            // as the overlay closes. Deferring the reset to a fresh task
+            // lets every listener registered for this one event see
+            // `closing===true` during their synchronous handling, regardless
+            // of relative order; only after the event has fully finished
+            // dispatching does the flag actually clear.
+            if (closing) { setTimeout(function() { closing = false; }, 0); return; }
 
             if (api.isOpen()) {
                 if (!(e.state && e.state.nest)) {
@@ -2880,6 +2954,8 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
     Transparent.openNest = Transparent.nest.open;
     Transparent.closeNest = Transparent.nest.close;
     Transparent.isNested = Transparent.nest.isOpen;
+    // called from INSIDE the nested iframe: parent.Transparent.notifyNestReady()
+    Transparent.notifyNestReady = Transparent.nest.notifyReady;
 
     return Transparent;
 });
