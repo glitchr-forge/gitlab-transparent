@@ -45,7 +45,9 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         if(oldURL == newURL) return false;
 
         var state = Object.assign({}, history.state, {href: newURL});
-        history.replaceState(state, '', newURL);
+        // Same srcdoc-iframe restriction as the pushState() call in
+        // handleResponse() - see its comment for the full explanation.
+        try { history.replaceState(state, '', newURL); } catch (e) {}
 
         if(triggerHashChange)
             dispatchEvent(new HashChangeEvent("hashchange", {oldURL:oldURL, newURL:newURL}));
@@ -2379,8 +2381,30 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
             // From here the page is valid..
             // so the new page is added to history..
-            if(xhr)
-                history.pushState({uuid: uuid, status:status, method: method, data: {}, href: responseURL}, '', responseURL);
+            //
+            // Guarded: inside a `srcdoc` iframe (exactly how Transparent.nest
+            // mounts overlay content) the document's actual URL is the opaque
+            // "about:srcdoc" - the browser unconditionally refuses ANY
+            // pushState() whose target is a real http(s) URL from that
+            // context, no matter how well-formed, throwing synchronously.
+            // Left unguarded (this is a DIFFERENT call site than the one
+            // fixed for the initial-load case), that uncaught exception
+            // aborted every remaining statement in this response handler -
+            // including the code just below that swaps the DOM in and clears
+            // the .loading state - so every in-admin navigation fetched
+            // successfully, then silently got stuck forever: spinner/progress
+            // bar frozen on screen, old content never replaced. A srcdoc
+            // iframe has no user-visible address bar of its own anyway, so
+            // simply not tracking history for it is both safe and correct -
+            // the host's own URL (tracking the overlay's open state) is what
+            // actually matters for bookmarking.
+            if(xhr) {
+                try {
+                    history.pushState({uuid: uuid, status:status, method: method, data: {}, href: responseURL}, '', responseURL);
+                } catch (e) {
+                    if (Settings.debug) console.error('Transparent: pushState failed (likely a srcdoc iframe) - continuing without it', e);
+                }
+            }
 
             // Page not recognized.. just go fetch by yourself.. no POST information transmitted..
             if(!Transparent.isPage(dom))
