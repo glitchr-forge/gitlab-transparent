@@ -163,7 +163,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
     };
 
     var Transparent = window.Transparent = {};
-    Transparent.version = '0.1.0';
+    Transparent.version = '3.0.0';
     
     var Settings = Transparent.settings = {
         "headers": {},
@@ -182,6 +182,51 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         "smoothscroll_speed"   : 0,
         "smoothscroll_easing"  : "swing",
         "exceptions": [],
+        // nest: list of path patterns (RegExp objects or wildcard strings,
+        // same syntax as `exceptions`) whose links open as a nested
+        // website-in-website overlay (Transparent.nest) instead of
+        // navigating. Purely config-driven - no HTML attribute needed on
+        // the links themselves; the target must still opt in via the
+        // X-Transparent-Nest response header (server-side safety net).
+        "nest": [],
+        // nest panel interactions (all opt-out): drag the chrome bar to
+        // move the panel, drag its edges/corners to resize, and magnetic
+        // snapping of the panel against the viewport's sides/corners
+        // while moving or resizing.
+        "nest_move": true,
+        "nest_resize": true,
+        "nest_snap": true,
+        // For resize (its own separate flush-to-edge clamp): how close
+        // counts as close enough. For dock (see nest_dock below): how far
+        // PAST the viewport boundary counts as genuinely "pushed out" -
+        // small on purpose, so it responds promptly without a 1px
+        // overshoot mis-triggering it.
+        "nest_snap_threshold": 8,
+        // dock: any move/resize away from the pristine centered default
+        // drops the modal backdrop and lets the host page behind become
+        // interactive again ("docked") - a chrome-bar dock button triggers
+        // the same thing on demand, without dragging anywhere first.
+        // Dragging far enough to push the panel OUT of the viewport docks
+        // it flush against that edge instead, stretched to fill the whole
+        // dimension (full height for left/right, full width for top/
+        // bottom) and collapsed to a small grab-tab-only chrome. Double-
+        // click the chrome bar (or the dock button again) to restore the
+        // centered default (full backdrop). Set false to forbid docking
+        // entirely (both the floating and nest_dock_target mechanisms).
+        // swipe: on small screens (<=768px, where the panel is always
+        // fullscreen) drag the chrome bar down to dismiss, iOS sheet style.
+        "nest_dock": true,
+        // nest_dock_target: a CSS selector naming ONE host-page element to
+        // dock INTO instead of floating a panel at a viewport edge -
+        // "dockerize on demand". That element's existing children are
+        // stashed (removed, kept in memory) and the nest panel is moved
+        // inside it directly; undocking (restore, close, or the dock
+        // button again) puts them back exactly as found. Only engaged by
+        // the dock button/enterPassthrough path, not by drag-to-edge
+        // (dragging to an edge always uses the floating dock). null (the
+        // default) disables this - docking then always floats.
+        "nest_dock_target": null,
+        "nest_swipe": true,
         // headlock: list of URL substrings or regex patterns to preserve in
         // <head> across page transitions (e.g. third-party widgets that
         // inject <style>/<link> dynamically). Anything matching is treated
@@ -230,7 +275,12 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // indicator by default; set to false/'off' to keep using a
         // different indicator (e.g. nprogress) instead, matching how the
         // public site's app-defer.js already opts out.
-        "progress_bar": true
+        "progress_bar": true,
+
+        // confirm() prompt shown before ESC closes an open nest overlay -
+        // overridable via Transparent.ready({nest_esc_confirm: '...'}) for
+        // localization, same as any other consumer-facing string here.
+        "nest_esc_confirm": "Close this panel? Any unsaved changes may be lost."
     };
 
     const State = Transparent.state = {
@@ -1011,7 +1061,14 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
         var delay = 0, duration = 0;
         if(el === undefined)
-            el = Transparent.loader[0];
+            // Transparent.loader is only assigned on DOMContentLoaded; a
+            // consumer calling Transparent.ready() inline during parsing
+            // can reach here first via ready()'s FIRST-branch scrollToHash
+            // (1ms setTimeout) - an intermittent, timing-dependent crash
+            // that left html stuck with first/loading/active-out classes.
+            // Fall back to <html> itself, same as the loader default when
+            // the Settings.loader selector matches nothing.
+            el = Transparent.loader ? Transparent.loader[0] : Transparent.html[0];
 
         var style = window.getComputedStyle(el);
         delay     = Math.max(delay, 1000*Math.max(Transparent.parseDuration(style["animation-delay"]),    Transparent.parseDuration(style["transition-delay"])));
@@ -2137,6 +2194,23 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         try { return parent.location.origin; } catch (e) { return location.origin; }
     }
 
+    // Shared by Settings.exceptions (__main__) and Settings.nest
+    // (Transparent.nest) - both are lists of RegExp objects or wildcard
+    // strings ('*' matches any sequence, everything else literal), tested
+    // against a URL's origin-relative pathname only (no query/hash).
+    function matchesPatternList(pathname, patterns) {
+        for (let i = 0; i < patterns.length; i++) {
+            let pattern = patterns[i];
+            if (pattern instanceof RegExp) {
+                if (pattern.test(pathname)) return true;
+            } else {
+                let escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+                if (new RegExp('^' + escaped + '$').test(pathname)) return true;
+            }
+        }
+        return false;
+    }
+
     function __main__(e) {
 
         // Disable transparent JS (e.g. during development..)
@@ -2220,19 +2294,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         }
 
         // Specific page exception
-        for (let i = 0; i < Settings.exceptions.length; i++) {
-            let exception = Settings.exceptions[i];
-            if (exception instanceof RegExp) {
-                if (exception.test(url.pathname)) return;
-            } else {
-                // Simple wildcard support: * matches any sequence of characters
-                let pattern = exception.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
-                let regex = new RegExp('^' + pattern + '$');
-                if (regex.test(url.pathname)) {
-                    return;
-                }
-            }
-        }
+        if (matchesPatternList(url.pathname, Settings.exceptions)) return;
 
         // Ressources files rejected
         if (url.pathname.startsWith("/css")) return;
@@ -2575,13 +2637,21 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
     // ─────────────────────────────────────────────────────────────────────
     // Nested navigation ("website within website").
     //
-    // A link opts in with data-transparent-nest; the TARGET page opts in by
-    // answering with an `X-Transparent-Nest` response header. Only when BOTH
-    // agree is the page fetched and mounted into a fixed overlay container
-    // ABOVE the still-live host DOM (nothing is detached: closing is
-    // instant, no re-fetch). The overlay gets real, bookmarkable history
-    // entries; Transparent.closeNest() (or Back) pops them and reveals the
-    // untouched host page.
+    // Purely config-driven, no HTML markup on links: any plain <a href>
+    // whose pathname matches a `Settings.nest` pattern (same RegExp-or-
+    // wildcard-string list syntax as `Settings.exceptions`, configured once
+    // via Transparent.ready({nest: [...]})) is a nest trigger. The TARGET
+    // page still opts in by answering with an `X-Transparent-Nest` response
+    // header - only when BOTH agree is the page fetched and mounted into a
+    // fixed overlay container ABOVE the still-live host DOM (nothing is
+    // detached: closing is instant, no re-fetch). The address bar stays on
+    // the HOST page's URL the whole time (a same-URL modal history entry
+    // keeps Back working as "close the overlay"); the chrome's share
+    // button is the explicit gesture that commits to the nested page's own
+    // URL as a full, real navigation.
+    // (The old per-link data-transparent-nest attribute is GONE as of 3.0 -
+    // transparentJS's whole point is promoting a multi-page site to feel
+    // single-page transparently, without touching how links are authored.)
     //
     // Every other case falls through to a regular <a href> navigation:
     // transparent disabled, header missing, fetch failure, direct visit.
@@ -2592,7 +2662,6 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
         var api = {};
 
-        var ATTRIBUTE = 'data-transparent-nest';
         var HEADER = 'X-Transparent-Nest';
         var CONTAINER_ID = 'transparent-nest';
         var HTML_CLASS = 'nested';
@@ -2625,14 +2694,21 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // run naturally, and closing is instant. srcdoc reuses the already
         // fetched HTML - no second request; same-origin, so the nested page
         // may reach window.parent.Transparent to close itself.
-        // Creates the overlay shell (backdrop + spinner) and attaches it to
-        // the DOM SYNCHRONOUSLY on click, before the HTML round-trip even
-        // starts. Without this, the host page stayed visually static for
-        // the whole fetch (only a slim top progress bar hinted anything was
-        // happening) and the blur/dim backdrop only appeared once content
-        // was ready - on a cold, un-prefetched open this reads as "nothing
-        // happens, then suddenly a blurry panel pops in a second later".
-        function openShell() {
+        // Creates the overlay shell (backdrop + a fixed-size centered panel,
+        // its own chrome bar with retry/close buttons, and a spinner) and
+        // attaches it to the DOM SYNCHRONOUSLY on click, before the HTML
+        // round-trip even starts. Without this, the host page stayed
+        // visually static for the whole fetch (only a slim top progress bar
+        // hinted anything was happening) and the blur/dim backdrop only
+        // appeared once content was ready - on a cold, un-prefetched open
+        // this reads as "nothing happens, then suddenly a blurry panel pops
+        // in a second later".
+        // Close/retry live HERE, in the host document, not in whatever page
+        // gets nested - a consumer page never needs to render its own close
+        // button (and the stopPropagation() dance that previously required,
+        // since a nested page's own click handler would otherwise race the
+        // host's) simply no longer exists as a problem.
+        function openShell(href) {
 
             // a fast re-open racing an in-flight close animation wins:
             // drop the dying node rather than leaving two #transparent-nest
@@ -2642,18 +2718,655 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
             var container = document.createElement('div');
             container.id = CONTAINER_ID;
-            container.setAttribute('role', 'dialog');
-            container.setAttribute('aria-modal', 'true');
-            // starts at the base rule's opacity:0 - .is-loading is added
-            // a frame later (below) so the opacity:0->0.55 change is an
-            // observable style change the transition can actually animate,
-            // instead of both being applied in the same synchronous tick
-            // (which the browser would coalesce into a single, untransitioned
-            // paint - no "before" frame to transition from).
+            // known from the very first tick (reveal() later refines it to
+            // the response URL) so share/esc/backdrop event details and the
+            // share navigation always have something meaningful to use
+            container._currentHref = href;
+
+            // Standard modal convention: clicking the dimmed backdrop
+            // (outside the panel) closes the nest. `e.target !== container`
+            // is sufficient - the panel fully covers its own subtree, so
+            // any click inside it targets a descendant, never the container
+            // itself; clicks inside the iframe never reach the host
+            // document at all. Deliberately no confirm() here (unlike ESC):
+            // a backdrop click is a deliberate outside-dismiss gesture.
+            container.addEventListener('click', function(e) {
+                if (e.target !== container) return;
+                dispatchEvent(new CustomEvent('transparent:nest:backdrop', { detail: { href: container._currentHref } }));
+                api.close();
+            });
+
+            var panel = document.createElement('div');
+            panel.className = 'transparent-nest-panel';
+            // role/aria-modal live on the panel (the actual dialog surface),
+            // not the backdrop - the backdrop is just a scrim
+            panel.setAttribute('role', 'dialog');
+            panel.setAttribute('aria-modal', 'true');
+            container.appendChild(panel);
+
+            var chromeBar = document.createElement('div');
+            chromeBar.className = 'transparent-nest-chrome';
+            panel.appendChild(chromeBar);
+
+            // Small loading indicator next to the chrome buttons: visible
+            // during nest-level loads (.is-loading) AND while the nested
+            // page's OWN transparentJS instance is mid-navigation
+            // (.is-busy, mirrored from the iframe's html.loading class by
+            // the observer wired in mount()) - the host-side replacement
+            // for the old in-admin .admin-nav-spinner.
+            var busySpinner = document.createElement('span');
+            busySpinner.className = 'transparent-nest-busy';
+            busySpinner.setAttribute('aria-hidden', 'true');
+            chromeBar.appendChild(busySpinner);
+
+            // resets the panel to its pristine centered default geometry -
+            // shared by the dock/restore/share state switches so freed
+            // (moved/resized) inline px never leaks between modes
+            function resetGeometry() {
+                panel.classList.remove('is-free');
+                panel.style.left = panel.style.top = panel.style.width = panel.style.height = '';
+            }
+
+            // Re-parents the WHOLE panel (chrome + body, so close/dock-
+            // toggle/etc keep working from wherever it ends up) into a
+            // designated host-page element (Settings.nest_dock_target, a
+            // CSS selector) instead of floating it at a viewport edge -
+            // "dockerize on demand": that element's own original content is
+            // stashed (removed, not destroyed) and put back by
+            // undockFromContainer(). No-op (returns false) if the setting
+            // isn't configured or the target isn't found in the DOM -
+            // callers fall back to the normal floating dock in that case.
+            function containerDock() {
+                if (container._dockedTarget) return true;
+                var sel = Settings["nest_dock_target"];
+                if (!sel) return false;
+                var target = document.querySelector(sel);
+                if (!target) return false;
+                container._dockStash = Array.prototype.slice.call(target.childNodes);
+                container._dockStash.forEach(function(n) { target.removeChild(n); });
+                resetGeometry();
+                target.appendChild(panel);
+                container._dockedTarget = target;
+                container.classList.add('is-docked', 'is-container-docked');
+                Transparent.html.addClass('nest-docked');
+                document.body.style.overflow = hostOverflow || '';
+                dispatchEvent(new CustomEvent('transparent:nest:dock', { detail: { href: container._currentHref, edge: null, target: sel } }));
+                return true;
+            }
+
+            // Reverses containerDock(): moves the panel back under the
+            // normal overlay shell and restores the host container's
+            // original children exactly as found. Safe to call whenever -
+            // no-op if never container-docked. Called by clearDock() (so
+            // restore/double-click/dock-toggle-off all clean it up the same
+            // way) AND wired onto the container itself (see below) so
+            // closeShell() can guarantee reintegration even when the nest
+            // closes outright instead of merely undocking.
+            function undockFromContainer() {
+                if (!container._dockedTarget) return;
+                var target = container._dockedTarget;
+                target.removeChild(panel);
+                container.appendChild(panel);
+                (container._dockStash || []).forEach(function(n) { target.appendChild(n); });
+                container._dockedTarget = null;
+                container._dockStash = null;
+                container.classList.remove('is-container-docked');
+            }
+            container._teardownDock = function() { undockFromContainer(); };
+
+            // Lightweight "docked" entry with no viewport edge attached -
+            // just removes the modal backdrop/blocking so the host page is
+            // interactive again, wherever the panel happens to be sitting.
+            // applyDock(edge) below is the fuller version of this (also
+            // stretches the panel to fill that edge) - this is what a plain
+            // move/resize that DOESN'T reach any edge falls back to, per
+            // "if it's not in its default position we should go into
+            // docking mode".
+            function enterPassthrough() {
+                if (Settings["nest_dock"] === false) return; // forbids docking entirely, including this lightweight form
+                if (container.classList.contains('is-docked')) return;
+                // Snapshot the panel's CURRENT (flex-centered) position/size
+                // into explicit inline px BEFORE switching to
+                // position:absolute (the .is-docked CSS below) - without
+                // this, a dock triggered from the dock button (as opposed
+                // to a drag, which already calls toFree() itself) had no
+                // left/top to fall back on, and browsers resolve an
+                // absolutely-positioned box with no offsets to its "static
+                // position" - which collapses to the top-left corner for a
+                // removed flex item in practice, not wherever it visually
+                // was. toFree() is a no-op if a drag already froze it.
+                toFree();
+                container.classList.add('is-docked');
+                Transparent.html.addClass('nest-docked');
+                document.body.style.overflow = hostOverflow || '';
+                dispatchEvent(new CustomEvent('transparent:nest:dock', { detail: { href: container._currentHref, edge: null } }));
+            }
+
+            // Docking's host-page concessions (scroll unlock, scrim removal
+            // are pure CSS off .is-docked) plus, if applicable, reversing a
+            // container-dock - used by restore, by share-while-docked, and
+            // by the dock-toggle button's "undock" branch.
+            function clearDock() {
+                if (!container.classList.contains('is-docked')) return;
+                undockFromContainer();
+                container.classList.remove('is-docked', 'is-hidden', 'is-container-docked');
+                delete container.dataset.dockEdge;
+                Transparent.html.removeClass('nest-docked');
+                document.body.style.overflow = 'hidden';
+            }
+
+            function restoreDefault() {
+                clearDock();
+                container.classList.remove('is-full');
+                resetGeometry();
+                dispatchEvent(new CustomEvent('transparent:nest:restore', { detail: { href: container._currentHref } }));
+            }
+
+            // A plain click on the grab tab (while genuinely docked flush
+            // against a viewport edge - not just "freed" mid-screen, and not
+            // container-docked) tucks the panel fully out of view - only
+            // the tab itself stays put, the host page reclaims the rest of
+            // that edge. Clicking again brings it back. Distinct from
+            // double-click (restoreDefault, jumps all the way back to the
+            // centered default) and from drag (move/undock) - see the
+            // pointerdown handler below for how the three are told apart.
+            function toggleHidden() {
+                if (!container.dataset.dockEdge) return;
+                var hidden = container.classList.toggle('is-hidden');
+                dispatchEvent(new CustomEvent('transparent:nest:' + (hidden ? 'hide' : 'show'), { detail: { href: container._currentHref, edge: container.dataset.dockEdge } }));
+            }
+
+            // The collapsed docked chrome's only visible control once flush
+            // against a viewport edge: a small grab tab on the panel's
+            // inner edge (the one bordering the still-visible host page),
+            // styled to match the same toolbar it replaces rather than a
+            // separate floating pill. Drag it like the normal chrome bar
+            // (same pointerdown target, chromeBar itself) to move/undock,
+            // click it to tuck the panel away, double-click the bar to
+            // restore. While merely "freed" (moved/resized but not pushed
+            // against an edge) the full button row stays visible instead -
+            // see the [data-dock-edge] gating in index.scss.
+            var grabTab = document.createElement('div');
+            grabTab.className = 'transparent-nest-grab';
+            grabTab.setAttribute('aria-hidden', 'true');
+            chromeBar.appendChild(grabTab);
+
+            // Address bar snapshot taken the instant share() commits the
+            // nested URL - restored by collapseBtn below so "exit full
+            // page" is a true inverse of share, not just a visual undo.
+            var preShareHref = null;
+
+            var shareBtn = document.createElement('button');
+            shareBtn.type = 'button';
+            shareBtn.className = 'transparent-nest-btn transparent-nest-share';
+            shareBtn.setAttribute('aria-label', 'Expand to full page');
+            shareBtn.setAttribute('title', 'Expand to full page');
+            shareBtn.innerHTML = '&#8599;';
+            shareBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                var target = container._currentHref;
+                if (!target) return;
+                dispatchEvent(new CustomEvent('transparent:nest:share', { detail: { href: target } }));
+                preShareHref = location.href;
+                // clear any freed (moved/resized) geometry and docked state
+                // so the fullscreen CSS state applies cleanly
+                clearDock();
+                resetGeometry();
+                container.classList.add('is-full');
+                // commit the URL. Normally the open pushed a nest-marked
+                // same-URL entry - replace it in place. If share is hit
+                // while the very first fetch is still in flight (no entry
+                // pushed yet), push one now instead - replacing there
+                // would destroy the HOST's own entry.
+                try {
+                    if (history.state && history.state.nest) history.replaceState({ nest: { href: target } }, '', target);
+                    else history.pushState({ nest: { href: target } }, '', target);
+                } catch (err) {}
+            });
+            chromeBar.appendChild(shareBtn);
+
+            // Fullscreen (shared) is otherwise a dead end - close was the
+            // only way out. This mirrors share exactly: drops back to the
+            // default panel AND reverts the address bar to whatever it was
+            // right before share committed it (not just "no history.back(),
+            // which would exit the nest entirely per the existing Back
+            // contract - see drive6 scenario 3).
+            var collapseBtn = document.createElement('button');
+            collapseBtn.type = 'button';
+            collapseBtn.className = 'transparent-nest-btn transparent-nest-collapse';
+            collapseBtn.setAttribute('aria-label', 'Exit full page');
+            collapseBtn.setAttribute('title', 'Exit full page');
+            collapseBtn.innerHTML = '&#8601;';
+            collapseBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                if (preShareHref) {
+                    try { history.replaceState({ nest: { href: container._currentHref } }, '', preShareHref); } catch (err) {}
+                    preShareHref = null;
+                }
+                restoreDefault();
+            });
+            chromeBar.appendChild(collapseBtn);
+
+            // Explicit manual trigger for the same non-modal "docked" state
+            // a drag/resize away from default now falls into on its own
+            // (see enterPassthrough/applyDock and the move/resize handlers
+            // below) - lets a user dock without having to drag anywhere
+            // first. Prefers Settings.nest_dock_target (re-parent into a
+            // host container) when configured, otherwise falls back to the
+            // plain floating passthrough. Toggling it back off restores.
+            var dockBtn = document.createElement('button');
+            dockBtn.type = 'button';
+            dockBtn.className = 'transparent-nest-btn transparent-nest-dock-toggle';
+            dockBtn.setAttribute('aria-label', 'Dock');
+            dockBtn.setAttribute('title', 'Dock (interact with the page behind)');
+            dockBtn.innerHTML = '<span class="transparent-nest-dock-icon" aria-hidden="true"></span>';
+            dockBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                if (container.classList.contains('is-docked')) {
+                    clearDock();
+                    resetGeometry();
+                    dispatchEvent(new CustomEvent('transparent:nest:restore', { detail: { href: container._currentHref } }));
+                } else if (Settings["nest_dock"] !== false) {
+                    if (!containerDock()) enterPassthrough();
+                }
+            });
+            chromeBar.appendChild(dockBtn);
+
+            var retryBtn = document.createElement('button');
+            retryBtn.type = 'button';
+            retryBtn.className = 'transparent-nest-btn transparent-nest-retry';
+            retryBtn.setAttribute('aria-label', 'Retry');
+            retryBtn.innerHTML = '&#8635;';
+            // only ever visible while .is-error/.is-retrying - see index.scss
+            retryBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                retryClicked();
+            });
+            chromeBar.appendChild(retryBtn);
+
+            var closeBtn = document.createElement('button');
+            closeBtn.type = 'button';
+            closeBtn.className = 'transparent-nest-btn transparent-nest-close';
+            closeBtn.setAttribute('aria-label', 'Close');
+            closeBtn.innerHTML = '&times;';
+            closeBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                api.close();
+            });
+            chromeBar.appendChild(closeBtn);
+
+            var body = document.createElement('div');
+            body.className = 'transparent-nest-body';
+            panel.appendChild(body);
 
             var spinner = document.createElement('div');
             spinner.className = 'transparent-nest-spinner';
-            container.appendChild(spinner);
+            body.appendChild(spinner);
+
+            var error = document.createElement('div');
+            error.className = 'transparent-nest-error';
+            error.innerHTML = '<div class="transparent-nest-error-icon">&#9888;</div>'
+                + '<div class="transparent-nest-error-message">Something went wrong loading this content.</div>';
+            body.appendChild(error);
+
+            // ── Panel interactions: move (drag the chrome bar), resize
+            // (drag edges/corners), magnetic snap against viewport
+            // sides/corners. All gated by Settings (nest_move/nest_resize/
+            // nest_snap, opt-out defaults). The panel starts flex-centered
+            // at its default size; the FIRST interaction "frees" it:
+            // position:absolute + explicit px geometry (is-free), after
+            // which it goes wherever the user puts it. is-dragging on the
+            // container disables the iframe's pointer-events for the whole
+            // gesture - without that shield the drag dies the instant the
+            // pointer crosses into the iframe (its document eats the
+            // events; pointer capture alone doesn't cross that boundary
+            // reliably in every engine, so both are used).
+            var MIN_W = 320, MIN_H = 240;
+            var MOBILE_QUERY = '(max-width: 768px)';
+            // Below this breakpoint the panel is ALWAYS fullscreen (see
+            // index.scss) - move/resize/dock don't apply there, only the
+            // swipe-down-to-dismiss gesture does.
+            function isMobile() {
+                return window.matchMedia && window.matchMedia(MOBILE_QUERY).matches;
+            }
+
+            function toFree() {
+                if (panel.classList.contains('is-free')) return;
+                var r = panel.getBoundingClientRect();
+                panel.classList.add('is-free');
+                panel.style.left = r.left + 'px';
+                panel.style.top = r.top + 'px';
+                panel.style.width = r.width + 'px';
+                panel.style.height = r.height + 'px';
+            }
+
+            // Live drag tracks the pointer 1:1, no clamping mid-drag - the
+            // dock decision below is made once, on release, same spirit as
+            // OS-level window snap (a live outline preview would be nicer
+            // but isn't implemented here).
+            //
+            // Docking is purely POSITIONAL now (no button): drop the panel
+            // and it docks THERE, stretched to fill that whole dimension
+            // ("snapping and perfectly fitting the screen") - full height
+            // for left/right, full width for top/bottom. Checked in this
+            // fixed order so a corner drop (overflowing two edges at once)
+            // resolves to one side, not an undefined blend.
+            //
+            // Deliberately triggers on genuine OVERFLOW past the viewport
+            // boundary, not mere proximity to it: an earlier version
+            // docked as soon as an edge came within a small zone of the
+            // viewport edge, so it kicked in constantly while the panel
+            // was still comfortably fully on-screen. Docking should only
+            // become visible once the panel is actually being pushed OUT
+            // of the window - nest_snap_threshold is now "how far past the
+            // boundary counts as pushed out" (a small tolerance so a
+            // 1-pixel overshoot doesn't mis-trigger), not "how close is
+            // close enough".
+            function pushedOutEdge(rect) {
+                if (Settings["nest_dock"] === false || Settings["nest_snap"] === false) return null;
+                var t = Settings["nest_snap_threshold"];
+                var vw = window.innerWidth, vh = window.innerHeight;
+                if (rect.left <= -t) return 'left';
+                if (rect.left + rect.width >= vw + t) return 'right';
+                if (rect.top <= -t) return 'top';
+                if (rect.top + rect.height >= vh + t) return 'bottom';
+                return null;
+            }
+
+            function applyDock(edge) {
+                var rect = panel.getBoundingClientRect();
+                container.classList.add('is-docked');
+                container.dataset.dockEdge = edge;
+                Transparent.html.addClass('nest-docked');
+                document.body.style.overflow = hostOverflow || ''; // host scrolls again
+                // The SPAN dimension (height for left/right, width for
+                // top/bottom) is fully CSS-driven (100vh/100vw) - clear any
+                // inline px so it stays responsive to viewport resizes. The
+                // DEPTH dimension keeps an explicit, clamped inline px:
+                // left/right/top/bottom clearing it out would let the
+                // panel's own base CSS width (92vw) or height (88vh) leak
+                // through, turning every dock into a near-fullscreen slab
+                // instead of a real sidebar/bar. Starts from whatever depth
+                // the panel already had (respects a prior resize) clamped
+                // to a sane range - the resize handle can adjust it further
+                // once docked.
+                if (edge === 'left' || edge === 'right') {
+                    panel.style.width = Math.min(Math.max(rect.width, MIN_W), Math.round(window.innerWidth * 0.5), 480) + 'px';
+                    panel.style.height = '';
+                } else {
+                    panel.style.height = Math.min(Math.max(rect.height, MIN_H), Math.round(window.innerHeight * 0.5), 360) + 'px';
+                    panel.style.width = '';
+                }
+                panel.style.left = panel.style.top = '';
+                dispatchEvent(new CustomEvent('transparent:nest:dock', { detail: { href: container._currentHref, edge: edge } }));
+            }
+
+            if (Settings["nest_move"] !== false) {
+                container.classList.add('is-movable');
+                // Manual double-click detection, NOT a native 'dblclick'
+                // listener: this same pointerdown handler calls
+                // e.preventDefault() to own the drag gesture, and several
+                // engines (WebKit/Safari notably) suppress the synthetic
+                // click/dblclick events a pointer interaction would
+                // otherwise generate once its pointerdown's default action
+                // is prevented - a native dblclick listener here could
+                // simply never fire. Tracking timestamp + position of the
+                // last pointerdown ourselves sidesteps that entirely.
+                var lastDownAt = 0, lastDownX = 0, lastDownY = 0;
+                var DBLCLICK_MS = 400, DBLCLICK_PX = 10;
+                // A plain click's hide/show toggle can't fire immediately on
+                // pointerup - it has to wait out the double-click window
+                // first, since the SAME click is also candidate #1 of a
+                // pending double-click (which means "restore", not "hide").
+                // Whichever click resolves the ambiguity (the double-click
+                // branch above) cancels this timer.
+                var pendingClickTimer = null;
+                chromeBar.addEventListener('pointerdown', function(e) {
+                    if (e.button !== 0) return;
+                    if (container.classList.contains('is-full')) return; // fullscreen (shared) isn't draggable
+                    if (isMobile()) return; // always-fullscreen breakpoint - swipe handles dismissal instead
+                    if (e.target.closest && e.target.closest('button')) return;
+
+                    var now = Date.now();
+                    var isDoubleClick = (now - lastDownAt) < DBLCLICK_MS
+                        && Math.abs(e.clientX - lastDownX) < DBLCLICK_PX
+                        && Math.abs(e.clientY - lastDownY) < DBLCLICK_PX;
+                    lastDownAt = now; lastDownX = e.clientX; lastDownY = e.clientY;
+                    if (isDoubleClick) {
+                        lastDownAt = 0; // consumed - a third rapid click starts fresh, isn't a triple-trigger
+                        if (pendingClickTimer) { clearTimeout(pendingClickTimer); pendingClickTimer = null; }
+                        restoreDefault();
+                        return;
+                    }
+
+                    var sx = e.clientX, sy = e.clientY;
+                    var sl, st, started = false;
+                    container.classList.add('is-dragging');
+                    try { chromeBar.setPointerCapture(e.pointerId); } catch (err) {}
+
+                    // Picking a docked panel up needs its own snapshot, NOT
+                    // plain toFree(): a docked panel's SPAN dimension is
+                    // deliberately oversized (100vh for left/right,
+                    // 100vw for top/bottom) as part of what docking means -
+                    // carrying that straight into a free-floating box would
+                    // hand the drag a panel whose height/width already
+                    // reaches (or exceeds, given the move itself shifts
+                    // top/left too) the opposite viewport edge, so the
+                    // edge-proximity check at release would false-positive
+                    // "still touching" almost immediately, regardless of
+                    // where it's actually dropped. Undocking gives the span
+                    // dimension a normal, moderate size instead - only the
+                    // depth (the dimension that was actually meaningful
+                    // while docked) carries over.
+                    var beginDrag = function() {
+                        started = true;
+                        var wasDocked = container.classList.contains('is-docked');
+                        if (wasDocked) {
+                            var edgeAtPickup = container.dataset.dockEdge;
+                            // drop is-hidden BEFORE measuring - its
+                            // transform pushes the panel fully off-screen,
+                            // so a rect taken while it's still applied would
+                            // hand the drag garbage (translated, not true)
+                            // coordinates
+                            container.classList.remove('is-hidden');
+                            var rect = panel.getBoundingClientRect();
+                            clearDock();
+                            panel.classList.add('is-free');
+                            if (edgeAtPickup === 'left' || edgeAtPickup === 'right') {
+                                panel.style.width = rect.width + 'px';
+                                panel.style.height = Math.round(window.innerHeight * 0.7) + 'px';
+                            } else {
+                                panel.style.height = rect.height + 'px';
+                                panel.style.width = Math.round(window.innerWidth * 0.7) + 'px';
+                            }
+                            panel.style.left = rect.left + 'px';
+                            panel.style.top = rect.top + 'px';
+                        } else {
+                            toFree();
+                        }
+                        // "if it's not in its default position we should go
+                        // into docking mode" - a genuine drag starting (or
+                        // resuming from a prior dock) drops the modal
+                        // backdrop immediately, not just once it happens to
+                        // land pushed against an edge
+                        enterPassthrough();
+                        sl = parseFloat(panel.style.left);
+                        st = parseFloat(panel.style.top);
+                    };
+
+                    var onMove = function(ev) {
+                        // A plain click - pointerdown then pointerup with
+                        // essentially no movement - must be a complete
+                        // no-op for dock state: committing to beginDrag()
+                        // on every click (as an earlier version did) picks
+                        // the panel up and immediately re-evaluates docking
+                        // even for a single stationary click, which can
+                        // shift the grab tab's exact pixel position by the
+                        // time a SECOND click of an intended double-click
+                        // lands - occasionally missing the tab entirely and
+                        // landing on the host page underneath instead
+                        // (once observed live: the "second click" of a
+                        // double-click hit an unrelated host link and
+                        // navigated away). Small jitter tolerance, not 0,
+                        // since real pointer input is never perfectly still.
+                        if (!started) {
+                            if (Math.abs(ev.clientX - sx) < 4 && Math.abs(ev.clientY - sy) < 4) return;
+                            // real movement - this was a drag, not a click;
+                            // a hide/show toggle scheduled by an earlier,
+                            // still-pending click on this same tab no longer
+                            // applies
+                            if (pendingClickTimer) { clearTimeout(pendingClickTimer); pendingClickTimer = null; }
+                            beginDrag();
+                        }
+                        panel.style.left = (sl + ev.clientX - sx) + 'px';
+                        panel.style.top = (st + ev.clientY - sy) + 'px';
+                    };
+                    var onUp = function() {
+                        chromeBar.removeEventListener('pointermove', onMove);
+                        chromeBar.removeEventListener('pointerup', onUp);
+                        chromeBar.removeEventListener('pointercancel', onUp);
+                        container.classList.remove('is-dragging');
+                        if (started) {
+                            var edge = pushedOutEdge(panel.getBoundingClientRect());
+                            // Pushed past an edge -> full edge-fit dock.
+                            // Otherwise it STAYS docked/passthrough right
+                            // where it was dropped (enterPassthrough()
+                            // already applied that in beginDrag) - dropping
+                            // it somewhere fully on-screen no longer snaps
+                            // all the way back to the full modal by itself;
+                            // only an explicit restore (double-click / the
+                            // dock button) does that.
+                            if (edge) applyDock(edge);
+                            else delete container.dataset.dockEdge;
+                            dispatchEvent(new CustomEvent('transparent:nest:move', { detail: { href: container._currentHref, rect: panel.getBoundingClientRect() } }));
+                        } else if (container.classList.contains('is-docked')) {
+                            // genuine click (no movement) on a docked panel's
+                            // grab tab - defer the hide/show toggle until the
+                            // double-click window has passed with no second
+                            // click; if one arrives, the branch above cancels
+                            // this and restores instead
+                            if (pendingClickTimer) clearTimeout(pendingClickTimer);
+                            pendingClickTimer = setTimeout(function() {
+                                pendingClickTimer = null;
+                                toggleHidden();
+                            }, DBLCLICK_MS);
+                        }
+                    };
+                    chromeBar.addEventListener('pointermove', onMove);
+                    chromeBar.addEventListener('pointerup', onUp);
+                    chromeBar.addEventListener('pointercancel', onUp);
+                    e.preventDefault();
+                });
+            }
+
+            if (Settings["nest_resize"] !== false) {
+                var startResize = function(e, dir, handle) {
+                    if (e.button !== 0) return;
+                    if (container.classList.contains('is-full')) return; // fullscreen (shared) isn't resizable
+                    if (isMobile()) return; // always-fullscreen breakpoint
+                    toFree();
+                    // resizing away from the pristine default is just as
+                    // much "not in its default position" as moving it - see
+                    // the move handler's beginDrag for the same call
+                    enterPassthrough();
+                    var sx = e.clientX, sy = e.clientY;
+                    var sl = parseFloat(panel.style.left), st = parseFloat(panel.style.top);
+                    var sw = panel.offsetWidth, sh = panel.offsetHeight;
+                    container.classList.add('is-dragging');
+                    try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+                    var t = Settings["nest_snap"] === false ? -1 : Settings["nest_snap_threshold"];
+                    var onMove = function(ev) {
+                        var dx = ev.clientX - sx, dy = ev.clientY - sy;
+                        var left = sl, top = st, w = sw, h = sh;
+                        // the dragged edge is the one that snaps
+                        if (dir.indexOf('e') !== -1) {
+                            w = sw + dx;
+                            if (t > 0 && Math.abs(window.innerWidth - (left + w)) < t) w = window.innerWidth - left;
+                        }
+                        if (dir.indexOf('s') !== -1) {
+                            h = sh + dy;
+                            if (t > 0 && Math.abs(window.innerHeight - (top + h)) < t) h = window.innerHeight - top;
+                        }
+                        if (dir.indexOf('w') !== -1) {
+                            left = sl + dx; w = sw - dx;
+                            if (t > 0 && Math.abs(left) < t) { w += left; left = 0; }
+                        }
+                        if (dir.indexOf('n') !== -1) {
+                            top = st + dy; h = sh - dy;
+                            if (t > 0 && Math.abs(top) < t) { h += top; top = 0; }
+                        }
+                        if (w < MIN_W) { if (dir.indexOf('w') !== -1) left -= (MIN_W - w); w = MIN_W; }
+                        if (h < MIN_H) { if (dir.indexOf('n') !== -1) top -= (MIN_H - h); h = MIN_H; }
+                        panel.style.left = left + 'px';
+                        panel.style.top = top + 'px';
+                        panel.style.width = w + 'px';
+                        panel.style.height = h + 'px';
+                    };
+                    var onUp = function() {
+                        handle.removeEventListener('pointermove', onMove);
+                        handle.removeEventListener('pointerup', onUp);
+                        handle.removeEventListener('pointercancel', onUp);
+                        container.classList.remove('is-dragging');
+                        dispatchEvent(new CustomEvent('transparent:nest:resize', { detail: { href: container._currentHref, rect: panel.getBoundingClientRect() } }));
+                    };
+                    handle.addEventListener('pointermove', onMove);
+                    handle.addEventListener('pointerup', onUp);
+                    handle.addEventListener('pointercancel', onUp);
+                    e.preventDefault();
+                    e.stopPropagation();
+                };
+                ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'].forEach(function(dir) {
+                    var handle = document.createElement('div');
+                    handle.className = 'transparent-nest-handle transparent-nest-handle-' + dir;
+                    handle.addEventListener('pointerdown', function(e) { startResize(e, dir, handle); });
+                    panel.appendChild(handle);
+                });
+            }
+
+            // Swipe-down-to-dismiss (iOS sheet style) - mobile only (the
+            // panel is always fullscreen below the breakpoint, see
+            // index.scss, so there's no move/resize/dock there, only this).
+            // Drag the chrome bar down past a distance OR flick it with
+            // enough velocity to close; otherwise it snaps back.
+            if (Settings["nest_swipe"] !== false) {
+                var SWIPE_CLOSE_DISTANCE = 120;
+                var SWIPE_CLOSE_VELOCITY = 0.5; // px/ms
+                chromeBar.addEventListener('pointerdown', function(e) {
+                    if (e.button !== 0) return;
+                    if (!isMobile()) return;
+                    if (e.target.closest && e.target.closest('button')) return;
+                    var startY = e.clientY, startTime = Date.now(), dy = 0;
+                    panel.classList.add('is-swiping');
+                    container.classList.add('is-swiping');
+                    try { chromeBar.setPointerCapture(e.pointerId); } catch (err) {}
+                    var onMove = function(ev) {
+                        dy = Math.max(0, ev.clientY - startY); // downward only
+                        panel.style.transform = 'translateY(' + dy + 'px)';
+                        var damp = Math.max(0, 1 - dy / (window.innerHeight * 0.6));
+                        container.style.setProperty('--transparent-nest-swipe-fade', damp);
+                    };
+                    var onUp = function() {
+                        chromeBar.removeEventListener('pointermove', onMove);
+                        chromeBar.removeEventListener('pointerup', onUp);
+                        chromeBar.removeEventListener('pointercancel', onUp);
+                        panel.classList.remove('is-swiping');
+                        container.classList.remove('is-swiping');
+                        var velocity = dy / Math.max(1, Date.now() - startTime);
+                        if (dy > SWIPE_CLOSE_DISTANCE || velocity > SWIPE_CLOSE_VELOCITY) {
+                            dispatchEvent(new CustomEvent('transparent:nest:swipe-close', { detail: { href: container._currentHref } }));
+                            panel.style.transform = ''; // is-closing's own transform takes over
+                            container.style.removeProperty('--transparent-nest-swipe-fade');
+                            api.close();
+                        } else {
+                            panel.style.transform = '';
+                            container.style.removeProperty('--transparent-nest-swipe-fade');
+                        }
+                    };
+                    chromeBar.addEventListener('pointermove', onMove);
+                    chromeBar.addEventListener('pointerup', onUp);
+                    chromeBar.addEventListener('pointercancel', onUp);
+                });
+            }
 
             hostTitle = document.title;
             hostOverflow = document.body.style.overflow;
@@ -2661,10 +3374,36 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             document.body.appendChild(container);
             Transparent.html.addClass(HTML_CLASS);
 
-            requestAnimationFrame(function() {
-                requestAnimationFrame(function() {
-                    container.classList.add('is-loading');
-                });
+            // Force a SYNCHRONOUS style flush (reading a layout-dependent
+            // property forces the browser to commit the base opacity:0
+            // state to the render tree right now, in this same tick) so
+            // .is-loading's opacity:1 has an observable "before" frame
+            // to transition from - same goal the previous double-rAF
+            // version had, but bounded. A double requestAnimationFrame
+            // delay is UNBOUNDED under real main-thread contention: on a
+            // busy page (heavy JS/rendering work already in flight, e.g.
+            // the host page's own map), two animation frames can take over
+            // a second to actually fire - confirmed independently in this
+            // session's own headless testing (the equivalent .is-error
+            // path stalled similarly). For the ENTIRE gap before those
+            // frames land, the container sits at the base rule's
+            // opacity:0 - genuinely, completely invisible - "truly flat,
+            // nothing at all" is exactly what opacity:0 looks like. This
+            // is what a real user reported live: an extended blank/flat
+            // period with no spinner, no dimming, nothing.
+            void container.offsetHeight;
+            container.classList.add('is-loading');
+            dispatchEvent(new CustomEvent('transparent:nest:fade-in-start', { detail: { href: href } }));
+            // The entrance fade (0 -> 1) runs and COMPLETES during
+            // .is-loading (loading is full opacity now, the frosted-glass
+            // panel is the loading look) - so fade-in-end must be armed
+            // here, where the fade starts, not in reveal() (by reveal time
+            // opacity is already 1 -> 1, no transition, the event would
+            // never fire).
+            container.addEventListener('transitionend', function onFadeInEnd(e) {
+                if (e.target !== container || e.propertyName !== 'opacity') return;
+                container.removeEventListener('transitionend', onFadeInEnd);
+                dispatchEvent(new CustomEvent('transparent:nest:fade-in-end', { detail: { href: href } }));
             });
 
             return container;
@@ -2676,11 +3415,12 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
             var title = (html.match(/<title[^>]*>([^<]*)<\/title>/i) || [])[1];
 
-            var frame = container.querySelector('iframe');
+            var body = container.querySelector('.transparent-nest-body');
+            var frame = body.querySelector('iframe');
             if (frame == null) {
                 frame = document.createElement('iframe');
                 frame.setAttribute('title', title || 'nested');
-                container.appendChild(frame);
+                body.appendChild(frame);
             }
 
             // Reveal only once the iframe has actually finished loading -
@@ -2698,22 +3438,34 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 if (revealed) return;
                 revealed = true;
                 container._pendingReveal = null;
+                // backs the `href` on esc/close-adjacent events without
+                // inventing separate per-event tracking
+                container._currentHref = href;
 
-                var spinner = container.querySelector('.transparent-nest-spinner');
-                if (spinner) spinner.remove();
+                // The spinner element is PERMANENT (not removed here): CSS
+                // gates it on .is-loading, so every subsequent in-overlay
+                // load (navigate/retry) gets the glass+spinner treatment
+                // too, not just the very first open.
 
-                // fade the fresh content in (the .is-loading dim was applied
-                // by fetchNested/openShell while the request was in flight).
-                // .is-entering is deliberately left on afterwards - it's just
-                // opacity:1, the correct resting state, not a one-shot
-                // animation trigger - removing it would fall through to the
-                // base rule's opacity:0 (needed for the very first open's
-                // transition-in) and make fully-loaded content invisible
-                // again. A subsequent navigate() call clears it before
-                // re-adding .is-loading (see fetchNested) so the loading
-                // dim still applies each time.
+                // Reveal the content: while .is-loading the panel is
+                // frosted glass with the spinner on top (see index.scss);
+                // swapping to .is-entering turns the panel opaque white and
+                // unhides the iframe. .is-entering is deliberately left on
+                // afterwards - it's just opacity:1, the correct resting
+                // state, not a one-shot animation trigger - removing it
+                // would fall through to the base rule's opacity:0 (needed
+                // for the very first open's transition-in) and make
+                // fully-loaded content invisible again. A subsequent
+                // navigate() call clears it before re-adding .is-loading
+                // (see fetchNested) so the glass state applies each time.
                 container.classList.remove('is-loading');
+                // defensive: a stale reveal (e.g. a very late notifyNestReady
+                // from a document that's since been replaced) shouldn't be
+                // able to leave a previously-shown error state stuck on
+                container.classList.remove('is-error');
                 container.classList.add('is-entering');
+                var retryBtn = container.querySelector('.transparent-nest-retry');
+                if (retryBtn) { retryBtn.classList.remove('is-retrying'); retryBtn.disabled = false; }
 
                 dispatchEvent(new CustomEvent('transparent:nest:' + (fresh ? 'open' : 'navigate'), { detail: { href: href } }));
             };
@@ -2761,6 +3513,34 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                     observer.observe(doc.documentElement, { childList: true, subtree: true, attributes: true });
                     scheduleSettle();
                     setTimeout(finish, MAX_WAIT_AFTER_LOAD_MS); // hard cap regardless of ongoing mutations
+                    // redundant with the attach right after srcdoc is set
+                    // below - identical (type, listener, capture) triples
+                    // dedupe per spec, so this is a harmless no-op unless
+                    // that earlier attach's contentDocument timing
+                    // assumption turns out not to hold in some engine
+                    try { doc.addEventListener('keydown', handleEscKeydown, true); } catch (e) {}
+
+                    // Mirror the nested page's own transparentJS loading
+                    // state (its html.loading class, set for every in-iframe
+                    // SPA navigation) onto the container as .is-busy - this
+                    // drives the small chrome loading indicator next to the
+                    // close button. Persistent for the document's lifetime
+                    // (unlike the settle observer above); re-created on
+                    // every mount since srcdoc replaces the whole document.
+                    if (container._busyObserver) { try { container._busyObserver.disconnect(); } catch (e) {} }
+                    var innerHtml = doc.documentElement;
+                    container._busyObserver = new MutationObserver(function() {
+                        var busy = innerHtml.classList.contains('loading');
+                        var had = container.classList.contains('is-busy');
+                        if (busy && !had) {
+                            container.classList.add('is-busy');
+                            dispatchEvent(new CustomEvent('transparent:nest:busy', { detail: { href: container._currentHref } }));
+                        } else if (!busy && had) {
+                            container.classList.remove('is-busy');
+                            dispatchEvent(new CustomEvent('transparent:nest:idle', { detail: { href: container._currentHref } }));
+                        }
+                    });
+                    container._busyObserver.observe(innerHtml, { attributes: true, attributeFilter: ['class'] });
                 } catch (e) {
                     // cross-origin or any other access failure - fall back
                     // to revealing right on 'load' rather than hanging
@@ -2771,8 +3551,21 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             // if 'load' never fires at all for some edge case
             setTimeout(reveal, 4000 + MAX_WAIT_AFTER_LOAD_MS);
 
+            // a leftover busy flag from the PREVIOUS document (it may have
+            // been mid-navigation when this mount replaced it) must not
+            // survive into the new one
+            container.classList.remove('is-busy');
+
             frame.srcdoc = html;
             if (title) document.title = title;
+            // reassigning srcdoc replaces the ENTIRE inner Document (new
+            // listener registry) every time - a one-time host-side keydown
+            // listener can never see ESC presses focused inside the iframe
+            // (keydown doesn't cross the iframe/parent boundary), so this
+            // must be re-attached on every mount(), not just once at setup.
+            // Same-origin srcdoc means contentDocument is synchronously
+            // available immediately, before 'load' even fires.
+            try { frame.contentDocument.addEventListener('keydown', handleEscKeydown, true); } catch (e) {}
         }
 
         // Called by the nested page itself - `parent.Transparent.notifyNestReady()`
@@ -2790,7 +3583,15 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         var prefetched = {};
         var PREFETCH_TTL = 15000;
 
-        function fetchRaw(href, onHit, onMiss) {
+        // Two structurally different failure modes, routed separately:
+        // - onIneligible: the target responded but isn't nest-eligible
+        //   (missing/wrong header, non-2xx, or a malformed body that threw
+        //   inside onHit) - retrying changes nothing, falling back to a
+        //   real navigation is correct (unchanged behavior).
+        // - onNetworkError: the request itself never completed (onerror/
+        //   ontimeout) - a transient problem retrying CAN fix, so this
+        //   routes to the error+retry UI instead of silently navigating away.
+        function fetchRaw(href, onHit, onIneligible, onNetworkError) {
 
             var request = new XMLHttpRequest();
             request.open('GET', href, true);
@@ -2800,17 +3601,17 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             request.onload = function() {
 
                 var nestable = request.status < 400 && request.getResponseHeader(HEADER) != null;
-                if (!nestable) return onMiss();
+                if (!nestable) return onIneligible();
 
                 // any mounting failure must never leave a dead click
                 try { onHit(request.responseText, request.responseURL || href); }
                 catch (err) {
                     if (Settings.debug) console.error('Transparent.nest mount failed', err);
-                    onMiss();
+                    onIneligible();
                 }
             };
-            request.onerror = onMiss;
-            request.ontimeout = onMiss;
+            request.onerror = onNetworkError;
+            request.ontimeout = onNetworkError;
             request.send();
         }
 
@@ -2819,26 +3620,34 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             var entry = prefetched[href];
             if (entry && (Date.now() - entry.at) < PREFETCH_TTL) return;
 
+            // background hover-prefetch must never surface UI on failure -
+            // both failure modes are no-ops here
             fetchRaw(href, function(text, url) {
                 prefetched[href] = { text: text, url: url, at: Date.now() };
-            }, function() {});
+            }, function() {}, function() {});
         };
 
-        function fetchNested(href, onMiss) {
+        function fetchNested(href, onIneligible) {
 
             var fresh = !api.isOpen();
             // shell first, content later: the backdrop/spinner appears the
             // instant the click lands, the round-trip only fills it in
-            var container = fresh ? openShell() : api.getContainer();
+            var container = fresh ? openShell(href) : api.getContainer();
             // .is-entering is left on permanently after a successful mount
             // (see mount()) - clear it here so the loading dim is visible
             // again for this subsequent in-overlay navigation, instead of
             // .is-entering's later-in-stylesheet opacity:1 winning the
             // cascade tie over .is-loading's opacity:0.55 while both are
-            // briefly present together.
-            if (!fresh) { container.classList.remove('is-entering'); container.classList.add('is-loading'); }
+            // briefly present together. Also clear any error left over from
+            // a previous failed attempt on this same open overlay.
+            if (!fresh) {
+                container.classList.remove('is-entering');
+                container.classList.remove('is-error');
+                container.classList.add('is-loading');
+            }
             // host-side feedback while the page is fetched (slim top bar)
             document.documentElement.classList.add('nest-loading');
+            dispatchEvent(new CustomEvent('transparent:nest:loading', { detail: { href: href, fresh: fresh } }));
 
             var done = function() { document.documentElement.classList.remove('nest-loading'); };
 
@@ -2847,21 +3656,44 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 delete prefetched[href];
 
                 mount(text, url, fresh);
-                if (fresh) {
-                    history.pushState({ nest: { href: url } }, '', url);
+                // A same-URL modal history entry: the address bar stays
+                // on the HOST page's URL (clicking a nest link should
+                // not feel like leaving the page), while Back still
+                // closes the overlay via the popstate handler below
+                // (the nest-marked state is what it keys on, not the
+                // URL). Committing to the nested page's own URL is the
+                // share button's job (in-place fullscreen promote). The
+                // history.state guard covers share-during-loading, which
+                // already pushed the nest entry itself - pushing a second
+                // one here would strand an extra Back press.
+                if (fresh && !(history.state && history.state.nest)) {
+                    history.pushState({ nest: { href: url } }, '', location.href);
                 }
                 done();
             };
 
-            var abort = function() {
+            var ineligible = function() {
                 // fresh: no content was ever shown, tear the shell down.
-                // !fresh: falling back to onMiss() (a real navigation) shortly,
-                // but restore .is-entering so the still-valid previous content
-                // doesn't sit at the base rule's opacity:0 in the meantime.
+                // !fresh: falling back to onIneligible() (a real navigation)
+                // shortly, but restore .is-entering so the still-valid
+                // previous content doesn't sit at the base rule's opacity:0
+                // in the meantime.
                 if (fresh) closeShell(container);
                 else { container.classList.remove('is-loading'); container.classList.add('is-entering'); }
                 done();
-                onMiss();
+                onIneligible();
+            };
+
+            // genuine network failure (not "target isn't nest-eligible") -
+            // show the error+retry UI instead of falling back to a real
+            // navigation. Applies the same whether this is a fresh open
+            // (empty body, nothing to preserve) or a mid-overlay navigate()
+            // (the previous iframe content is untouched underneath - mount()
+            // never ran, so srcdoc was never reassigned - the opaque error
+            // panel simply covers it until retry succeeds).
+            var networkError = function() {
+                done();
+                showError(container, href, fresh);
             };
 
             var entry = prefetched[href];
@@ -2869,11 +3701,48 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 try { return settle(entry.text, entry.url); }   // instant: already fetched on hover
                 catch (err) {
                     if (Settings.debug) console.error('Transparent.nest mount failed', err);
-                    return abort();
+                    return ineligible();
                 }
             }
 
-            fetchRaw(href, settle, abort);
+            fetchRaw(href, settle, ineligible, networkError);
+        }
+
+        // container._retryHref stashed by showError(); reused by the retry
+        // button's click handler below
+        function showError(container, href, fresh) {
+
+            container._retryHref = href;
+
+            container.classList.remove('is-loading');
+            // full opacity, not the dimmed .is-loading state - the error
+            // message must be legible, not half-transparent
+            container.classList.add('is-entering');
+            container.classList.add('is-error');
+
+            var retryBtn = container.querySelector('.transparent-nest-retry');
+            if (retryBtn) { retryBtn.classList.remove('is-retrying'); retryBtn.disabled = false; }
+
+            if (Settings.debug) console.error('Transparent.nest: network error loading', href);
+            dispatchEvent(new CustomEvent('transparent:nest:error', { detail: { href: href, fresh: fresh } }));
+        }
+
+        // At click time api.isOpen() is always true (the container exists,
+        // isn't .is-closing) regardless of whether the original failure was
+        // a fresh open or a mid-overlay navigate - so api.navigate()'s own
+        // fresh = !api.isOpen() naturally evaluates false here, reusing the
+        // existing shell/settle/ineligible plumbing with no new code paths.
+        function retryClicked() {
+
+            var container = api.getContainer();
+            if (!container || !container._retryHref) return;
+            var href = container._retryHref;
+
+            var retryBtn = container.querySelector('.transparent-nest-retry');
+            if (retryBtn) { retryBtn.classList.add('is-retrying'); retryBtn.disabled = true; }
+
+            dispatchEvent(new CustomEvent('transparent:nest:retry', { detail: { href: href } }));
+            api.navigate(href);
         }
 
         api.open = function(href) {
@@ -2898,10 +3767,51 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // then removing it keeps the visual change fully inside the overlay.
         var CLOSE_TRANSITION_MS = 300; // keep in sync with index.scss's #transparent-nest transition-duration
         function closeShell(container) {
+            var href = container._currentHref;
+            // if the panel was re-parented into a host container
+            // (nest_dock_target), pull it back under this shell FIRST - it
+            // lives outside `container` while docked that way, so removing
+            // `container` alone would silently orphan it in the host page
+            // instead of actually closing it
+            if (container._teardownDock) container._teardownDock();
             container.classList.add('is-closing');
+            dispatchEvent(new CustomEvent('transparent:nest:fade-out-start', { detail: { href: href } }));
             setTimeout(function() {
                 if (container.parentNode) container.remove();
+                dispatchEvent(new CustomEvent('transparent:nest:fade-out-end', { detail: { href: href } }));
             }, CLOSE_TRANSITION_MS);
+        }
+
+        // ESC closes the overlay, but only after confirmation - attached
+        // both on the host document (below) and, freshly on every mount(),
+        // on the nested iframe's own contentDocument: keydown doesn't cross
+        // the iframe/parent boundary, and almost every ESC press happens
+        // while focus is inside the iframe (that's the entire interactive
+        // surface). window.confirm() blocks the JS thread synchronously, so
+        // a second ESC pressed while a confirm dialog is already open simply
+        // queues and gets reprocessed after the first resolves - by then
+        // either isOpen() is already false (confirmed -> closed, the guard
+        // below short-circuits it) or the overlay is still open and it's a
+        // perfectly legitimate new attempt.
+        function handleEscKeydown(e) {
+
+            if (Settings.disable) return;
+            if (e.key !== 'Escape') return;
+            if (!api.isOpen()) return;
+            if (e.defaultPrevented) return;
+
+            var container = api.getContainer();
+            var href = container ? container._currentHref : null;
+
+            dispatchEvent(new CustomEvent('transparent:nest:esc', { detail: { href: href } }));
+
+            var confirmed = window.confirm(Settings['nest_esc_confirm']);
+            if (confirmed) {
+                dispatchEvent(new CustomEvent('transparent:nest:esc-confirmed', { detail: { href: href } }));
+                api.close();
+            } else {
+                dispatchEvent(new CustomEvent('transparent:nest:esc-cancelled', { detail: { href: href } }));
+            }
         }
 
         api.close = function(goBack) {
@@ -2915,6 +3825,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             document.body.style.overflow = hostOverflow || '';
             document.title = hostTitle || document.title;
             Transparent.html.removeClass(HTML_CLASS);
+            Transparent.html.removeClass('nest-docked'); // no-op if never docked
 
             // pop the nested history entry; the host page is live underneath
             if (goBack !== false && history.state && history.state.nest) {
@@ -2937,18 +3848,24 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             dispatchEvent(new CustomEvent('transparent:nest:close'));
         };
 
+        // host-side half of the ESC handler - see handleEscKeydown's own
+        // comment for why the iframe-side half is attached separately,
+        // inside mount(), on every single mount rather than once here
+        document.addEventListener('keydown', handleEscKeydown, true);
+
         // hover prefetch: by the time the click lands the page is usually
         // already in the cache, so the overlay opens instantly
         document.addEventListener('mouseover', function(e) {
 
             if (Settings.disable || !e.target.closest) return;
+            if (location.origin === 'null') return; // inside a nest iframe - see the click handler's nest-within-nest guard
 
-            var anchor = e.target.closest('a[' + ATTRIBUTE + '][href]');
+            var anchor = e.target.closest('a[href]');
             if (anchor == null) return;
 
             try {
                 var url = new URL(anchor.href, location.origin);
-                if (url.origin == location.origin) api.prefetch(url.href);
+                if (url.origin == location.origin && matchesPatternList(url.pathname, Settings.nest)) api.prefetch(url.href);
             } catch (_) {}
         }, true);
 
@@ -2956,18 +3873,29 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // before any click handler of the host page. Links INSIDE the
         // nested iframe belong to the iframe's own document - the host
         // never sees them, the nested app navigates itself.
+        // Every same-origin <a href> is a candidate now (no attribute);
+        // non-matching links return before preventDefault() with zero side
+        // effects, so __main__ still processes them normally afterwards.
         document.addEventListener('click', function(e) {
 
             if (Settings.disable) return;
+            // HARD guard against nest-within-nest: this same code also runs
+            // in the nested page's OWN transparentJS instance inside the
+            // srcdoc iframe (where location.origin is the literal "null" -
+            // see currentOrigin()). A nested document must never open a
+            // second overlay level, regardless of how a consumer configures
+            // Settings.nest inside it.
+            if (location.origin === 'null') return;
             if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
             if (e.defaultPrevented) return;
 
-            var anchor = e.target.closest ? e.target.closest('a[' + ATTRIBUTE + '][href]') : null;
+            var anchor = e.target.closest ? e.target.closest('a[href]') : null;
             if (anchor == null || anchor.target == '_blank') return;
 
             var url;
             try { url = new URL(anchor.href, currentOrigin()); } catch (_) { return; }
             if (url.origin != currentOrigin()) return;
+            if (!matchesPatternList(url.pathname, Settings.nest)) return;
 
             e.preventDefault();
             e.stopImmediatePropagation();

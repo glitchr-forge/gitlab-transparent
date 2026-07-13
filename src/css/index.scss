@@ -37,49 +37,554 @@ img[data-src]:not(.loaded) {
 }
 
 /* ── Nested navigation (Transparent.nest) ─────────────────────────────── */
-//
-// A SINGLE transition drives the whole opacity lifecycle (0 -> loading dim
-// -> full -> closed). Previously the entrance used a CSS *animation*
-// (transparent-nest-in, opacity 0->1) on the same property a *transition*
-// and class-based static opacity values (.is-loading's 0.55) also
-// targeted. Animations override the cascade for their duration and then
-// revert when they finish; with the transition rule also present, that
-// revert itself animated - net effect: fade up to 1, THEN fade back down
-// to 0.55 once the entrance animation ended (loading was still in
-// progress), then fade up to 1 again once real content arrived. Visibly
-// "blinking". A plain transition on one property, driven purely by class
-// toggles, can't produce that - there's only ever one target value.
+/*
+ * A SINGLE transition drives the whole opacity lifecycle (0 -> loading dim
+ * -> full -> closed). Previously the entrance used a CSS *animation*
+ * (transparent-nest-in, opacity 0->1) on the same property a *transition*
+ * and class-based static opacity values (.is-loading's 0.55) also
+ * targeted. Animations override the cascade for their duration and then
+ * revert when they finish; with the transition rule also present, that
+ * revert itself animated - net effect: fade up to 1, THEN fade back down
+ * to 0.55 once the entrance animation ended (loading was still in
+ * progress), then fade up to 1 again once real content arrived. Visibly
+ * "blinking". A plain transition on one property, driven purely by class
+ * toggles, can't produce that - there's only ever one target value.
+ *
+ * NOTE: this file is served as-is, uncompiled, to at least one real
+ * consumer (base-bundle-admin/public/css/transparent.css - see that
+ * package's own README). `//` line comments are valid SCSS but NOT valid
+ * CSS - a browser parsing this file directly (no Sass compile step) hits
+ * the first `//` and silently fails to parse every rule after it for the
+ * rest of the file, discovered when #transparent-nest itself and every
+ * rule below it turned out to be entirely absent from document.styleSheets.
+ * Block comments only in this file, always - no `//` anywhere below.
+ */
 #transparent-nest {
 	position: fixed;
 	inset: 0;
 	z-index: 100000;
-	overflow: auto;
+	/* the backdrop is a plain flex-center scrim; the fixed-size panel below
+	   is the actual sized surface, so nothing here needs to scroll */
+	display: flex;
+	align-items: center;
+	justify-content: center;
 	background: rgba(15, 18, 22, 0.35);
+	/* Safari needs the -webkit- prefix or the blur never renders there at
+	   all - and Safari is a real, primary browser for this overlay's users */
+	-webkit-backdrop-filter: blur(2px);
 	backdrop-filter: blur(2px);
 	opacity: 0;
-	transform: translateY(8px);
-	transition: opacity 0.3s ease, transform 0.3s ease;
+	/* The backdrop itself never moves/scales - only fades. It used to carry
+	   its own translateY/scale motion (moving the panel WITH it, since the
+	   panel is a child and inherits the container's transform), which read
+	   as "the backdrop is also shrinking" on close - a fixed, edge-to-edge
+	   scrim visibly pulling in from the screen boundary. The panel now
+	   carries its own independent entrance/close motion instead (see
+	   .transparent-nest-panel below) so it can move while the backdrop
+	   stays put. */
+	transition: opacity 0.3s ease;
 }
 html.nested { overflow: hidden; }
 
-/* openShell() adds .is-loading one frame after insertion (requestAnimationFrame)
-   so the browser has a style flush to transition FROM (opacity:0 above) -
-   adding it in the same tick as element creation would skip the transition
-   entirely, since there'd be no observable "previous" frame to animate from.
+/* openShell() forces a reflow after insertion so the browser has a style
+   flush to transition FROM (opacity:0 above) before .is-loading lands.
+   Loading is full opacity, NOT a dim: the loading look is the frosted-glass
+   panel below (the previous 0.55 dim washed the whole panel - including the
+   spinner - into a translucent white sheet, which read as "opacity:0.5 of
+   white background, no spinner"). The single-transition lifecycle is now
+   simply 0 -> 1 -> 0, driven purely by class toggles as documented above.
    No pointer-events:none here (previous versions had it): that disabled
    clicks on the OVERLAY AS A WHOLE, not just the spinner it was meant for -
    with nothing left to intercept them, clicks fell straight through to the
    host page underneath while the overlay was still visibly up. A loading
    overlay should block interaction with the host, not let it leak through. */
-#transparent-nest.is-loading { opacity: 0.55; transform: none; }
-#transparent-nest.is-entering { opacity: 1; transform: none; }
-/* A pure opacity fade cross-dissolves the closing overlay WITH the host
-   page underneath - both partially visible and blended together for the
-   duration of the transition, which reads as "the whole page is fading",
-   not "this panel is closing". Adding a slight scale-down alongside the
-   fade gives the overlay its own distinct closing motion (shrinks away)
-   instead of dissolving into the host, while still revealing it. */
-#transparent-nest.is-closing { opacity: 0; transform: scale(0.98); }
+#transparent-nest.is-loading { opacity: 1; }
+#transparent-nest.is-entering { opacity: 1; }
+/* A pure opacity fade on the BACKDROP cross-dissolves it with the host page
+   underneath - "the whole page is fading", not "this panel is closing".
+   The panel's own scale-down (below) gives the CLOSING WINDOW its distinct
+   motion instead, independent of the fixed backdrop. */
+#transparent-nest.is-closing { opacity: 0; }
+/* The panel's grow-in/shrink-away motion, keyed off the same container
+   classes as the backdrop's own fade above - see .transparent-nest-panel's
+   base rule for its resting (pre-entering / post-closing) scale. */
+/* :not(.is-closing) on the entering rule matters: closeShell() never
+   actually REMOVES is-entering when it adds is-closing (both classes sit
+   on the container together for the whole close transition) - two rules
+   tied on specificity (1 id + 2 classes each) SHOULD resolve by source
+   order (closing declared after entering, so closing should win), but
+   that tie broke the wrong way once bundled into the real page's vendor
+   CSS chunk (verified live: the panel never actually shrank on close,
+   computed transform stayed matrix(1,0,0,1,0,0) the whole transition).
+   Excluding :not(.is-closing) removes the tie entirely instead of relying
+   on cascade order to resolve it correctly - only one rule can ever match
+   at a time, regardless of bundler/cascade quirks. */
+#transparent-nest.is-entering:not(.is-closing) .transparent-nest-panel { transform: none; }
+#transparent-nest.is-closing .transparent-nest-panel { transform: scale(0.98); }
+
+/* Fixed-size, centered panel (not a fullscreen takeover) - the container
+   above is only the dimmed backdrop. Close/retry live in .transparent-nest-chrome,
+   never rendered by whatever page gets nested. */
+.transparent-nest-panel {
+	position: relative;
+	width: 92vw;
+	height: 88vh;
+	max-width: 1600px;
+	display: flex;
+	flex-direction: column;
+	background: #fff;
+	border-radius: 10px;
+	overflow: hidden;
+	box-shadow: 0 20px 60px rgba(0, 0, 0, .35), 0 2px 8px rgba(0, 0, 0, .2);
+	/* The panel's own entrance/close motion (moved here from the backdrop -
+	   see #transparent-nest above for why): starts very slightly scaled
+	   down, grows to full size once .is-entering, shrinks back on
+	   .is-closing - the WINDOW visibly opens/closes while the backdrop
+	   behind it just fades, staying fixed. */
+	transform: scale(0.98);
+	/* smooth glass -> white when content reveals (different element and
+	   property than the container's opacity transition - no interference
+	   with the single-transition contract documented above) */
+	transition: background-color 0.3s ease;
+}
+
+/* While loading, the panel is frosted glass instead of an opaque white
+   sheet: the host page shows through, heavily blurred, with the white
+   spinner on top - the loading state visibly belongs to the site
+   underneath instead of erasing it. The panel's own backdrop-filter
+   samples everything painted behind it (host page + the container scrim),
+   independent of the container's subtler blur(2px). */
+#transparent-nest.is-loading .transparent-nest-panel {
+	/* High enough opacity to read as genuinely WHITE regardless of what's
+	   behind it - the original 0.14 was so transparent that the tint
+	   barely lightened the blurred host content at all, so the panel's
+	   actual brightness was really whatever colors happened to be behind
+	   it (often reading as dark against the always-light chrome bar right
+	   above it - "the topbar seems very white while the frosted is always
+	   dark, weird contrast"). saturate(1.4) was actively working against
+	   that - it made the blurred host content MORE vivid, fighting the
+	   white tint into a muddy grey blend rather than a clean wash ("very
+	   gray"). Desaturating instead (saturate(.35)) plus a brightness boost
+	   gives a soft, bright wash that reads as white regardless of what
+	   colorful content is behind it. This is the "daylight" look; dark
+	   mode below mirrors it with a dark tint instead. */
+	background: rgba(255, 255, 255, 0.82);
+	-webkit-backdrop-filter: blur(20px) saturate(.35) brightness(1.15);
+	backdrop-filter: blur(20px) saturate(.35) brightness(1.15);
+}
+/* no backdrop-filter support (old browsers, some headless engines): a
+   stronger tint stands in for the blur so the host page is still visibly
+   muted behind the spinner instead of showing through nearly raw */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+	#transparent-nest.is-loading .transparent-nest-panel { background: rgba(255, 255, 255, 0.92); }
+}
+@media (prefers-color-scheme: dark) {
+	#transparent-nest.is-loading .transparent-nest-panel {
+		background: rgba(20, 22, 26, 0.82);
+		-webkit-backdrop-filter: blur(20px) saturate(.35) brightness(.85);
+		backdrop-filter: blur(20px) saturate(.35) brightness(.85);
+	}
+	@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+		#transparent-nest.is-loading .transparent-nest-panel { background: rgba(20, 22, 26, 0.92); }
+	}
+}
+
+/* Deliberately ALWAYS opaque, never transitioning, in every state
+   (loading/entering/error) - share/dock/retry/close have to stay legible
+   and stable the instant the panel appears, not fade or flicker in. An
+   earlier version made this transparent during .is-loading so it would
+   blend into the glass panel below - but the chrome bar has no
+   backdrop-filter of its own (only .transparent-nest-panel does), so a
+   transparent chrome showed a compositing seam at the panel/chrome
+   boundary: Safari flashed it dark and re-painted on every loading-state
+   change instead of cleanly showing the blur - "the topbar darkens and
+   flickers until the window is shown". Keeping the bar solid removes that
+   whole class of backdrop-filter recomposite glitch at zero visual cost -
+   the glass treatment stays exactly where it was praised, on the spinner
+   body below. */
+.transparent-nest-chrome {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 4px;
+	height: 40px;
+	padding: 0 6px;
+	background: #f6f7f9;
+	border-bottom: 1px solid rgba(0, 0, 0, .08);
+}
+@media (prefers-color-scheme: dark) {
+	.transparent-nest-chrome { background: #26292e; border-bottom-color: rgba(255, 255, 255, .08); }
+}
+.transparent-nest-btn {
+	appearance: none;
+	border: 0;
+	background: transparent;
+	cursor: pointer;
+	width: 28px;
+	height: 28px;
+	border-radius: 6px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	color: #444;
+	font-size: 18px;
+	line-height: 1;
+}
+.transparent-nest-btn:hover { background: rgba(0, 0, 0, .06); }
+.transparent-nest-close { font-size: 20px; }
+.transparent-nest-share { font-size: 15px; }
+@media (prefers-color-scheme: dark) {
+	.transparent-nest-btn { color: #ddd; }
+	.transparent-nest-btn:hover { background: rgba(255, 255, 255, .08); }
+}
+
+/* Small loading indicator next to the chrome buttons - ONLY while the
+   nested page's own transparentJS is mid-navigation INSIDE the iframe
+   (.is-busy, mirrored from the iframe's html.loading class by mount()'s
+   observer). Deliberately NOT shown during .is-loading (the nest-level
+   fetch itself, first open or retry) - that already has the big centered
+   spinner in the body; showing both at once read as two redundant
+   spinners for what's really the same "opening" event. One spinner per
+   moment: center = opening the nest, chrome = navigating inside it. */
+.transparent-nest-busy {
+	display: none;
+	width: 14px;
+	height: 14px;
+	margin-right: 4px;
+	border-radius: 50%;
+	border: 2px solid rgba(0, 0, 0, 0.15);
+	border-top-color: #444;
+	animation: transparent-nest-spin 0.7s linear infinite;
+	align-self: center;
+}
+#transparent-nest.is-busy .transparent-nest-busy { display: inline-block; }
+@media (prefers-color-scheme: dark) {
+	.transparent-nest-busy { border-color: rgba(255, 255, 255, 0.2); border-top-color: #ddd; }
+}
+
+/* ── Panel interactions: move / resize / magnetic snap ─────────────────
+   The first drag "frees" the panel out of flex centering into explicit
+   absolute px geometry (inline styles set by openShell's handlers). */
+.transparent-nest-panel.is-free {
+	position: absolute;
+	max-width: none;
+}
+
+/* Shared/promoted state: the panel expands in place to the full viewport
+   (no reload - the loaded document is untouched) while the address bar
+   commits to the nested URL. Not draggable/resizable while fullscreen. */
+#transparent-nest.is-full .transparent-nest-panel {
+	width: 100%;
+	height: 100%;
+	max-width: none;
+	border-radius: 0;
+}
+#transparent-nest.is-full .transparent-nest-handle { display: none; }
+#transparent-nest.is-full .transparent-nest-chrome { cursor: default; }
+/* Fullscreen replaces share/dock with a single "exit full page" control -
+   the only way back used to be closing outright. */
+.transparent-nest-collapse { display: none; }
+#transparent-nest.is-full .transparent-nest-collapse { display: inline-flex; }
+#transparent-nest.is-full .transparent-nest-share,
+#transparent-nest.is-full .transparent-nest-dock-toggle { display: none; }
+/* A small "sidebar" pictograph (outline box + filled strip) for the dock
+   button - reads as "dock to the side" independent of language, same
+   language as e.g. a devtools/editor sidebar toggle icon. */
+.transparent-nest-dock-icon {
+	display: inline-block;
+	box-sizing: border-box;
+	width: 15px;
+	height: 13px;
+	border: 1.5px solid currentColor;
+	border-radius: 2px;
+	position: relative;
+}
+.transparent-nest-dock-icon::before {
+	content: '';
+	position: absolute;
+	top: 0; bottom: 0; right: 0;
+	width: 5px;
+	background: currentColor;
+}
+#transparent-nest.is-docked .transparent-nest-dock-toggle { color: #2563eb; }
+@media (prefers-color-scheme: dark) {
+	#transparent-nest.is-docked .transparent-nest-dock-toggle { color: #6ea8fe; }
+}
+#transparent-nest.is-movable .transparent-nest-chrome { cursor: grab; }
+#transparent-nest.is-dragging .transparent-nest-chrome { cursor: grabbing; }
+/* the shield: without it the drag dies the instant the pointer crosses
+   into the iframe (its document eats the events) */
+#transparent-nest.is-dragging iframe { pointer-events: none; }
+#transparent-nest.is-dragging { user-select: none; -webkit-user-select: none; }
+
+/* Invisible resize zones along the panel's edges/corners, INSIDE the
+   panel (its overflow:hidden would clip anything outside), stacked above
+   the iframe so they win the hit-test on those few edge pixels. */
+.transparent-nest-handle { position: absolute; z-index: 5; }
+.transparent-nest-handle-n  { top: 0;    left: 14px; right: 14px; height: 6px; cursor: ns-resize; }
+.transparent-nest-handle-s  { bottom: 0; left: 14px; right: 14px; height: 6px; cursor: ns-resize; }
+.transparent-nest-handle-e  { right: 0;  top: 14px; bottom: 14px; width: 6px;  cursor: ew-resize; }
+.transparent-nest-handle-w  { left: 0;   top: 14px; bottom: 14px; width: 6px;  cursor: ew-resize; }
+.transparent-nest-handle-ne { top: 0;    right: 0; width: 14px; height: 14px; cursor: nesw-resize; }
+.transparent-nest-handle-nw { top: 0;    left: 0;  width: 14px; height: 14px; cursor: nwse-resize; }
+.transparent-nest-handle-se { bottom: 0; right: 0; width: 14px; height: 14px; cursor: nwse-resize; }
+.transparent-nest-handle-sw { bottom: 0; left: 0;  width: 14px; height: 14px; cursor: nesw-resize; }
+
+/* ── Dock: any move/resize away from the pristine default, or the chrome
+   bar's dock button ─────────────────────────────────────────────────────
+   Removes the modal backdrop so the host page becomes interactive again
+   (pointer-events:none lets everything behind it through - the panel, a
+   normal descendant, opts back in individually, since pointer-events:none
+   doesn't inherit to children that re-declare it). Dragging far enough to
+   push the panel OUT of the viewport additionally fills that whole
+   dimension flush against the edge (full height for left/right, full
+   width for top/bottom, [data-dock-edge] set) and collapses the chrome to
+   just a grab tab; short of that, the panel just sits wherever it was
+   moved/resized to, full button row still showing. Only the pristine
+   default position keeps the full-viewport dimmed backdrop. */
+#transparent-nest.is-docked {
+	background: transparent;
+	-webkit-backdrop-filter: none;
+	backdrop-filter: none;
+	pointer-events: none;
+	align-items: stretch;
+	justify-content: stretch;
+	padding: 0;
+}
+#transparent-nest.is-docked .transparent-nest-panel {
+	pointer-events: auto;
+	position: absolute;
+	/* children (the grab tab) are allowed to poke slightly past the
+	   panel's own box once edge-fit - see .transparent-nest-grab below */
+	overflow: visible;
+}
+/* Square corners ONLY on the side actually flush against a viewport edge -
+   the other (inner) two corners keep the normal rounded-window look,
+   same as a freed panel sitting mid-screen. A blanket border-radius:0 here
+   read as harsher/flatter than intended once actually seen live. */
+#transparent-nest.is-docked[data-dock-edge="left"] .transparent-nest-panel { border-radius: 0 10px 10px 0; }
+#transparent-nest.is-docked[data-dock-edge="right"] .transparent-nest-panel { border-radius: 10px 0 0 10px; }
+#transparent-nest.is-docked[data-dock-edge="top"] .transparent-nest-panel { border-radius: 0 0 10px 10px; }
+#transparent-nest.is-docked[data-dock-edge="bottom"] .transparent-nest-panel { border-radius: 10px 10px 0 0; }
+#transparent-nest.is-docked[data-dock-edge="left"] .transparent-nest-panel,
+#transparent-nest.is-docked[data-dock-edge="right"] .transparent-nest-panel {
+	top: 0; height: 100vh; max-height: none;
+}
+#transparent-nest.is-docked[data-dock-edge="left"] .transparent-nest-panel { left: 0; }
+#transparent-nest.is-docked[data-dock-edge="right"] .transparent-nest-panel { right: 0; }
+#transparent-nest.is-docked[data-dock-edge="top"] .transparent-nest-panel,
+#transparent-nest.is-docked[data-dock-edge="bottom"] .transparent-nest-panel {
+	left: 0; width: 100vw; max-width: none;
+}
+#transparent-nest.is-docked[data-dock-edge="top"] .transparent-nest-panel { top: 0; }
+#transparent-nest.is-docked[data-dock-edge="bottom"] .transparent-nest-panel { bottom: 0; }
+
+/* Once actually flush against an edge, the whole button row (busy/share/
+   dock/retry/close) collapses away, replaced by a small grab tab on the
+   panel's INNER edge - a drag handle and nothing else. Drag it to move/
+   undock, click it to tuck the panel away (see .is-hidden below), double-
+   click the bar (or the dock button again, before it collapsed) to
+   restore. Close happens via ESC or by restoring first - no dedicated
+   close affordance in this collapsed state, by design. */
+#transparent-nest.is-docked[data-dock-edge] .transparent-nest-chrome {
+	position: absolute;
+	background: transparent;
+	border: 0;
+	padding: 0;
+}
+#transparent-nest.is-docked[data-dock-edge] .transparent-nest-busy,
+#transparent-nest.is-docked[data-dock-edge] .transparent-nest-share,
+#transparent-nest.is-docked[data-dock-edge] .transparent-nest-dock-toggle,
+#transparent-nest.is-docked[data-dock-edge] .transparent-nest-retry,
+#transparent-nest.is-docked[data-dock-edge] .transparent-nest-close { display: none; }
+/* Styled to match the very toolbar it replaces (same flat surface/border
+   as .transparent-nest-chrome) rather than a separate floating pill, so it
+   reads as a collapsed piece of this UI - plus a small neutral grip bar,
+   the same visual language already used for the mobile sheet grabber
+   below. */
+.transparent-nest-grab {
+	display: none;
+	align-items: center;
+	justify-content: center;
+	background: #f6f7f9;
+	border: 1px solid rgba(0, 0, 0, .08);
+	cursor: grab;
+}
+.transparent-nest-grab::before {
+	content: '';
+	background: rgba(0, 0, 0, .22);
+	border-radius: 2px;
+}
+.transparent-nest-grab:hover { background: #eef0f2; }
+#transparent-nest.is-dragging .transparent-nest-grab { cursor: grabbing; }
+#transparent-nest.is-docked[data-dock-edge] .transparent-nest-grab { display: flex; }
+@media (prefers-color-scheme: dark) {
+	.transparent-nest-grab { background: #26292e; border-color: rgba(255, 255, 255, .08); }
+	.transparent-nest-grab::before { background: rgba(255, 255, 255, .28); }
+	.transparent-nest-grab:hover { background: #2c3036; }
+}
+/* left/right dock: a vertical tab centered on the panel's inner (opposite)
+   edge, poking slightly outward into the still-visible host page.
+   height:auto is required - the base .transparent-nest-chrome rule sets an
+   explicit height:40px, and per spec an absolutely positioned box with
+   BOTH top and bottom set only stretches to fill when height is auto;
+   with an explicit (non-auto) height still in effect from that base rule,
+   `bottom` gets silently ignored and the box stays pinned at 40px tall
+   instead of spanning the panel - the grab tab centers on that 40px
+   sliver near the top instead of the panel's actual vertical center. */
+#transparent-nest.is-docked[data-dock-edge="left"] .transparent-nest-chrome,
+#transparent-nest.is-docked[data-dock-edge="right"] .transparent-nest-chrome {
+	top: 0; bottom: 0; height: auto; width: 0;
+}
+#transparent-nest.is-docked[data-dock-edge="left"] .transparent-nest-chrome { right: 0; }
+#transparent-nest.is-docked[data-dock-edge="right"] .transparent-nest-chrome { left: 0; }
+#transparent-nest.is-docked[data-dock-edge="left"] .transparent-nest-grab,
+#transparent-nest.is-docked[data-dock-edge="right"] .transparent-nest-grab {
+	position: absolute; top: 50%; margin-top: -24px;
+	width: 18px; height: 48px;
+}
+#transparent-nest.is-docked[data-dock-edge="left"] .transparent-nest-grab { left: 0; border-radius: 0 6px 6px 0; border-left: 0; }
+#transparent-nest.is-docked[data-dock-edge="right"] .transparent-nest-grab { right: 0; border-radius: 6px 0 0 6px; border-right: 0; }
+#transparent-nest.is-docked[data-dock-edge="left"] .transparent-nest-grab::before,
+#transparent-nest.is-docked[data-dock-edge="right"] .transparent-nest-grab::before { width: 4px; height: 24px; }
+/* top/bottom dock: a horizontal tab centered on the panel's inner edge */
+#transparent-nest.is-docked[data-dock-edge="top"] .transparent-nest-chrome,
+#transparent-nest.is-docked[data-dock-edge="bottom"] .transparent-nest-chrome {
+	left: 0; right: 0; height: 0;
+}
+#transparent-nest.is-docked[data-dock-edge="top"] .transparent-nest-chrome { bottom: 0; }
+#transparent-nest.is-docked[data-dock-edge="bottom"] .transparent-nest-chrome { top: 0; }
+#transparent-nest.is-docked[data-dock-edge="top"] .transparent-nest-grab,
+#transparent-nest.is-docked[data-dock-edge="bottom"] .transparent-nest-grab {
+	position: absolute; left: 50%; margin-left: -24px;
+	width: 48px; height: 18px;
+}
+#transparent-nest.is-docked[data-dock-edge="top"] .transparent-nest-grab { top: 0; border-radius: 0 0 6px 6px; border-top: 0; }
+#transparent-nest.is-docked[data-dock-edge="bottom"] .transparent-nest-grab { bottom: 0; border-radius: 6px 6px 0 0; border-bottom: 0; }
+#transparent-nest.is-docked[data-dock-edge="top"] .transparent-nest-grab::before,
+#transparent-nest.is-docked[data-dock-edge="bottom"] .transparent-nest-grab::before { width: 24px; height: 4px; }
+
+/* Container-dock (Settings.nest_dock_target): the whole panel is re-
+   parented into a designated host-page element instead of floating - the
+   overlay shell left behind is now empty and shouldn't render or
+   intercept anything. display:contents drops its own box entirely while
+   staying in the DOM (container._teardownDock etc still need it there). */
+#transparent-nest.is-container-docked { display: contents; }
+#transparent-nest.is-container-docked .transparent-nest-panel {
+	position: static;
+	width: 100%;
+	height: 100%;
+	max-width: none;
+	max-height: none;
+	border-radius: 0;
+	box-shadow: none;
+}
+
+/* Hidden: a plain click (not a drag, not the first half of a double-click -
+   see the pointerdown handler in transparent.js) on the grab tab tucks the
+   whole panel out of view, leaving only the tab itself visible, flush
+   against the true screen edge. The translate direction mirrors the tab's
+   own outward poke (see the dock-edge rules above), so sliding the panel
+   that same distance lands the tab exactly flush rather than needing
+   separate positioning math - reuses .transparent-nest-panel's own
+   existing transform transition for the slide animation. Clicking the tab
+   again reveals it. */
+#transparent-nest.is-docked.is-hidden[data-dock-edge="left"] .transparent-nest-panel { transform: translateX(-100%); }
+#transparent-nest.is-docked.is-hidden[data-dock-edge="right"] .transparent-nest-panel { transform: translateX(100%); }
+#transparent-nest.is-docked.is-hidden[data-dock-edge="top"] .transparent-nest-panel { transform: translateY(-100%); }
+#transparent-nest.is-docked.is-hidden[data-dock-edge="bottom"] .transparent-nest-panel { transform: translateY(100%); }
+
+/* Resize once flush against an edge: only the SINGLE handle on the
+   panel's inner edge (the one not already pinned to a viewport boundary)
+   stays active - the other 7 would be pointless (that edge is already at
+   the boundary). A freed-but-not-edge-fit panel keeps all 8, same as the
+   default state. */
+#transparent-nest.is-docked[data-dock-edge] .transparent-nest-handle { display: none; }
+#transparent-nest.is-docked[data-dock-edge="left"] .transparent-nest-handle-e,
+#transparent-nest.is-docked[data-dock-edge="right"] .transparent-nest-handle-w,
+#transparent-nest.is-docked[data-dock-edge="top"] .transparent-nest-handle-s,
+#transparent-nest.is-docked[data-dock-edge="bottom"] .transparent-nest-handle-n { display: block; }
+
+/* html.nest-docked (mirrors #transparent-nest.is-docked onto <html>, set
+   by the move handler's dock/undock decision) - the ONLY reason a
+   separate html-level class is needed: html.nested's own overflow:hidden
+   (still present, since the overlay itself is still open) must be lifted
+   so the host page scrolls again while docked. Scoped this way rather
+   than reworking html.nested's own rule so every other consumer of that
+   class is untouched. */
+html.nested.nest-docked { overflow: visible; }
+
+/* ── Mobile: always fullscreen, swipe-down-to-dismiss ───────────────────
+   Below this breakpoint move/resize/dock don't apply (JS-gated via the
+   same query) - the panel is simply the whole viewport, and the chrome
+   bar becomes a drag handle for a downward dismiss gesture instead. */
+@media (max-width: 768px) {
+	.transparent-nest-panel,
+	.transparent-nest-panel.is-free,
+	#transparent-nest.is-docked .transparent-nest-panel {
+		position: fixed;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		max-width: none;
+		max-height: none;
+		border-radius: 0;
+	}
+	.transparent-nest-handle { display: none; }
+	.transparent-nest-grab { display: none !important; } /* no room for edge-docking on a phone screen */
+	.transparent-nest-chrome {
+		height: 48px; /* a bit more room for a comfortable touch drag target */
+		touch-action: none; /* the swipe gesture owns vertical drag here, not the browser's own scroll/refresh gestures */
+	}
+	/* small affordance hinting the bar is draggable, same visual language
+	   as an iOS/native bottom-sheet grabber */
+	.transparent-nest-chrome::before {
+		content: '';
+		position: absolute;
+		left: 50%; top: 6px;
+		width: 36px; height: 4px;
+		margin-left: -18px;
+		border-radius: 2px;
+		background: rgba(0, 0, 0, .18);
+	}
+}
+/* live drag: 1:1 with the finger, no transition lag; released, the swipe
+   handler clears the inline transform and this transition snaps it back
+   (or is-closing's own transform takes over if the swipe committed to a
+   close) */
+.transparent-nest-panel { transition: background-color 0.3s ease, transform 0.2s ease; }
+.transparent-nest-panel.is-swiping { transition: none; }
+/* backdrop fades out in step with the swipe distance (--transparent-nest-swipe-fade,
+   1 at rest -> 0 near the dismiss threshold, set live by the swipe handler).
+   is-swiping disables the container's own opacity transition for the
+   duration of the drag - otherwise the fade would lag a beat behind the
+   finger instead of tracking it 1:1, same reasoning as the panel's own
+   is-swiping override for transform above. */
+#transparent-nest { --transparent-nest-swipe-fade: 1; }
+#transparent-nest.is-entering { opacity: calc(var(--transparent-nest-swipe-fade, 1) * 1); }
+#transparent-nest.is-swiping { transition: none; }
+
+/* Hidden unless genuinely retrying (is-retrying, set the instant the button
+   is clicked) OR the panel is in an error state - gating on BOTH, not just
+   .is-error, matters: fetchNested's !fresh branch clears .is-error the
+   moment retry fires (same "clear the dim, start loading" path any
+   navigate() takes), so without the button's own is-retrying class it would
+   vanish the instant it's clicked, before the retry's outcome is known. */
+.transparent-nest-retry { display: none; }
+#transparent-nest.is-error .transparent-nest-retry,
+.transparent-nest-retry.is-retrying { display: inline-flex; }
+/* reuses the spinner's own keyframes below - one spin animation to maintain,
+   same visual language for "loading" whether it's the first open or a retry */
+.transparent-nest-retry.is-retrying { animation: transparent-nest-spin 0.7s linear infinite; }
+.transparent-nest-retry[disabled] { pointer-events: none; opacity: .6; }
+
+.transparent-nest-body {
+	position: relative;
+	flex: 1 1 auto;
+	min-height: 0; /* required so the iframe's height:100% below actually shrinks inside this flex column */
+	overflow: hidden;
+}
 
 /* mount() inserts the iframe (srcdoc set, fetch already resolved) BEFORE
    waiting for it to actually finish loading - openShell()'s spinner is a
@@ -91,25 +596,74 @@ html.nested { overflow: hidden; }
    a wash of plain white at whatever opacity .is-loading/.is-closing happen
    to be at - "the spinner disappears too early, then it's just white for a
    while". Keeping the iframe invisible until content is actually revealed
-   (is-entering) leaves the dark blurred backdrop + centered spinner as the
+   (is-entering) leaves the frosted-glass panel + centered spinner as the
    only thing on screen for the entire wait, exactly as designed. */
-#transparent-nest.is-loading iframe { visibility: hidden; }
+#transparent-nest.is-loading .transparent-nest-body iframe { visibility: hidden; }
+/* also hide the (now stale) iframe underneath the error panel - belt-and-
+   suspenders against stale tab order/hit-testing while an error is shown */
+#transparent-nest.is-error .transparent-nest-body iframe { visibility: hidden; }
 
-/* shown the instant a nest link is clicked, before the HTML round-trip
-   returns - replaces the old "static page + slim top bar only" cold-open
-   wait with immediate backdrop + spinner feedback */
+/* Shown the instant a nest link is clicked, before the HTML round-trip
+   returns - and on EVERY subsequent in-overlay load (navigate/retry), not
+   just the first: the element is permanent (reveal() no longer removes it),
+   gated purely by .is-loading on the container. Dark-on-white by default,
+   matching the glass panel now reading as genuinely white in daylight
+   (a white spinner would be near-invisible against it - the earlier
+   white-on-white version predates that fix); dark mode flips back to
+   light-on-dark to match its own darker glass tint. */
 .transparent-nest-spinner {
+	display: none;
 	position: absolute;
 	top: 50%; left: 50%;
 	width: 32px; height: 32px;
 	margin: -16px 0 0 -16px;
 	border-radius: 50%;
-	border: 3px solid rgba(255, 255, 255, 0.35);
-	border-top-color: #fff;
+	/* A soft blue accent arc instead of stark black-on-grey - reads as
+	   "loading" without looking like a heavy dark blob sitting on the
+	   glass, and doubles as a small brand touch (same blue used for the
+	   active dock-toggle icon). */
+	border: 3px solid rgba(37, 99, 235, 0.18);
+	border-top-color: #2563eb;
+	filter: drop-shadow(0 1px 6px rgba(255, 255, 255, 0.5));
 	animation: transparent-nest-spin 0.7s linear infinite;
+}
+#transparent-nest.is-loading .transparent-nest-spinner { display: block; }
+@media (prefers-color-scheme: dark) {
+	.transparent-nest-spinner {
+		border-color: rgba(110, 168, 254, 0.25);
+		border-top-color: #6ea8fe;
+		filter: drop-shadow(0 1px 6px rgba(0, 0, 0, 0.5));
+	}
 }
 @keyframes transparent-nest-spin {
 	to { transform: rotate(360deg); }
+}
+
+/* Network-failure state (genuine onerror/ontimeout, not "not nest-eligible" -
+   the latter still falls back to a real navigation, unchanged). Rides on
+   top of the EXISTING .is-entering (opacity:1) resting state rather than
+   inventing a fourth opacity target - the whole point of the single-
+   transition contract documented above is exactly one target value; this
+   stays entirely inner-element display toggles gated by .is-error on the
+   container, no new animation/transition on #transparent-nest itself. */
+.transparent-nest-error {
+	position: absolute;
+	inset: 0;
+	display: none;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 10px;
+	padding: 2rem;
+	text-align: center;
+	background: #fff;
+	color: #444;
+}
+.transparent-nest-error-icon { font-size: 2rem; color: #dc2626; }
+.transparent-nest-error-message { max-width: 32em; }
+#transparent-nest.is-error .transparent-nest-error { display: flex; }
+@media (prefers-color-scheme: dark) {
+	.transparent-nest-error { background: #1c1e22; color: #ccc; }
 }
 
 /* first-open feedback: progress cursor + slim animated top bar on the host */
@@ -165,4 +719,4 @@ html.progress-bar-native.ready:not(.first).loading body::before {
    a transparent background that moment let the blurred/dimmed host page
    underneath show straight through the iframe - visible as a flash back to
    the host on every in-admin navigation, not just on open/close. */
-#transparent-nest iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+.transparent-nest-body iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
