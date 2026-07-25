@@ -711,6 +711,15 @@ html.progress-bar-native.ready:not(.first).loading body::before {
 	background-repeat: no-repeat;
 	animation: transparent-nest-bar 1s linear infinite;
 }
+/* Same gap as the bar above, for the cursor: the nested overlay already
+   gets cursor:progress via .nest-loading (see the top of this block), but
+   a plain in-page navigation (link click, form submit) left the pointer
+   looking exactly like it does when nothing is happening - the only
+   feedback was the 3px top bar, easy to miss if your eyes are elsewhere. */
+html.progress-bar-native.ready:not(.first).loading,
+html.progress-bar-native.ready:not(.first).loading body {
+	cursor: progress;
+}
 
 /* Opaque, not transparent: the nested page's own transparentJS instance
    does real DOM swaps while navigating internally (menu clicks, edit/save),
