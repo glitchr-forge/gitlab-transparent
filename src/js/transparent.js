@@ -2194,6 +2194,23 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         try { return parent.location.origin; } catch (e) { return location.origin; }
     }
 
+    // Same opaque-srcdoc problem as currentOrigin(), for pathname/search
+    // instead of origin - and NOT fixable the same way (parent.location is
+    // the HOST page's own URL, e.g. the public site's "/", not the nested
+    // admin page's real path; Transparent.nest deliberately never commits
+    // the address bar to it - see fetchNested's own comment). document.
+    // baseURI is the right source instead: it's exactly "what URL does
+    // this document consider itself to be at", and defaults to location.
+    // href when no <base> tag is present - so this is a no-op everywhere
+    // except inside a nest iframe, where mount() injects a <base href>
+    // pointing at the page's real URL specifically so this resolves
+    // correctly. Without this, "is this link just a same-page #hash
+    // scroll" (__main__) always compared the real resolved pathname
+    // against the opaque "srcdoc" and never matched - falling through to
+    // a real fetch-and-remount of the SAME page on every single click.
+    function currentPathname() { return new URL(document.baseURI).pathname; }
+    function currentSearch() { return new URL(document.baseURI).search; }
+
     // Shared by Settings.exceptions (__main__) and Settings.nest
     // (Transparent.nest) - both are lists of RegExp objects or wildcard
     // strings ('*' matches any sequence, everything else literal), tested
@@ -2333,7 +2350,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         if (ajaxSemaphore) return;
         if (url == location) return;
 
-        if((e.type == Transparent.state.CLICK || e.type == Transparent.state.HASHCHANGE) && url.pathname == location.pathname && url.search == location.search && type != "POST") {
+        if((e.type == Transparent.state.CLICK || e.type == Transparent.state.HASHCHANGE) && url.pathname == currentPathname() && url.search == currentSearch() && type != "POST") {
 
             if(!url.hash) return;
             Transparent.scrollToHash(url.hash ?? "", {easing:Settings["smoothscroll_easing"], duration:Settings["smoothscroll_duration"], speed:Settings["smoothscroll_speed"]}, function() {
