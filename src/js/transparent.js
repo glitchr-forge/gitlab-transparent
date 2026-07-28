@@ -280,7 +280,19 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // confirm() prompt shown before ESC closes an open nest overlay -
         // overridable via Transparent.ready({nest_esc_confirm: '...'}) for
         // localization, same as any other consumer-facing string here.
-        "nest_esc_confirm": "Close this panel? Any unsaved changes may be lost."
+        "nest_esc_confirm": "Close this panel? Any unsaved changes may be lost.",
+
+        // The response cache (sessionStorage + the in-memory live-DOM
+        // cache) has no built-in freshness check - it's keyed purely by
+        // page path/uuid, so a deploy that changes server-rendered HTML/
+        // CSS leaves any tab that had a page cached replaying that stale
+        // copy indefinitely (sessionStorage survives normal reloads).
+        // Passing a value here that changes on every real deploy (a git
+        // commit SHA, a build id, ...) makes checkCacheVersion() purge
+        // the whole cache on mismatch. null (the default) skips the
+        // check entirely - existing consumers who never opt in see no
+        // behavior change.
+        "cache_version": null
     };
 
     const State = Transparent.state = {
@@ -691,6 +703,33 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         return false;
     }
 
+    // Purges every cached page (targeted per-key removal, same as the
+    // quota-eviction path above - never a blanket sessionStorage.clear(),
+    // which would also wipe unrelated app state) plus the in-memory
+    // live-DOM cache, whenever Settings["cache_version"] doesn't match
+    // what was stored on a previous visit. A no-op if cache_version was
+    // never configured. Called once per page load from ready()'s
+    // first-run path, before anything else touches the cache.
+    function checkCacheVersion() {
+        var version = Settings["cache_version"];
+        if (null === version || undefined === version) return;
+        if (!isLocalStorageNameSupported()) return;
+
+        if (sessionStorage.getItem('transparent[version]') === String(version)) return;
+
+        try {
+            var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
+            array.forEach(removeResponseEntry);
+            sessionStorage.removeItem('transparent');
+        } catch (e) {}
+
+        Transparent.clearLiveResponse();
+
+        try {
+            sessionStorage.setItem('transparent[version]', String(version));
+        } catch (e) {}
+    }
+
     Transparent.configure = function (options) {
 
         var key, value;
@@ -720,7 +759,10 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             else console.debug("Transparent is running..");
         }
 
-        if(!isReady) dispatchEvent(new Event('transparent:'+Transparent.state.FIRST));
+        if(!isReady) {
+            checkCacheVersion();
+            dispatchEvent(new Event('transparent:'+Transparent.state.FIRST));
+        }
 
         isReady = true;
 
