@@ -762,6 +762,17 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         if(!isReady) {
             checkCacheVersion();
             dispatchEvent(new Event('transparent:'+Transparent.state.FIRST));
+
+            // __main__'s own checkCacheVersion() call (see there) only
+            // fires on a real navigation - a tab left open and genuinely
+            // idle (no clicks, nothing to navigate to) across a deploy
+            // would still miss it. Re-checking on tab refocus catches
+            // that case too, at effectively zero cost (visibilitychange
+            // fires rarely compared to clicks). Registered once here
+            // (inside the !isReady branch), not per ready() call.
+            document.addEventListener('visibilitychange', function () {
+                if (document.visibilityState === 'visible') checkCacheVersion();
+            });
         }
 
         isReady = true;
@@ -2311,6 +2322,17 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
         // Wait for transparent window event to be triggered
         if (!isReady) return;
+
+        // checkCacheVersion() otherwise only runs once, from ready()'s
+        // first-run branch - fine for a fresh page load, but a tab that
+        // stays open and navigates ONLY through this SPA layer (never a
+        // real reload) would keep isReady true for its whole life and
+        // never notice a deploy changed cache_version. Re-checking here
+        // (every real navigation funnels through __main__) closes that
+        // gap for free: it's two sessionStorage reads that return
+        // immediately in the normal (no mismatch) case, and only pays the
+        // purge cost once, right after a real deploy.
+        checkCacheVersion();
 
         if (e.type != Transparent.state.POPSTATE   &&
             e.type != Transparent.state.HASHCHANGE && !$(this).find(Settings.identifier).length) return;
