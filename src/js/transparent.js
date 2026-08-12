@@ -321,6 +321,23 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         NOTIFICATION: "notification"
     };
 
+    /* Classes this library (or a consumer) puts on <html> at RUNTIME, which
+       the server never renders.
+
+       The page-swap reconciliation (see the removeHtmlClass filter further
+       down) rebuilds <html>'s class list by diffing the live one against the
+       INCOMING document's, and drops anything the incoming markup doesn't
+       carry. State classes are exempted there because they are transient by
+       definition - but a runtime class like progress-bar-native is neither
+       transient nor server-rendered, so the very first navigation silently
+       deleted it and nothing ever put it back (configure() runs once, at
+       ready()). The native progress bar animated on the first navigation and
+       never again: .progress-bar-active kept being added on every click, but
+       its CSS is gated on html.progress-bar-native, which had gone.
+
+       Anything registered here survives a swap. */
+    const Persist = Transparent.persistentClasses = new Set(["progress-bar-native"]);
+
     var isReady    = false;
     var rescueMode = false;
 
@@ -1721,7 +1738,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             var states = Object.values(Transparent.state);
             var     htmlClass = Array.from(($(dom).find("html").attr("class") || "").split(" ")).filter(x => !states.includes(x));
             var  oldHtmlClass = Array.from(($(Transparent.html).attr("class") || "").split(" "));
-            var removeHtmlClass = oldHtmlClass.filter(x => !htmlClass.includes(x) && switchLayout != x && !states.includes(x));
+            var removeHtmlClass = oldHtmlClass.filter(x => !htmlClass.includes(x) && switchLayout != x && !states.includes(x) && !Persist.has(x));
 
             Transparent.html.removeClass(removeHtmlClass).addClass(htmlClass);
             $(page).insertBefore(oldPage);
