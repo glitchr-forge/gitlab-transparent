@@ -868,6 +868,15 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
     }
 
     window.previousLocation = window.location.toString();
+    /* currentOrigin()/currentPathname(), never plain location.* below:
+       inside a `srcdoc` iframe - which is exactly how Transparent.nest
+       mounts the website-in-website overlay - location.origin is the
+       literal string "null". `new URL(path, "null")` THROWS ("Invalid
+       URL"), so every link and every form submission resolved here died
+       with a TypeError the moment it ran inside the overlay. Reported
+       live: saving a form from the nested site did nothing at all.
+       __main__'s same-origin guard was already fixed this way; this is the
+       same fix for the URLs findLink() builds. */
     Transparent.findLink = function (el) {
 
         if (el.type == Transparent.state.HASHCHANGE) {
@@ -896,9 +905,9 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             if (https.test(href)) return [type, new URL(href), data];
 
             var hash  = /^\#\w*/i;
-            if (hash.test(href)) return [type, new URL(location.origin+location.pathname+href), data];
+            if (hash.test(href)) return [type, new URL(currentOrigin()+currentPathname()+href), data];
 
-            return [type, new URL(href, location.origin), data];
+            return [type, new URL(href, currentOrigin()), data];
 
         } else if(el.type == Transparent.state.SUBMIT) {
 
@@ -928,7 +937,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
                 var pat  = /^https?:\/\//i;
                 if (pat.test(href)) return [method, new URL(href), form];
-                return [method, new URL(href, location.origin), form];
+                return [method, new URL(href, currentOrigin()), form];
             }
         }
 
@@ -948,7 +957,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 var pat  = /^https?:\/\//i;
                 if (pat.test(href)) return ["GET", new URL(href), el];
 
-                return ["GET", new URL(href, location.origin), el];
+                return ["GET", new URL(href, currentOrigin()), el];
 
             case "INPUT":
             case "BUTTON":
@@ -974,7 +983,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
                     var pat  = /^https?:\/\//i;
                     if (pat.test(href)) return ["POST", new URL(pathname), form];
-                    return ["POST", new URL(pathname, location.origin), form];
+                    return ["POST", new URL(pathname, currentOrigin()), form];
                 }
         }
 
@@ -1005,7 +1014,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
             var pat  = /^https?:\/\//i;
             if (pat.test(href)) return ["GET", new URL(href), form];
-            return ["GET", new URL(href, location.origin), form];
+            return ["GET", new URL(href, currentOrigin()), form];
         }
 
         if (el.target && el.target.parentElement)
