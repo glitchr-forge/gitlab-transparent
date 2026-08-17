@@ -1931,7 +1931,14 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         return elementsXY;
     }
 
-    var ajaxSemaphore = false;
+    // The in-flight navigation XHR, if any. A newer navigation aborts this
+    // one instead of being dropped - see __main__ and handleResponse.
+    var currentXhr = null;
+    // uuid of the most recently started navigation. A response whose uuid
+    // doesn't match this is stale (superseded by a newer click) and gets
+    // discarded in handleResponse, instead of overwriting what the user's
+    // more recent click already requested.
+    var currentNavUuid = null;
     var formSubmission = false;
 
     // ── User-typed form dirty tracking ──────────────────────────────────────
@@ -2458,9 +2465,24 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             return;
         }
 
+        // A modifier key (new-tab/new-window intent) or an explicit
+        // target="_blank" means the user wants the browser's own handling,
+        // not the SPA swap - bail out BEFORE preventDefault() so native
+        // behaviour (new tab, new window, background tab, ...) fires
+        // exactly as the browser/OS decides for that modifier combination,
+        // instead of this code re-implementing a handful of combinations
+        // by hand via window.open() further below - which used to cover
+        // Cmd+Click but never Ctrl+Click or a plain Shift+Click, so those
+        // silently fell through into an in-place SPA navigation instead of
+        // opening a new tab. A real form submission has no "open in new
+        // tab" convention, so this only applies to a plain link click.
+        if (!form && e.type == Transparent.state.CLICK &&
+            (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || $(target).attr("target") == "_blank")) {
+            return;
+        }
+
         e.preventDefault();
 
-        if (ajaxSemaphore) return;
         if (url == location) return;
 
         if((e.type == Transparent.state.CLICK || e.type == Transparent.state.HASHCHANGE) && url.pathname == currentPathname() && url.search == currentSearch() && type != "POST") {
@@ -2475,10 +2497,6 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
             return;
         }
-
-        if(e.metaKey && e.altKey) return window.open(url).focus();
-        if(e.metaKey && e.shiftKey) return window.open(url, '_blank').focus(); // Safari not focusing..
-        if(e.metaKey || $(target).attr("target") == "_blank") return window.open(url, '_blank');
 
         // right (still limited by browser policy):
         dispatchEvent(new Event('transparent:beforeunload'));
@@ -2497,8 +2515,17 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
         function handleResponse(uuid, status = 200, method = null, data = null, xhr = null, request = null) {
 
-            ajaxSemaphore = false;
-            
+            // A newer navigation has since started and superseded this one
+            // (see the abort() call below). This response is stale -
+            // discard it instead of overwriting what the user's more
+            // recent click already requested. This was the reported bug:
+            // clicking a second link before the first request resolved
+            // showed the FIRST (slower) link's content, because nothing
+            // here checked whether a response still matched the latest
+            // navigation before applying it.
+            if (uuid !== currentNavUuid) return;
+            if (currentXhr === xhr) currentXhr = null;
+
             var responseURL;
             responseURL = xhr !== null ? xhr.responseURL : url.href;
 
@@ -2713,9 +2740,36 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
             // Submit ajax request..
             if(form) form.dispatchEvent(new SubmitEvent("submit", { submitter: formTrigger }));
-            var xhr = new XMLHttpRequest();
 
-            ajaxSemaphore = true;
+            // A navigation already in flight is now stale - the user's
+            // most recent click always wins. Abort it (best-effort; a
+            // request already past its final byte can't be un-sent, but
+            // its response is still discarded in handleResponse via the
+            // uuid check) rather than silently dropping THIS click the way
+            // the old semaphore guard did, which let whichever request
+            // happened to be in flight first win over the user's actual,
+            // more recent intent.
+            //
+            // currentNavUuid/currentXhr are reassigned to THIS navigation
+            // BEFORE the old one is aborted, not after - jQuery's error
+            // callback for an aborted XHR can fire synchronously, inside
+            // this very abort() call, and handleResponse's staleness
+            // check compares against currentNavUuid at the moment IT
+            // runs. Aborting first left currentNavUuid still pointing at
+            // the OLD navigation during that synchronous callback, so the
+            // guard passed it through as if it were still current -
+            // confirmed live: the aborted request's error response was
+            // reaching Transparent.rescue() instead of being discarded.
+            var previousXhr = currentXhr;
+
+            var xhr = new XMLHttpRequest();
+            currentXhr = xhr;
+            currentNavUuid = uuid;
+
+            if (previousXhr) {
+                try { previousXhr.abort(); } catch (err) {}
+            }
+
             return jQuery.ajax({
                 url: url.href,
                 type: type,
@@ -2729,6 +2783,12 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             });
         }
 
+        // This branch replays an already-cached response (e.g. popstate
+        // Back/Forward) synchronously, with no network round-trip - so
+        // there's no actual staleness race here, but handleResponse's
+        // uuid check would still spuriously discard this if
+        // currentNavUuid weren't also updated for this path.
+        currentNavUuid = history.state.uuid;
         return handleResponse(history.state.uuid, history.state.status, history.state.method, history.state.data);
     }
 
