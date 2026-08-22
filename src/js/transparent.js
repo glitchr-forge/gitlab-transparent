@@ -2333,6 +2333,29 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // Determine link
         const link = Transparent.findLink(e);
         if (link == null) {
+
+            // findLink() returning null means "this click is not a navigation".
+            // preventDefault()ing it anyway suppressed the DEFAULT ACTION of
+            // every non-link interactive element on the page - and for anything
+            // whose default action IS its behaviour, that is the behaviour gone.
+            //
+            // Buttons are the sharpest case: a <button> inside a form submits by
+            // default, but findLink() only recognises one when it carries an
+            // explicit type="submit" ATTRIBUTE. Markup that relies on the HTML
+            // default (very common) is therefore unrecognised here, and the
+            // click was swallowed - no request, no submit event, no error. This
+            // was confirmed live in a consuming admin, where every datagrid row
+            // delete button was dead, along with the confirmation dialog that
+            // listens for the submit event those buttons never fired.
+            //
+            // The others in the list have the same problem: <summary>/<details>
+            // never toggled, checkboxes and radios never ticked, <select> never
+            // opened. For all of these transparentJS has nothing to do in the
+            // first place - there is no link to follow - so the default must be
+            // left alone.
+            const t = e.target;
+            if (t && t.closest && t.closest('summary, details, input, select, textarea, option, label, [contenteditable], button')) return;
+
             e.preventDefault();
             return;
         }
