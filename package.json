@@ -1,6 +1,6 @@
 {
   "name": "@glitchr/transparent",
-  "version": "3.0.5",
+  "version": "3.0.6",
   "description": "Transparent SPA Application",
   "main": "src/index.js",
   "access": "public",
