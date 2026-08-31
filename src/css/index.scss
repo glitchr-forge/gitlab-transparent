@@ -134,7 +134,14 @@ html.nested { overflow: hidden; }
 	flex-direction: column;
 	background: #fff;
 	border-radius: 10px;
-	overflow: hidden;
+	/* visible, not hidden, so .transparent-nest-chrome can sit just ABOVE
+	   this box's top-right corner instead of inside it - see that rule.
+	   The clipping this used to provide has not been lost, only moved one
+	   level down: .transparent-nest-body already has its own
+	   overflow:hidden and now inherits this radius, and it is the element
+	   that actually wraps the iframe, so the rounded corners still cut the
+	   nested page exactly as before. */
+	overflow: visible;
 	box-shadow: 0 20px 60px rgba(0, 0, 0, .35), 0 2px 8px rgba(0, 0, 0, .2);
 	/* The panel's own entrance/close motion (moved here from the backdrop -
 	   see #transparent-nest above for why): starts very slightly scaled
@@ -202,19 +209,74 @@ html.nested { overflow: hidden; }
    whole class of backdrop-filter recomposite glitch at zero visual cost -
    the glass treatment stays exactly where it was praised, on the spinner
    body below. */
+/* A floating corner cluster, not a title bar. This used to be a full-width
+   40px band across the top of the panel, which cost 40px of the nested
+   page's height and read as a heavy chrome strip above content that already
+   has its own header.
+
+   It is now taken out of flow entirely (position:absolute), so the nested
+   page gets the panel's full height, and parked just OUTSIDE the panel's
+   top-right corner - `bottom:100%` puts it in the backdrop gap ABOVE the
+   window rather than on top of the page inside it. That placement is the
+   whole point: dropped inside the corner these three buttons landed exactly
+   on the nested admin's own header controls (measured live: cluster at
+   x 1284-1376 against the admin's theme/locale/move icons at x 1271-1361)
+   and would have swallowed clicks meant for them.
+
+   It carries its own translucent pill at all times rather than only on
+   hover, because it no longer has a bar behind it: it floats over whatever
+   the backdrop happens to be showing (a blurred page, or - once docked -
+   the live host page, which may be any colour), and a bare icon has no
+   guaranteed contrast there. Hover just deepens it. */
 .transparent-nest-chrome {
-	flex: 0 0 auto;
+	position: absolute;
+	top: 0;              /* fallback anchor for the fullscreen/docked states below */
+	right: 0;
+	left: auto;
+	width: auto;
+	height: auto;
+	z-index: 6;          /* above .transparent-nest-handle (5) so the corner stays clickable */
 	display: flex;
 	align-items: center;
 	justify-content: flex-end;
-	gap: 4px;
-	height: 40px;
-	padding: 0 6px;
-	background: #f6f7f9;
-	border-bottom: 1px solid rgba(0, 0, 0, .08);
+	gap: 2px;
+	padding: 3px;
+	border-radius: 9px;
+	background: rgba(15, 18, 22, .55);
+	-webkit-backdrop-filter: blur(6px);
+	backdrop-filter: blur(6px);
+	box-shadow: 0 2px 8px rgba(0, 0, 0, .25);
+	transition: background .15s ease, box-shadow .15s ease;
 }
+/* Only float above the window in the normal centered/free state. Fullscreen
+   has no backdrop gap left to float into, and every docked edge already
+   repositions this element for the grab tab (see the [data-dock-edge] rules
+   further down) - both keep the `top:0` fallback above. :focus-within keeps
+   it reachable by keyboard, where there is no pointer to hover with. */
+#transparent-nest:not(.is-full):not(.is-docked) .transparent-nest-chrome {
+	top: auto;
+	bottom: 100%;
+	margin-bottom: 6px;
+}
+.transparent-nest-chrome:hover,
+.transparent-nest-chrome:focus-within {
+	background: rgba(15, 18, 22, .82);
+	box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
+}
+/* Fullscreen is the one state with no backdrop gap to float into - the
+   panel IS the viewport - so the cluster falls back inside the corner, and
+   inside the corner is exactly where the nested page keeps its own controls
+   (measured live: the pill sat on top of the admin's move icon at
+   x 1395-1423, which the old 40px bar had kept clear). Offset the body by
+   the cluster's height so it lands in an empty strip instead. That strip is
+   transparent and only as tall as the cluster itself, so this is a gutter,
+   not a reinstated title bar. */
+#transparent-nest.is-full .transparent-nest-chrome { top: 3px; right: 3px; }
+#transparent-nest.is-full .transparent-nest-body { margin-top: 40px; }
 @media (prefers-color-scheme: dark) {
-	.transparent-nest-chrome { background: #26292e; border-bottom-color: rgba(255, 255, 255, .08); }
+	.transparent-nest-chrome { background: rgba(0, 0, 0, .6); }
+	.transparent-nest-chrome:hover,
+	.transparent-nest-chrome:focus-within { background: rgba(0, 0, 0, .85); }
 }
 .transparent-nest-btn {
 	appearance: none;
@@ -227,17 +289,16 @@ html.nested { overflow: hidden; }
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	color: #444;
+	/* Light in BOTH schemes now, not just dark: these no longer sit on a
+	   light bar, they sit on the chrome's own translucent dark pill (see
+	   .transparent-nest-chrome), so the old #444 was dark-on-dark. */
+	color: #f2f4f7;
 	font-size: 18px;
 	line-height: 1;
 }
-.transparent-nest-btn:hover { background: rgba(0, 0, 0, .06); }
+.transparent-nest-btn:hover { background: rgba(255, 255, 255, .18); }
 .transparent-nest-close { font-size: 20px; }
 .transparent-nest-share { font-size: 15px; }
-@media (prefers-color-scheme: dark) {
-	.transparent-nest-btn { color: #ddd; }
-	.transparent-nest-btn:hover { background: rgba(255, 255, 255, .08); }
-}
 
 /* Small loading indicator next to the chrome buttons - ONLY while the
    nested page's own transparentJS is mid-navigation INSIDE the iframe
@@ -390,6 +451,13 @@ html.nested { overflow: hidden; }
 #transparent-nest.is-docked[data-dock-edge] .transparent-nest-chrome {
 	position: absolute;
 	background: transparent;
+	/* the floating cluster's pill (see .transparent-nest-chrome) has to come
+	   off with its background here too, or the grab tab this state collapses
+	   down to would trail a blurred shadowed box around itself */
+	box-shadow: none;
+	-webkit-backdrop-filter: none;
+	backdrop-filter: none;
+	padding: 0;
 	border: 0;
 	padding: 0;
 }
@@ -419,6 +487,30 @@ html.nested { overflow: hidden; }
 .transparent-nest-grab:hover { background: #eef0f2; }
 #transparent-nest.is-dragging .transparent-nest-grab { cursor: grabbing; }
 #transparent-nest.is-docked[data-dock-edge] .transparent-nest-grab { display: flex; }
+/* ...and in the floating-cluster state it is the only draggable surface
+   left. The chrome's pointerdown handler deliberately bails on anything
+   inside a <button> (`e.target.closest('button')`), so that a click on
+   share/dock/close is never mistaken for a window drag - which was fine
+   while the chrome was a 40px full-width bar with plenty of bare space,
+   but leaves nothing to grab now that it has collapsed to just those three
+   buttons. Same element, re-styled small: a three-dot grip at the
+   cluster's leading edge rather than the big tab the docked edges use. */
+#transparent-nest:not(.is-full):not(.is-docked) .transparent-nest-grab {
+	display: flex;
+	width: 16px;
+	height: 28px;
+	background: transparent;
+	border: 0;
+	border-radius: 6px;
+}
+#transparent-nest:not(.is-full):not(.is-docked) .transparent-nest-grab:hover { background: rgba(255, 255, 255, .18); }
+#transparent-nest:not(.is-full):not(.is-docked) .transparent-nest-grab::before {
+	width: 3px;
+	height: 3px;
+	border-radius: 50%;
+	background: rgba(255, 255, 255, .8);
+	box-shadow: 0 -5px 0 rgba(255, 255, 255, .8), 0 5px 0 rgba(255, 255, 255, .8);
+}
 @media (prefers-color-scheme: dark) {
 	.transparent-nest-grab { background: #26292e; border-color: rgba(255, 255, 255, .08); }
 	.transparent-nest-grab::before { background: rgba(255, 255, 255, .28); }
@@ -584,6 +676,11 @@ html.nested.nest-docked { overflow: visible; }
 	flex: 1 1 auto;
 	min-height: 0; /* required so the iframe's height:100% below actually shrinks inside this flex column */
 	overflow: hidden;
+	/* Took over the panel's corner clipping when that switched to
+	   overflow:visible (see .transparent-nest-panel). `inherit` rather than
+	   a literal 10px so the two can never drift, and so the fullscreen
+	   state - which squares the panel off - squares this off with it. */
+	border-radius: inherit;
 }
 
 /* mount() inserts the iframe (srcdoc set, fetch already resolved) BEFORE
