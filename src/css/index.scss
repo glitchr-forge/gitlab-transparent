@@ -246,7 +246,19 @@ html.nested { overflow: hidden; }
 	-webkit-backdrop-filter: blur(6px);
 	backdrop-filter: blur(6px);
 	box-shadow: 0 2px 8px rgba(0, 0, 0, .25);
-	transition: background .15s ease, box-shadow .15s ease;
+	/* Hidden until the pointer dwells in the top-right corner - see the
+	   corner-peek block in transparent.js. `pointer-events:none` is the
+	   load-bearing half: an opaque pill parked over whatever the nested page
+	   keeps in ITS top-right would otherwise eat those clicks even while
+	   invisible. Shown, it takes them back. */
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity .18s ease, background .15s ease, box-shadow .15s ease;
+}
+#transparent-nest.is-chrome-peek .transparent-nest-chrome,
+.transparent-nest-chrome:focus-within {
+	opacity: 1;
+	pointer-events: auto;
 }
 /* Only float above the window in the normal centered/free state. Fullscreen
    has no backdrop gap left to float into, and every docked edge already
@@ -264,15 +276,16 @@ html.nested { overflow: hidden; }
 	box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
 }
 /* Fullscreen is the one state with no backdrop gap to float into - the
-   panel IS the viewport - so the cluster falls back inside the corner, and
-   inside the corner is exactly where the nested page keeps its own controls
-   (measured live: the pill sat on top of the admin's move icon at
-   x 1395-1423, which the old 40px bar had kept clear). Offset the body by
-   the cluster's height so it lands in an empty strip instead. That strip is
-   transparent and only as tall as the cluster itself, so this is a gutter,
-   not a reinstated title bar. */
+   panel IS the viewport - so the cluster falls back inside the corner, on
+   top of whatever the nested page keeps there.
+
+   This used to offset the body by the cluster's height to keep that corner
+   clear, which was the right answer while the cluster was always visible -
+   but it reserved a full-width strip that read as the title bar coming
+   back, just white and empty. The corner peek makes it unnecessary: the
+   pill is click-through and invisible until the pointer dwells in that
+   corner, so it costs the nested page nothing until it is actually wanted. */
 #transparent-nest.is-full .transparent-nest-chrome { top: 3px; right: 3px; }
-#transparent-nest.is-full .transparent-nest-body { margin-top: 40px; }
 @media (prefers-color-scheme: dark) {
 	.transparent-nest-chrome { background: rgba(0, 0, 0, .6); }
 	.transparent-nest-chrome:hover,
@@ -450,6 +463,14 @@ html.nested { overflow: hidden; }
    close affordance in this collapsed state, by design. */
 #transparent-nest.is-docked[data-dock-edge] .transparent-nest-chrome {
 	position: absolute;
+	/* Exempt from the corner peek above: docked flush against an edge, this
+	   collapses to the grab tab, which is the ONLY control left in that
+	   state - the way back out. Hiding it until a corner hover would strand
+	   the panel with no visible affordance at all. It is also no longer a
+	   pill over the nested page here (background/shadow are dropped just
+	   below), so there is nothing to collide with. */
+	opacity: 1;
+	pointer-events: auto;
 	background: transparent;
 	/* the floating cluster's pill (see .transparent-nest-chrome) has to come
 	   off with its background here too, or the grab tab this state collapses

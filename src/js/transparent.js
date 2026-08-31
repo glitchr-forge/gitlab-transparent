@@ -3230,6 +3230,63 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             });
             chromeBar.appendChild(closeBtn);
 
+            // ── Corner peek ──────────────────────────────────────────────
+            // The cluster is hidden (and click-through) until the pointer
+            // dwells in the panel's top-right corner. Two reasons it is not
+            // simply always on: it is an opaque pill floating over whatever
+            // the nested page keeps in ITS top-right - in fullscreen that is
+            // that page's own controls - and a permanently visible overlay
+            // there both hides them and eats their clicks. Hidden by
+            // default, `pointer-events:none` means it cannot intercept
+            // anything at all until it is actually shown.
+            //
+            // SHOW_MS is a dwell, not a debounce: "keep the mouse in the
+            // corner". Passing through on the way somewhere else should not
+            // flash the pill. HIDE_MS is the opposite - leaving must be
+            // forgiving, or the pill vanishes in the gap between the corner
+            // zone and the button the user is reaching for inside it.
+            var PEEK_W = 170, PEEK_ABOVE = 96, PEEK_BELOW = 64;
+            var PEEK_SHOW_MS = 120, PEEK_HIDE_MS = 260;
+            var peekShowTimer = null, peekHideTimer = null;
+
+            function setPeek(on) {
+
+                if (on) {
+                    if (peekHideTimer) { clearTimeout(peekHideTimer); peekHideTimer = null; }
+                    if (container.classList.contains('is-chrome-peek') || peekShowTimer) return;
+                    peekShowTimer = setTimeout(function() {
+                        peekShowTimer = null;
+                        container.classList.add('is-chrome-peek');
+                    }, PEEK_SHOW_MS);
+                    return;
+                }
+
+                if (peekShowTimer) { clearTimeout(peekShowTimer); peekShowTimer = null; }
+                if (!container.classList.contains('is-chrome-peek') || peekHideTimer) return;
+                peekHideTimer = setTimeout(function() {
+                    peekHideTimer = null;
+                    container.classList.remove('is-chrome-peek');
+                }, PEEK_HIDE_MS);
+            }
+
+            // Host-viewport coordinates. The zone hugs the panel's top-right
+            // corner and deliberately reaches ABOVE the panel as well: in the
+            // default windowed state the cluster floats in the backdrop gap
+            // up there, outside the panel box entirely, so a zone clipped to
+            // the panel would never cover the pill the user is aiming at.
+            function peekFromPoint(x, y) {
+
+                var r = panel.getBoundingClientRect();
+                setPeek(x >= r.right - PEEK_W && x <= r.right + 28
+                     && y >= r.top - PEEK_ABOVE && y <= r.top + PEEK_BELOW);
+            }
+            container._peekFromPoint = peekFromPoint;
+
+            document.addEventListener('mousemove', function(e) { peekFromPoint(e.clientX, e.clientY); });
+            // Pointer gone from the host document entirely - drop it rather
+            // than leaving the pill stranded on screen.
+            document.addEventListener('mouseleave', function() { setPeek(false); });
+
             var body = document.createElement('div');
             body.className = 'transparent-nest-body';
             panel.appendChild(body);
@@ -3779,6 +3836,23 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                     // that earlier attach's contentDocument timing
                     // assumption turns out not to hold in some engine
                     try { doc.addEventListener('keydown', handleEscKeydown, true); } catch (e) {}
+
+                    // The iframe swallows the host's mousemove for every
+                    // pixel it covers - which, now that the chrome bar no
+                    // longer reserves a strip, is the whole panel. Without
+                    // this the corner peek could only ever trigger from the
+                    // backdrop around the panel, i.e. never at all in
+                    // fullscreen or when docked. Coordinates are relative to
+                    // the iframe's own viewport, so shift them into host
+                    // space by its rect. Re-attached per mount() like the
+                    // keydown above: srcdoc replaces the whole Document.
+                    try {
+                        doc.addEventListener('mousemove', function(e) {
+                            if (!container._peekFromPoint) return;
+                            var fr = frame.getBoundingClientRect();
+                            container._peekFromPoint(e.clientX + fr.left, e.clientY + fr.top);
+                        }, true);
+                    } catch (e) {}
 
                     // Mirror the nested page's own transparentJS loading
                     // state (its html.loading class, set for every in-iframe
