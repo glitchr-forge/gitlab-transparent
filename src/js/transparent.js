@@ -219,6 +219,20 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         "response_limit": 25,
         "throttle": 1000,
         "rescue_reload": 5000,
+        // Milliseconds to hold `html.exiting` after the response arrives and
+        // before the DOM is swapped, so the outgoing page can animate away.
+        //
+        // 0 (off) by default, which is the behaviour every consumer had
+        // before this existed: the swap happens the moment the response
+        // lands. Turning it on trades that much added latency per navigation
+        // for an exit animation - and it is the ONLY window in which one can
+        // run, because the swap itself is a single blocking task and a
+        // transition started against it never gets a style commit.
+        //
+        // Plain milliseconds, not parseDuration(): that helper returns
+        // seconds for "200ms" but milliseconds for a bare 5000, which is not
+        // a distinction to hang a timing API on.
+        "exit_duration": 0,
         "identifier": "#page",
         "loader": "#loader",
         "smoothscroll_duration": "200ms",
@@ -354,6 +368,17 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         POPSTATE   : "popstate",
         HASHCHANGE : "hashchange",
         CLICK      : "click",
+
+        // Set once the response is in hand but BEFORE the DOM is swapped, and
+        // held for Settings.exit_duration so the outgoing page has a window in
+        // which it can still animate. Off (0) by default - see exit_duration.
+        //
+        // Deliberately its own state rather than reusing `new`: `new` is only
+        // added when isKnownLayout() is false, i.e. the first time a layout is
+        // seen in a session, so CSS keyed on it animates once and then quietly
+        // stops. That is a trap worth naming - it looks correct in testing and
+        // fails on the second visit.
+        EXITING    : "exiting",
 
         PREACTIVE  : "pre-active",
         ACTIVEIN   : "active-in",
@@ -2827,18 +2852,46 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             if($(dom).find("html").hasClass(Transparent.state.RELOAD) || $(dom).find("html").hasClass(Transparent.state.DISABLE))
                 return window.location.reload();
 
-            return Transparent.onLoad(uuid, dom, function() {
+            var swap = function() {
 
-                Transparent.activeOut(function() {
+                return Transparent.onLoad(uuid, dom, function() {
 
-                    Transparent.html
-                        .removeClass(switchLayout)
-                        .removeClass(Transparent.state.SUBMIT)
-                        .removeClass(Transparent.state.POPSTATE)
-                        .removeClass(Transparent.state.NEW);
-                });
+                    Transparent.activeOut(function() {
 
-            }, type != "POST");
+                        Transparent.html
+                            .removeClass(switchLayout)
+                            .removeClass(Transparent.state.SUBMIT)
+                            .removeClass(Transparent.state.POPSTATE)
+                            .removeClass(Transparent.state.EXITING)
+                            .removeClass(Transparent.state.NEW);
+                    });
+
+                }, type != "POST");
+            };
+
+            // Give the outgoing page a window to animate away in, if the host
+            // asked for one. This is the only place such a window can exist:
+            // before this point we are waiting on the server with no idea when
+            // the response lands, and after it the swap is one long blocking
+            // task in which a newly-started transition never gets a style
+            // commit. Measured: a transition begun against the swap had ~1ms
+            // of free time in a 412ms window.
+            //
+            // `exiting` is dropped in the activeOut callback above, not here,
+            // so it hands over to `active-out` without a frame in between
+            // where neither is set - that gap would flash the swapped-in page
+            // before its own entrance.
+            var exitMs = parseInt(Settings["exit_duration"], 10) || 0;
+            if (exitMs > 0) {
+
+                Transparent.html.addClass(Transparent.state.EXITING);
+                dispatchEvent(new Event('transparent:' + Transparent.state.EXITING));
+
+                setTimeout(swap, exitMs);
+                return;
+            }
+
+            return swap();
         }
 
         if(history.state && !Transparent.hasResponse(history.state.uuid))
