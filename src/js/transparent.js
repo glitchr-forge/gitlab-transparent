@@ -89,12 +89,27 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             var el = this[i] === window ? document.documentElement : this[i];
             var isDom = el == document.documentElement;
 
-            var hasScrollableContent = el.scrollWidth > el.clientWidth;
+            // Cheap test first, and bail on it. The result is
+            // `hasScrollableContent && (isOverflowScroll || isDom)`, so an
+            // element with nothing to scroll can never qualify however it is
+            // styled - yet getComputedStyle() was being called for every one
+            // of them anyway.
+            //
+            // That matters because of who calls this: getScrollableElement()
+            // runs `$(el).find('*')` over the WHOLE document and tests every
+            // element, immediately after a page swap has inserted a fresh
+            // subtree. At ~1600 elements that was ~3200 getComputedStyle
+            // calls plus the layout flush they force, measured at 136.6ms of
+            // the swap's blocking task - the single most expensive phase in
+            // it, larger than every piece of transparentJS's own work
+            // combined. Almost none of those elements scroll.
+            //
+            // Same short-circuit for isDom: the documentElement qualifies on
+            // that flag alone, so its overflow never needed reading either.
+            if (!(el.scrollWidth > el.clientWidth)) return false;
+            if (isDom) return true;
 
-            var overflowStyle   = window.getComputedStyle(el).overflowX;
-            var isOverflowScroll = overflowStyle.indexOf('scroll') !== -1;
-
-            return hasScrollableContent && (isOverflowScroll || isDom);
+            return window.getComputedStyle(el).overflowX.indexOf('scroll') !== -1;
 
         }.bind(this));
     }
@@ -106,12 +121,12 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             var el = this[i] === window ? document.documentElement : this[i];
             var isDom = el == document.documentElement;
 
-            var hasScrollableContent = el.scrollHeight > el.clientHeight;
+            // Same short-circuit as isScrollableX above - see that comment
+            // for why this one call site dominated the swap.
+            if (!(el.scrollHeight > el.clientHeight)) return false;
+            if (isDom) return true;
 
-            var overflowStyle   = window.getComputedStyle(el).overflowY;
-            var isOverflowScroll = overflowStyle.indexOf('scroll') !== -1;
-
-            return hasScrollableContent && (isOverflowScroll || isDom);
+            return window.getComputedStyle(el).overflowY.indexOf('scroll') !== -1;
 
         }.bind(this));
     }
@@ -1293,7 +1308,23 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         }
 
         if (el.tagName === 'SCRIPT' ) el.parentNode.replaceChild( scriptCloneEl(el) , el );
-        else {
+        else if (typeof el.querySelectorAll === 'function') {
+
+            // One native query instead of recursing the entire node tree.
+            // This walked childNodes and called itself for every node - text
+            // and comment nodes included - which after a page swap meant 618
+            // recursive calls costing 33.5ms to locate FOUR <script> tags.
+            //
+            // querySelectorAll returns the same elements in the same document
+            // order, and as a STATIC list, so replacing each script as we go
+            // cannot disturb the iteration the way a live childNodes walk
+            // would. Non-Element nodes keep the old path below rather than
+            // throwing on the missing method.
+            var scripts = el.querySelectorAll('script');
+            for (var s = 0; s < scripts.length; s++)
+                Transparent.evalScript( scripts[s] );
+
+        } else {
 
             var i = -1, children = el.childNodes;
             var N = children.length;
@@ -1760,6 +1791,24 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
             Transparent.addLayout();
 
+            // Deferred a frame ON PURPOSE. Everything above has just inserted
+            // a freshly parsed page and removed the old one, leaving style and
+            // layout dirty for the whole document. getScrollableElement() then
+            // reads scrollWidth/scrollHeight off every element, and the first
+            // of those reads forces the browser to compute all of it
+            // synchronously, inside this task - measured at 136.6ms before the
+            // short-circuit in isScrollableX/Y, and still ~80ms after it,
+            // because the flush itself is the cost, not the per-element work.
+            //
+            // requestAnimationFrame lets the browser do that style and layout
+            // in its own rendering pass instead of being forced mid-task, and
+            // the read then happens against clean layout. Nothing here paints
+            // anything: Transparent.scrollTo already defers its own work with
+            // setTimeout, so only the MEASUREMENT was ever synchronous, and
+            // the page is still hidden (.active-out) for this frame, so a
+            // one-frame delay in restoring scroll cannot be seen.
+            requestAnimationFrame(function() {
+
             if(scrollTo) {
 
                 // Go back to top of the page..
@@ -1787,6 +1836,8 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                     }
                 }
             }
+
+            }); /* end requestAnimationFrame - see the comment above it */
 
             $('head').append(function() {
 
