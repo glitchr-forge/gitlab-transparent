@@ -3614,24 +3614,66 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             // default, `pointer-events:none` means it cannot intercept
             // anything at all until it is actually shown.
             //
-            // SHOW_MS is a dwell, not a debounce: "keep the mouse in the
-            // corner". Passing through on the way somewhere else should not
-            // flash the pill. HIDE_MS is the opposite - leaving must be
+            // The trigger is deliberately small: a corner, not the whole
+            // top-right quadrant. A generous zone made the pill appear while
+            // the pointer was merely on its way to one of the NESTED page's
+            // own top-right controls, and the pill then covered the very
+            // button being reached for. The cluster's own (always
+            // measurable, even at opacity 0) rect is unioned in below, so
+            // shrinking this box can never strand the pointer outside the
+            // zone while it is on the pill itself.
+            var PEEK_W = 104, PEEK_ABOVE = 60, PEEK_BELOW = 36, PEEK_PAD = 10;
+            // PEEK_SHOW_MS is a dwell, not a debounce: "keep the mouse in
+            // the corner". Passing through on the way somewhere else must
+            // not flash the pill, so it is long enough to sit out a normal
+            // traverse. PEEK_HOLD_MS is the same dwell while the pointer
+            // rests on a control BELOW the pill (one of the nested page's,
+            // or one of the host's) - long enough that clicking that control
+            // always wins, short enough that parking the mouse there still
+            // summons the chrome eventually, which matters in fullscreen
+            // where the page's own corner may be nothing but buttons.
+            // PEEK_HIDE_MS is the opposite of both - leaving must be
             // forgiving, or the pill vanishes in the gap between the corner
             // zone and the button the user is reaching for inside it.
-            var PEEK_W = 170, PEEK_ABOVE = 96, PEEK_BELOW = 64;
-            var PEEK_SHOW_MS = 120, PEEK_HIDE_MS = 260;
-            var peekShowTimer = null, peekHideTimer = null;
+            var PEEK_SHOW_MS = 340, PEEK_HOLD_MS = 1000, PEEK_HIDE_MS = 340;
+            var peekShowTimer = null, peekHideTimer = null, peekShowDelay = 0;
 
-            function setPeek(on) {
+            // Anything the pointer could be aiming AT rather than merely
+            // passing over. Matched against the element under the pointer -
+            // in the host document and, forwarded from the mount below, in
+            // the nested one.
+            var PEEK_CONTROL_SEL = 'a[href],button,input,select,textarea,summary,label,'
+                + '[role="button"],[role="link"],[role="tab"],[contenteditable=""],[contenteditable="true"]';
+
+            function isControl(target) {
+
+                if (!target || target.nodeType !== 1 || !target.closest) return false;
+                var hit = target.closest(PEEK_CONTROL_SEL);
+                // the cluster's own buttons are not a conflict with itself
+                return !!hit && !chromeBar.contains(hit);
+            }
+            container._peekIsControl = isControl;
+
+            function setPeek(on, slow) {
 
                 if (on) {
                     if (peekHideTimer) { clearTimeout(peekHideTimer); peekHideTimer = null; }
-                    if (container.classList.contains('is-chrome-peek') || peekShowTimer) return;
+                    if (container.classList.contains('is-chrome-peek')) return;
+                    var delay = slow ? PEEK_HOLD_MS : PEEK_SHOW_MS;
+                    // A dwell of the same kind is already counting down;
+                    // restarting it on every mousemove would turn the dwell
+                    // into a debounce and it would never fire. Crossing onto
+                    // (or off) a control IS a restart, on purpose: the extra
+                    // wait has to begin when the control is reached.
+                    if (peekShowTimer) {
+                        if (peekShowDelay === delay) return;
+                        clearTimeout(peekShowTimer);
+                    }
+                    peekShowDelay = delay;
                     peekShowTimer = setTimeout(function() {
                         peekShowTimer = null;
                         container.classList.add('is-chrome-peek');
-                    }, PEEK_SHOW_MS);
+                    }, delay);
                     return;
                 }
 
@@ -3648,15 +3690,28 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             // default windowed state the cluster floats in the backdrop gap
             // up there, outside the panel box entirely, so a zone clipped to
             // the panel would never cover the pill the user is aiming at.
-            function peekFromPoint(x, y) {
+            // The cluster's own rect is unioned in for the same reason - it
+            // grows and moves with the state (fullscreen, docked, error) and
+            // must stay hoverable whatever the fixed box above covers.
+            function peekFromPoint(x, y, overControl) {
 
                 var r = panel.getBoundingClientRect();
-                setPeek(x >= r.right - PEEK_W && x <= r.right + 28
-                     && y >= r.top - PEEK_ABOVE && y <= r.top + PEEK_BELOW);
+                var inCorner = x >= r.right - PEEK_W && x <= r.right + PEEK_PAD
+                            && y >= r.top - PEEK_ABOVE && y <= r.top + PEEK_BELOW;
+
+                if (!inCorner) {
+                    var c = chromeBar.getBoundingClientRect();
+                    inCorner = x >= c.left - PEEK_PAD && x <= c.right + PEEK_PAD
+                            && y >= c.top - PEEK_PAD && y <= c.bottom + PEEK_PAD;
+                }
+
+                setPeek(inCorner, !!overControl);
             }
             container._peekFromPoint = peekFromPoint;
 
-            document.addEventListener('mousemove', function(e) { peekFromPoint(e.clientX, e.clientY); });
+            document.addEventListener('mousemove', function(e) {
+                peekFromPoint(e.clientX, e.clientY, isControl(e.target));
+            });
             // Pointer gone from the host document entirely - drop it rather
             // than leaving the pill stranded on screen.
             document.addEventListener('mouseleave', function() { setPeek(false); });
@@ -4224,7 +4279,14 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                         doc.addEventListener('mousemove', function(e) {
                             if (!container._peekFromPoint) return;
                             var fr = frame.getBoundingClientRect();
-                            container._peekFromPoint(e.clientX + fr.left, e.clientY + fr.top);
+                            // Whether the pointer sits on one of the NESTED
+                            // page's own controls travels with the point:
+                            // the host cannot see through the iframe to ask,
+                            // and it is exactly the case the peek has to
+                            // stay out of the way for.
+                            var onControl = container._peekIsControl
+                                && container._peekIsControl(e.target);
+                            container._peekFromPoint(e.clientX + fr.left, e.clientY + fr.top, onControl);
                         }, true);
                     } catch (e) {}
 
