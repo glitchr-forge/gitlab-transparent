@@ -306,6 +306,13 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // default) disables this - docking then always floats.
         "nest_dock_target": null,
         "nest_swipe": true,
+        // nest_keepalive: closing the overlay PARKS the nested session
+        // (hidden, still mounted) instead of destroying it, and the next
+        // open of that same page resumes it exactly as it was left - a
+        // half-filled form, an editor mid-edit, the scroll position. Only
+        // one session is ever parked; opening a different page discards it.
+        // Set false to go back to tearing the iframe down on every close.
+        "nest_keepalive": true,
         // headlock: list of URL substrings or regex patterns to preserve in
         // <head> across page transitions (e.g. third-party widgets that
         // inject <style>/<link> dynamically). Anything matching is treated
@@ -3278,16 +3285,28 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         var hostTitle = null;      // host document title backup
         var hostOverflow = null;   // body overflow backup
         var closing = false;       // reentrance guard (closeNest vs popstate)
+        // The one closed-but-still-mounted session, if any - see closeShell
+        // and resume() at the bottom of this module.
+        var parked = null;
 
         api.isOpen = function() {
             var el = document.getElementById(CONTAINER_ID);
             // a container mid-close-fade doesn't count as "open" - a fast
-            // re-open must be treated as fresh, not folded into the dying one
-            return el != null && !el.classList.contains('is-closing');
+            // re-open must be treated as fresh, not folded into the dying
+            // one - and neither does a parked one: it IS closed, it just
+            // still exists (hidden) so its nested page keeps its state.
+            return el != null
+                && !el.classList.contains('is-closing')
+                && !el.classList.contains('is-parked');
         };
 
+        // Deliberately blind to a parked container, so that everything
+        // reaching for "the overlay" (esc, retry, mount, close) treats a
+        // parked session as gone. resume() below is the only way back to
+        // it, through the `parked` reference.
         api.getContainer = function() {
-            return document.getElementById(CONTAINER_ID);
+            var el = document.getElementById(CONTAINER_ID);
+            return el != null && !el.classList.contains('is-parked') ? el : null;
         };
 
         // __main__ consults this before acting: popstate traffic related to
@@ -3321,9 +3340,13 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
             // a fast re-open racing an in-flight close animation wins:
             // drop the dying node rather than leaving two #transparent-nest
-            // elements in the document at once
+            // elements in the document at once. A PARKED session is dropped
+            // here too - reaching this point means the caller asked for a
+            // page that session isn't on (resume() already declined it), and
+            // only one nested document is ever kept alive.
             var stale = document.getElementById(CONTAINER_ID);
             if (stale) stale.remove();
+            if (parked) parked = null;
 
             var container = document.createElement('div');
             container.id = CONTAINER_ID;
@@ -3331,6 +3354,9 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             // the response URL) so share/esc/backdrop event details and the
             // share navigation always have something meaningful to use
             container._currentHref = href;
+            // the page this session was opened WITH, kept alongside the one
+            // it has since navigated to - resume() accepts either
+            container._openHref = href;
 
             // Standard modal convention: clicking the dimmed backdrop
             // (outside the panel) closes the nest. `e.target !== container`
@@ -3374,6 +3400,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             function resetGeometry() {
                 panel.classList.remove('is-free');
                 panel.style.left = panel.style.top = panel.style.width = panel.style.height = '';
+                updateChromePlacement();
             }
 
             // Re-parents the WHOLE panel (chrome + body, so close/dock-
@@ -3448,6 +3475,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 container.classList.add('is-docked');
                 Transparent.html.addClass('nest-docked');
                 document.body.style.overflow = hostOverflow || '';
+                updateChromePlacement();
                 dispatchEvent(new CustomEvent('transparent:nest:dock', { detail: { href: container._currentHref, edge: null } }));
             }
 
@@ -3462,6 +3490,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 delete container.dataset.dockEdge;
                 Transparent.html.removeClass('nest-docked');
                 document.body.style.overflow = 'hidden';
+                updateChromePlacement();
             }
 
             function restoreDefault() {
@@ -3604,15 +3633,35 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             });
             chromeBar.appendChild(closeBtn);
 
+            // ── Chrome placement ─────────────────────────────────────────
+            // The cluster floats in the backdrop gap ABOVE the panel (see
+            // index.scss) - which only works while there IS a gap. A panel
+            // dragged flush against the top of the viewport would push its
+            // own chrome off-screen, so below that much room it falls back
+            // inside the panel's corner. Recomputed on every move/resize/
+            // dock and, cheaply, from the pointer tracking below.
+            var CHROME_ROOM = 46;   // cluster height (34) + its 6px gap + slack
+
+            function applyChromeRoom(r) {
+
+                var inside = r.top < CHROME_ROOM;
+                if (inside === container.classList.contains('is-chrome-inside')) return;
+                container.classList.toggle('is-chrome-inside', inside);
+            }
+
+            function updateChromePlacement() { applyChromeRoom(panel.getBoundingClientRect()); }
+            container._updateChromePlacement = updateChromePlacement;
+
             // ── Corner peek ──────────────────────────────────────────────
-            // The cluster is hidden (and click-through) until the pointer
-            // dwells in the panel's top-right corner. Two reasons it is not
-            // simply always on: it is an opaque pill floating over whatever
-            // the nested page keeps in ITS top-right - in fullscreen that is
-            // that page's own controls - and a permanently visible overlay
-            // there both hides them and eats their clicks. Hidden by
-            // default, `pointer-events:none` means it cannot intercept
-            // anything at all until it is actually shown.
+            // IN FULLSCREEN ONLY, the cluster is hidden (and click-through)
+            // until the pointer dwells in the panel's top-right corner.
+            // That is the one state where it has no backdrop gap to float
+            // in and sits inside the corner instead, on top of whatever the
+            // nested page keeps there - in the consuming admin, that page's
+            // own controls - where a permanently visible pill both hides
+            // them and eats their clicks. Every other state floats it clear
+            // of the page and simply leaves it visible (see index.scss), so
+            // everything below is a no-op there.
             //
             // The trigger is deliberately small: a corner, not the whole
             // top-right quadrant. A generous zone made the pill appear while
@@ -3650,6 +3699,13 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 return !!hit && !chromeBar.contains(hit);
             }
             container._peekIsControl = isControl;
+
+            function clearPeek() {
+
+                if (peekShowTimer) { clearTimeout(peekShowTimer); peekShowTimer = null; }
+                if (peekHideTimer) { clearTimeout(peekHideTimer); peekHideTimer = null; }
+                container.classList.remove('is-chrome-peek');
+            }
 
             function setPeek(on, urgent) {
 
@@ -3692,6 +3748,22 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             // must stay hoverable whatever the fixed box above covers.
             function peekFromPoint(x, y, overControl) {
 
+                // a parked session still has these listeners attached, and
+                // measures as a zero rect while hidden - nothing here means
+                // anything until it is resumed
+                if (container.classList.contains('is-parked')) return;
+
+                var r = panel.getBoundingClientRect();
+                // free ride: this is the one callback that already runs on
+                // every pointer move, so the placement stays right even
+                // after a viewport change nothing else hooked
+                applyChromeRoom(r);
+
+                // Outside fullscreen the cluster is simply always visible -
+                // nothing to peek at, and a stale .is-chrome-peek left on
+                // here would make the next fullscreen start out showing it.
+                if (!container.classList.contains('is-full')) { clearPeek(); return; }
+
                 // A control under the pointer OWNS that pointer, wherever it
                 // is. The pill is opaque and, once shown, click-eating: put
                 // it over a button somebody is already hovering and it both
@@ -3703,7 +3775,6 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 // closes the nest outright, so no state is unreachable.
                 if (overControl) { setPeek(false, true); return; }
 
-                var r = panel.getBoundingClientRect();
                 var inCorner = x >= r.right - PEEK_W && x <= r.right + PEEK_PAD
                             && y >= r.top - PEEK_ABOVE && y <= r.top + PEEK_BELOW;
 
@@ -3827,6 +3898,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                     panel.style.width = '';
                 }
                 panel.style.left = panel.style.top = '';
+                updateChromePlacement();
                 dispatchEvent(new CustomEvent('transparent:nest:dock', { detail: { href: container._currentHref, edge: edge } }));
             }
 
@@ -3949,6 +4021,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                         }
                         panel.style.left = (sl + ev.clientX - sx) + 'px';
                         panel.style.top = (st + ev.clientY - sy) + 'px';
+                        updateChromePlacement();
                     };
                     var onUp = function() {
                         chromeBar.removeEventListener('pointermove', onMove);
@@ -4030,6 +4103,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                         panel.style.top = top + 'px';
                         panel.style.width = w + 'px';
                         panel.style.height = h + 'px';
+                        updateChromePlacement();
                     };
                     var onUp = function() {
                         handle.removeEventListener('pointermove', onMove);
@@ -4192,6 +4266,9 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 if (revealed) return;
                 revealed = true;
                 container._pendingReveal = null;
+                // there is now a real nested document worth keeping alive
+                // across a close (see canPark)
+                container._mounted = true;
                 // backs the `href` on esc/close-adjacent events without
                 // inventing separate per-event tracking
                 container._currentHref = href;
@@ -4523,9 +4600,57 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             api.navigate(href);
         }
 
+        // Same target, whether or not either side is absolute: the click
+        // that reopens a nest is usually a bare "/admin" while the parked
+        // session records the response URL it actually landed on.
+        function sameTarget(a, b) {
+
+            if (!a || !b) return false;
+            try { return new URL(a, location.href).href === new URL(b, location.href).href; }
+            catch (e) { return a === b; }
+        }
+
+        // Bring the parked session back instead of fetching the page again.
+        // Accepted for the page it was opened with AS WELL AS the one it has
+        // navigated to since: the common flow is opening /admin, walking
+        // into some edit form inside the overlay, closing it, and then
+        // clicking that same /admin link again - meaning "give me back what
+        // I had", not "load the dashboard fresh". A link to any OTHER page
+        // is a deliberate request for that page and falls through to a
+        // normal open, which discards the parked session (see openShell).
+        function resume(href) {
+
+            if (!parked) return false;
+            if (!sameTarget(href, parked._currentHref) && !sameTarget(href, parked._openHref)) return false;
+
+            var container = parked;
+            parked = null;
+            container.classList.remove('is-parked', 'is-closing');
+
+            hostTitle = document.title;
+            hostOverflow = document.body.style.overflow;
+            Transparent.html.addClass(HTML_CLASS);
+            // restore the host-page concessions this session was closed in,
+            // not the pristine modal ones: a docked panel left the host
+            // scrollable and interactive, and still does
+            if (container.classList.contains('is-docked')) Transparent.html.addClass('nest-docked');
+            else document.body.style.overflow = 'hidden';
+
+            // the nest history entry was popped by the close - put an
+            // equivalent one back so Back still closes the overlay
+            if (!(history.state && history.state.nest)) {
+                try { history.pushState({ nest: { href: container._currentHref } }, '', location.href); } catch (e) {}
+            }
+
+            if (container._updateChromePlacement) container._updateChromePlacement();
+            dispatchEvent(new CustomEvent('transparent:nest:resume', { detail: { href: container._currentHref } }));
+            return true;
+        }
+
         api.open = function(href) {
 
             if (api.isOpen()) return api.navigate(href);
+            if (resume(href)) return;
 
             fetchNested(href, function() { window.location.href = href; });
         };
@@ -4544,8 +4669,22 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // `#transparent-nest { transition: opacity .3s }` rule) and only
         // then removing it keeps the visual change fully inside the overlay.
         var CLOSE_TRANSITION_MS = 300; // keep in sync with index.scss's #transparent-nest transition-duration
+
+        // Whether this session is worth parking rather than destroying.
+        // A shell that never mounted anything (an ineligible target torn
+        // down mid-open) has nothing to preserve, and an error panel would
+        // come back as an error.
+        function canPark(container) {
+
+            if (Settings['nest_keepalive'] === false) return false;
+            if (!container._mounted) return false;
+            if (container.classList.contains('is-error')) return false;
+            return true;
+        }
+
         function closeShell(container) {
             var href = container._currentHref;
+            var park = canPark(container);
             // if the panel was re-parented into a host container
             // (nest_dock_target), pull it back under this shell FIRST - it
             // lives outside `container` while docked that way, so removing
@@ -4555,8 +4694,19 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             container.classList.add('is-closing');
             dispatchEvent(new CustomEvent('transparent:nest:fade-out-start', { detail: { href: href } }));
             setTimeout(function() {
-                if (container.parentNode) container.remove();
-                dispatchEvent(new CustomEvent('transparent:nest:fade-out-end', { detail: { href: href } }));
+                // Parked, not destroyed: the node STAYS in the document and
+                // is merely hidden (index.scss, .is-parked). Removing it
+                // instead would tear the iframe's browsing context down -
+                // that is what made every close start the nested page over
+                // from scratch, losing anything half-typed in it - and
+                // re-inserting the same element reloads it just the same,
+                // so "detach and put it back" is not an option.
+                if (park) {
+                    parked = container;
+                    container.classList.add('is-parked');
+                    container.classList.remove('is-closing');
+                } else if (container.parentNode) container.remove();
+                dispatchEvent(new CustomEvent('transparent:nest:fade-out-end', { detail: { href: href, parked: park } }));
             }, CLOSE_TRANSITION_MS);
         }
 

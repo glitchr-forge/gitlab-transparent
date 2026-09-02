@@ -246,26 +246,46 @@ html.nested { overflow: hidden; }
 	-webkit-backdrop-filter: blur(6px);
 	backdrop-filter: blur(6px);
 	box-shadow: 0 2px 8px rgba(0, 0, 0, .25);
-	/* Hidden until the pointer dwells in the top-right corner - see the
-	   corner-peek block in transparent.js. `pointer-events:none` is the
-	   load-bearing half: an opaque pill parked over whatever the nested page
-	   keeps in ITS top-right would otherwise eat those clicks even while
-	   invisible. Shown, it takes them back. */
-	opacity: 0;
-	pointer-events: none;
+	/* Visible from the moment the panel opens. Everywhere but fullscreen
+	   this pill floats in the backdrop gap ABOVE the panel (see the rule
+	   right below), where it covers nothing of the nested page - there is
+	   nothing to hide it FOR, and chrome you have to discover by hovering
+	   is worse than chrome that is simply there.
+
+	   Fullscreen is the exception, and the only state the corner peek in
+	   transparent.js applies to: no gap is left to float into, so the pill
+	   falls back inside the corner on top of whatever the nested page keeps
+	   there, and it stays hidden until the pointer dwells in that corner.
+	   `pointer-events:none` is the load-bearing half of that hidden state -
+	   an opaque pill parked over the nested page's own controls would
+	   otherwise eat their clicks even while invisible. Shown, it takes them
+	   back. */
+	opacity: 1;
+	pointer-events: auto;
 	transition: opacity .18s ease, background .15s ease, box-shadow .15s ease;
 }
-#transparent-nest.is-chrome-peek .transparent-nest-chrome,
-.transparent-nest-chrome:focus-within {
+#transparent-nest.is-full .transparent-nest-chrome {
+	opacity: 0;
+	pointer-events: none;
+}
+#transparent-nest.is-full.is-chrome-peek .transparent-nest-chrome,
+#transparent-nest.is-full .transparent-nest-chrome:focus-within {
 	opacity: 1;
 	pointer-events: auto;
 }
-/* Only float above the window in the normal centered/free state. Fullscreen
-   has no backdrop gap left to float into, and every docked edge already
-   repositions this element for the grab tab (see the [data-dock-edge] rules
-   further down) - both keep the `top:0` fallback above. :focus-within keeps
-   it reachable by keyboard, where there is no pointer to hover with. */
-#transparent-nest:not(.is-full):not(.is-docked) .transparent-nest-chrome {
+/* Float above the window in every state that still looks like a window -
+   the pristine centered default AND a panel merely moved/resized away from
+   it. That second case used to be excluded by `:not(.is-docked)`, but
+   .is-docked is set by ANY move (it is what drops the modal backdrop), so
+   dragging the panel an inch dropped the cluster back inside the corner,
+   on top of the nested page's own controls - the exact collision floating
+   it exists to avoid. The states that genuinely have nowhere to float are
+   named explicitly instead: fullscreen (no backdrop gap), an edge dock
+   (repositioned for the grab tab by the [data-dock-edge] rules further
+   down), a container dock (the panel lives inside a host element), and
+   .is-chrome-inside - set from transparent.js when the panel sits too
+   close to the top of the viewport for the cluster to fit above it. */
+#transparent-nest:not(.is-full):not(.is-container-docked):not(.is-chrome-inside):not([data-dock-edge]) .transparent-nest-chrome {
 	top: auto;
 	bottom: 100%;
 	margin-bottom: 6px;
@@ -381,10 +401,17 @@ html.nested { overflow: hidden; }
 	width: 5px;
 	background: currentColor;
 }
-#transparent-nest.is-docked .transparent-nest-dock-toggle { color: #2563eb; }
-@media (prefers-color-scheme: dark) {
-	#transparent-nest.is-docked .transparent-nest-dock-toggle { color: #6ea8fe; }
-}
+/* Marks the dock toggle as the active state. The lighter blue is used in
+   BOTH schemes on purpose: this button only ever renders on the dark glass
+   pill (fullscreen and edge docks hide it entirely), and #2563eb - correct
+   against a light page - is close to unreadable there. */
+#transparent-nest.is-docked .transparent-nest-dock-toggle { color: #6ea8fe; }
+/* Closed, but kept mounted - see the park/resume block in transparent.js.
+   display:none (rather than removing the node) is the whole trick: pulling
+   an iframe out of the document tears its browsing context down and the
+   nested page would reload from scratch on the next open, losing whatever
+   was being typed into it. Hidden, it just stops being painted. */
+#transparent-nest.is-parked { display: none; }
 #transparent-nest.is-movable .transparent-nest-chrome { cursor: grab; }
 #transparent-nest.is-dragging .transparent-nest-chrome { cursor: grabbing; }
 /* the shield: without it the drag dies the instant the pointer crosses
@@ -516,7 +543,7 @@ html.nested { overflow: hidden; }
    but leaves nothing to grab now that it has collapsed to just those three
    buttons. Same element, re-styled small: a three-dot grip at the
    cluster's leading edge rather than the big tab the docked edges use. */
-#transparent-nest:not(.is-full):not(.is-docked) .transparent-nest-grab {
+#transparent-nest:not(.is-full):not(.is-container-docked):not([data-dock-edge]) .transparent-nest-grab {
 	display: flex;
 	width: 16px;
 	height: 28px;
@@ -524,8 +551,8 @@ html.nested { overflow: hidden; }
 	border: 0;
 	border-radius: 6px;
 }
-#transparent-nest:not(.is-full):not(.is-docked) .transparent-nest-grab:hover { background: rgba(255, 255, 255, .18); }
-#transparent-nest:not(.is-full):not(.is-docked) .transparent-nest-grab::before {
+#transparent-nest:not(.is-full):not(.is-container-docked):not([data-dock-edge]) .transparent-nest-grab:hover { background: rgba(255, 255, 255, .18); }
+#transparent-nest:not(.is-full):not(.is-container-docked):not([data-dock-edge]) .transparent-nest-grab::before {
 	width: 3px;
 	height: 3px;
 	border-radius: 50%;
