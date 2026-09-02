@@ -3809,6 +3809,49 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 + '<div class="transparent-nest-error-message">Something went wrong loading this content.</div>';
             body.appendChild(error);
 
+            // ── Host drag shield ─────────────────────────────────────────
+            // The iframe swallows every mouse event over the pixels it
+            // covers, so a drag implemented the usual way - listeners on the
+            // HOST document, no pointer capture - dies the moment the
+            // pointer crosses the panel: no more mousemove, and no mouseup
+            // either, which typically leaves whatever was being dragged
+            // stuck to the pointer afterwards. Reported live against
+            // Symfony's dev toolbar, which is draggable and sits above the
+            // overlay (z-index 9999999): dragging it froze the instant it
+            // reached the panel and never let go.
+            //
+            // The panel's OWN drags already solve this by making the frame
+            // inert while .is-dragging (see index.scss). A host-page widget
+            // cannot reach for that class, so arm the same shield on its
+            // behalf: a pointerdown landing on the host document makes the
+            // frame inert until the button comes back up. It costs the
+            // nested page nothing - the pointer is by definition NOT over
+            // the iframe at the moment a host pointerdown happens (one
+            // inside it never crosses the boundary at all, so it can never
+            // arm this), and press/release/click still works normally.
+            function shieldOff() {
+
+                if (container.classList.contains('is-host-dragging')) {
+                    container.classList.remove('is-host-dragging');
+                }
+            }
+
+            document.addEventListener('pointerdown', function(e) {
+                if (e.button !== 0) return;
+                if (container.classList.contains('is-parked')) return;
+                container.classList.add('is-host-dragging');
+            }, true);
+            // Captured on window so a release the page swallows still lifts
+            // the shield, plus the ways a drag can end without a pointerup
+            // reaching us at all (cancelled, released outside the window and
+            // noticed only on the next buttonless move, tabbed away).
+            window.addEventListener('pointerup', shieldOff, true);
+            window.addEventListener('pointercancel', shieldOff, true);
+            window.addEventListener('blur', shieldOff);
+            document.addEventListener('pointermove', function(e) {
+                if (e.buttons === 0) shieldOff();
+            }, true);
+
             // ── Panel interactions: move (drag the chrome bar), resize
             // (drag edges/corners), magnetic snap against viewport
             // sides/corners. All gated by Settings (nest_move/nest_resize/

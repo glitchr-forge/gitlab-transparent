@@ -415,8 +415,14 @@ html.nested { overflow: hidden; }
 #transparent-nest.is-movable .transparent-nest-chrome { cursor: grab; }
 #transparent-nest.is-dragging .transparent-nest-chrome { cursor: grabbing; }
 /* the shield: without it the drag dies the instant the pointer crosses
-   into the iframe (its document eats the events) */
-#transparent-nest.is-dragging iframe { pointer-events: none; }
+   into the iframe (its document eats the events). .is-host-dragging is the
+   same shield armed on behalf of the HOST page - any of its own draggable
+   widgets (Symfony's dev toolbar, floating above this overlay, is the one
+   that surfaced it) would otherwise freeze mid-drag over the panel and
+   never receive its mouseup. See the host-drag-shield block in
+   transparent.js. */
+#transparent-nest.is-dragging iframe,
+#transparent-nest.is-host-dragging iframe { pointer-events: none; }
 #transparent-nest.is-dragging { user-select: none; -webkit-user-select: none; }
 
 /* Invisible resize zones along the panel's edges/corners, INSIDE the
