@@ -3626,17 +3626,14 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             // PEEK_SHOW_MS is a dwell, not a debounce: "keep the mouse in
             // the corner". Passing through on the way somewhere else must
             // not flash the pill, so it is long enough to sit out a normal
-            // traverse. PEEK_HOLD_MS is the same dwell while the pointer
-            // rests on a control BELOW the pill (one of the nested page's,
-            // or one of the host's) - long enough that clicking that control
-            // always wins, short enough that parking the mouse there still
-            // summons the chrome eventually, which matters in fullscreen
-            // where the page's own corner may be nothing but buttons.
-            // PEEK_HIDE_MS is the opposite of both - leaving must be
+            // traverse. PEEK_HIDE_MS is the opposite - leaving must be
             // forgiving, or the pill vanishes in the gap between the corner
             // zone and the button the user is reaching for inside it.
-            var PEEK_SHOW_MS = 340, PEEK_HOLD_MS = 1000, PEEK_HIDE_MS = 340;
-            var peekShowTimer = null, peekHideTimer = null, peekShowDelay = 0;
+            // PEEK_YIELD_MS is that same exit taken in a hurry: the pointer
+            // has landed on a control the pill is covering, and every ms it
+            // stays up is a ms that control cannot be clicked.
+            var PEEK_SHOW_MS = 340, PEEK_HIDE_MS = 340, PEEK_YIELD_MS = 90;
+            var peekShowTimer = null, peekHideTimer = null, peekHideDelay = 0;
 
             // Anything the pointer could be aiming AT rather than merely
             // passing over. Matched against the element under the pointer -
@@ -3654,35 +3651,35 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             }
             container._peekIsControl = isControl;
 
-            function setPeek(on, slow) {
+            function setPeek(on, urgent) {
 
                 if (on) {
                     if (peekHideTimer) { clearTimeout(peekHideTimer); peekHideTimer = null; }
-                    if (container.classList.contains('is-chrome-peek')) return;
-                    var delay = slow ? PEEK_HOLD_MS : PEEK_SHOW_MS;
-                    // A dwell of the same kind is already counting down;
-                    // restarting it on every mousemove would turn the dwell
-                    // into a debounce and it would never fire. Crossing onto
-                    // (or off) a control IS a restart, on purpose: the extra
-                    // wait has to begin when the control is reached.
-                    if (peekShowTimer) {
-                        if (peekShowDelay === delay) return;
-                        clearTimeout(peekShowTimer);
-                    }
-                    peekShowDelay = delay;
+                    if (container.classList.contains('is-chrome-peek') || peekShowTimer) return;
                     peekShowTimer = setTimeout(function() {
                         peekShowTimer = null;
                         container.classList.add('is-chrome-peek');
-                    }, delay);
+                    }, PEEK_SHOW_MS);
                     return;
                 }
 
                 if (peekShowTimer) { clearTimeout(peekShowTimer); peekShowTimer = null; }
-                if (!container.classList.contains('is-chrome-peek') || peekHideTimer) return;
+                if (!container.classList.contains('is-chrome-peek')) return;
+                // A pending leave already counting down is left alone -
+                // restarting it on every mousemove would turn the delay into
+                // a debounce and it would never fire. Switching from the
+                // forgiving leave to the urgent yield (or back) IS a
+                // restart: the shorter deadline has to win.
+                var delay = urgent ? PEEK_YIELD_MS : PEEK_HIDE_MS;
+                if (peekHideTimer) {
+                    if (peekHideDelay === delay) return;
+                    clearTimeout(peekHideTimer);
+                }
+                peekHideDelay = delay;
                 peekHideTimer = setTimeout(function() {
                     peekHideTimer = null;
                     container.classList.remove('is-chrome-peek');
-                }, PEEK_HIDE_MS);
+                }, delay);
             }
 
             // Host-viewport coordinates. The zone hugs the panel's top-right
@@ -3695,6 +3692,17 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             // must stay hoverable whatever the fixed box above covers.
             function peekFromPoint(x, y, overControl) {
 
+                // A control under the pointer OWNS that pointer, wherever it
+                // is. The pill is opaque and, once shown, click-eating: put
+                // it over a button somebody is already hovering and it both
+                // hides the target and swallows the click meant for it. So
+                // this is a veto, not a longer dwell - an earlier version
+                // merely stretched the wait to a second and the pill still
+                // turned up on top of the control being used. Keyboard users
+                // are unaffected (:focus-within shows it) and Escape still
+                // closes the nest outright, so no state is unreachable.
+                if (overControl) { setPeek(false, true); return; }
+
                 var r = panel.getBoundingClientRect();
                 var inCorner = x >= r.right - PEEK_W && x <= r.right + PEEK_PAD
                             && y >= r.top - PEEK_ABOVE && y <= r.top + PEEK_BELOW;
@@ -3705,7 +3713,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                             && y >= c.top - PEEK_PAD && y <= c.bottom + PEEK_PAD;
                 }
 
-                setPeek(inCorner, !!overControl);
+                setPeek(inCorner);
             }
             container._peekFromPoint = peekFromPoint;
 
