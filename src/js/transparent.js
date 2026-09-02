@@ -3046,6 +3046,22 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             if (exitMs > 0) {
 
                 Transparent.html.addClass(Transparent.state.EXITING);
+
+                // Force the style change to be committed NOW. Adding a class
+                // only schedules a recalc, and the browser is free to defer it
+                // - which it does, because this moment is busy: measured 70ms
+                // of a 120ms window elapsing before the transition produced
+                // any movement at all, leaving ~50ms of visible slide that
+                // was then cut off at 75% of its travel. Reported, fairly, as
+                // the menu not sliding out.
+                //
+                // Reading a layout property flushes pending style and starts
+                // the transition in this frame, so the window that follows is
+                // animation time rather than mostly waiting. It costs one
+                // forced layout on a document that is about to be replaced
+                // anyway.
+                void Transparent.html[0].offsetHeight;
+
                 dispatchEvent(new Event('transparent:' + Transparent.state.EXITING));
 
                 setTimeout(swap, exitMs);
