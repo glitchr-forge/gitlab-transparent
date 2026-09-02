@@ -219,6 +219,28 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         "response_limit": 25,
         "throttle": 1000,
         "rescue_reload": 5000,
+        // ── Prefetch on intent ───────────────────────────────────────────
+        // Fetch a link's HTML when the pointer settles on it, so the server
+        // round-trip is already done (or well underway) by the time it is
+        // clicked. The existing response cache only ever helped Back: it is
+        // keyed by history uuid, so returning to a page you had already
+        // visited cost full price again - measured 2360ms for a first visit
+        // and 2301ms for a second visit to the SAME url, against 877ms for
+        // Back. Server time dominates a navigation, and this is the only
+        // lever that removes it rather than shortening what comes after.
+        //
+        // prefetch_delay is a dwell, not a debounce: sweeping the pointer
+        // across a list of links should not fire a request per link. 65ms is
+        // long enough to mean "aiming at this" and far shorter than the
+        // reaction time between deciding and clicking.
+        //
+        // prefetch_ttl bounds staleness. A prefetched page is HTML rendered
+        // before the click, so it can be out of date by the time it is used;
+        // short is safer, and a miss only costs a normal navigation.
+        "prefetch": true,
+        "prefetch_delay": 65,
+        "prefetch_ttl": 30000,
+        "prefetch_max": 15,
         // Milliseconds to hold `html.exiting` after the response arrives and
         // before the DOM is swapped, so the outgoing page can animate away.
         //
@@ -648,6 +670,145 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
     Transparent.clearLiveResponse = function() {
         Transparent._liveDomCache.clear();
     };
+
+    // ── Prefetch cache, keyed by URL ────────────────────────────────────
+    // Deliberately separate from the uuid-keyed caches above. Those answer
+    // "what did THIS history entry look like", which is the right question
+    // for Back and the wrong one for "am I about to be asked for this page".
+    // A url key is what lets a prefetch started on hover be claimed by the
+    // click that follows, and what lets a second visit to a page skip the
+    // server entirely.
+    Transparent._prefetchCache = new Map();
+    Transparent._prefetchInFlight = new Set();
+
+    Transparent.getPrefetched = function(href) {
+
+        var entry = Transparent._prefetchCache.get(href);
+        if (!entry) return null;
+
+        var ttl = parseInt(Settings["prefetch_ttl"], 10) || 0;
+        if (ttl > 0 && Date.now() - entry.ts > ttl) {
+            Transparent._prefetchCache.delete(href);
+            return null;
+        }
+
+        return entry.text;
+    };
+
+    Transparent.setPrefetched = function(href, text) {
+
+        if (!href || !text) return;
+        Transparent._prefetchCache.set(href, { text: text, ts: Date.now() });
+
+        var max = parseInt(Settings["prefetch_max"], 10) || 15;
+        while (Transparent._prefetchCache.size > max) {
+            var oldest = Transparent._prefetchCache.keys().next().value;
+            Transparent._prefetchCache.delete(oldest);
+        }
+    };
+
+    Transparent.clearPrefetched = function() {
+        Transparent._prefetchCache.clear();
+    };
+
+    // GET a page in the background and park its HTML under its url. Never
+    // throws and never reports: a prefetch that fails is simply a click that
+    // pays full price later, which is the behaviour without prefetch at all.
+    Transparent.prefetch = function(href) {
+
+        if (Settings["prefetch"] === false) return;
+        if (!href) return;
+        if (Transparent._prefetchCache.has(href)) return;
+        if (Transparent._prefetchInFlight.has(href)) return;
+        // Two at a time. A slow backend is exactly the case prefetch helps
+        // most and also the one where a hover-storm could pile requests onto
+        // an already-struggling server.
+        if (Transparent._prefetchInFlight.size >= 2) return;
+
+        Transparent._prefetchInFlight.add(href);
+
+        var request = new XMLHttpRequest();
+        request.open("GET", href, true);
+        // Marks it as a speculative fetch so a backend can tell it apart from
+        // a real navigation (skip write-side effects, analytics, etc.).
+        request.setRequestHeader("X-Purpose", "prefetch");
+        request.setRequestHeader("Purpose", "prefetch");
+
+        request.onreadystatechange = function() {
+
+            if (request.readyState !== 4) return;
+            Transparent._prefetchInFlight.delete(href);
+
+            if (request.status >= 200 && request.status < 300 && request.responseText)
+                Transparent.setPrefetched(href, request.responseText);
+        };
+
+        try { request.send(); }
+        catch (e) { Transparent._prefetchInFlight.delete(href); }
+    };
+
+    // Would clicking this anchor actually be an in-page navigation? Kept
+    // conservative on purpose - a wrong "yes" costs a pointless request to
+    // the server, and for anything with a side effect (a logout link, a
+    // form action) it could cost far more than that. Anything not clearly a
+    // plain GET navigation to another page of this site is left alone.
+    function isPrefetchable(a) {
+
+        if (!a || !a.getAttribute) return false;
+        if (a.hasAttribute("download")) return false;
+        if (a.getAttribute("data-no-prefetch") !== null) return false;
+
+        var target = a.getAttribute("target");
+        if (target && target !== "_self") return false;
+
+        var href = a.getAttribute("href");
+        if (!href || href.charAt(0) === "#") return false;
+
+        var url;
+        try { url = new URL(a.href, location.href); } catch (e) { return false; }
+
+        if (url.origin !== location.origin) return false;
+        if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+        // Same page - nothing to fetch.
+        if (url.href.split("#")[0] === location.href.split("#")[0]) return false;
+
+        var exceptions = Settings["exceptions"] || [];
+        if (exceptions.length && matchesPatternList(url.pathname, exceptions)) return false;
+
+        // Nest links open as an overlay through their own path; the main
+        // navigation cache is not what serves them.
+        var nest = Settings["nest"] || [];
+        if (nest.length && matchesPatternList(url.pathname, nest)) return false;
+
+        return true;
+    }
+
+    var prefetchTimer = null;
+
+    function onPrefetchIntent(e) {
+
+        if (Settings["prefetch"] === false) return;
+
+        var a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
+        if (!isPrefetchable(a)) return;
+
+        var href = new URL(a.href, location.href).href;
+
+        clearTimeout(prefetchTimer);
+        prefetchTimer = setTimeout(function() { Transparent.prefetch(href); },
+                                   parseInt(Settings["prefetch_delay"], 10) || 0);
+    }
+
+    document.addEventListener("mouseover", onPrefetchIntent, true);
+    document.addEventListener("mouseout", function() { clearTimeout(prefetchTimer); }, true);
+    // Touch has no hover, but touchstart still lands ~100ms before the click
+    // it becomes - enough to overlap the request with the tap. No dwell here:
+    // a finger already on the link IS the intent.
+    document.addEventListener("touchstart", function(e) {
+        if (Settings["prefetch"] === false) return;
+        var a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
+        if (isPrefetchable(a)) Transparent.prefetch(new URL(a.href, location.href).href);
+    }, { capture: true, passive: true });
 
     Transparent.setResponse = function(uuid, responseText, scrollableXY, exceptionRaised = false)
     {
@@ -2929,6 +3090,34 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             // guard passed it through as if it were still current -
             // confirmed live: the aborted request's error response was
             // reaching Transparent.rescue() instead of being discarded.
+            // Already fetched on hover (or on an earlier visit)? Feed it
+            // through the same path popstate uses - park the HTML under this
+            // navigation's uuid and call handleResponse with no xhr - so the
+            // click costs a swap and nothing else. GET only: a POST is a
+            // write and must never be answered from a cache.
+            if (type !== "POST") {
+
+                var prefetched = Transparent.getPrefetched(url.href);
+                if (prefetched) {
+
+                    currentNavUuid = uuid;
+                    Transparent.setResponseText(uuid, prefetched);
+
+                    // Passing a stand-in rather than null for `xhr`, and the
+                    // reason is load-bearing: handleResponse gates
+                    // history.pushState on `if (xhr)`. That is right for the
+                    // popstate path it was written for - the browser has
+                    // already moved history, so pushing again would corrupt
+                    // it - but this is a FORWARD navigation that still has to
+                    // push. With null the swap ran and the URL never changed,
+                    // so the click appeared to do nothing at all.
+                    //
+                    // responseURL is the only property read off it (twice),
+                    // so a one-field stand-in is the whole contract.
+                    return handleResponse(uuid, 200, type, data, { responseURL: url.href });
+                }
+            }
+
             var previousXhr = currentXhr;
 
             var xhr = new XMLHttpRequest();
