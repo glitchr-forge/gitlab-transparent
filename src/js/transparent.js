@@ -1512,6 +1512,85 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         });
     }
 
+    // External scripts a swap has inserted that have not run yet - drained
+    // by whenScriptsSettled() at the end of that same swap.
+    var pendingScripts = [];
+    var SCRIPT_SETTLE_TIMEOUT = 10000;
+
+    // Moves a node from a freshly parsed response document into the live
+    // one. Anything but a <script> is a plain clone. A <script> has to be
+    // created here, in this document: the parser already marked the parsed
+    // one "already started", so appending it as-is would never run it.
+    // jQuery's append() used to paper over that by fetching node.src itself
+    // with a synchronous XHR and eval'ing the text - which happened to run
+    // the script BEFORE the swap dispatched its synthetic 'load'. Except
+    // inside a srcdoc iframe (Transparent.nest): location.href there is the
+    // opaque "about:srcdoc", jQuery's same-origin test fails against it and
+    // its cross-domain fallback is an async <script> tag instead - the
+    // bundle then ran AFTER 'load', so every widget that initialises on
+    // that event (the admin's select2 fields, seen live) had already missed
+    // its cue, with nothing logged anywhere. A real script element loads
+    // the same way in both contexts; async=false keeps insertion order
+    // between several of them (defer/async attributes mean nothing on a
+    // dynamically inserted script), and the pending list lets the swap
+    // hold its 'load' until they have actually run.
+    Transparent.adoptNode = function(node, target) {
+
+        if (node.tagName !== 'SCRIPT') {
+            var clone = node.cloneNode(true);
+            target.appendChild(clone);
+            return clone;
+        }
+
+        var script = document.createElement('script');
+        for (var i = 0; i < node.attributes.length; i++)
+            script.setAttribute(node.attributes[i].name, node.attributes[i].value);
+
+        if (node.hasAttribute('src')) {
+
+            script.async = false;
+
+            var done = false, waiting = [];
+            var settle = function() { done = true; while (waiting.length) waiting.shift()(); };
+            script.addEventListener('load', settle);
+            script.addEventListener('error', settle); // a 404 must not hang the page
+            pendingScripts.push(function(callback) { done ? callback() : waiting.push(callback); });
+
+        } else {
+
+            script.text = node.text;
+        }
+
+        target.appendChild(script);
+        return script;
+    };
+
+    // Runs `callback` once every script adoptNode() inserted since the last
+    // call has loaded (or failed), or after SCRIPT_SETTLE_TIMEOUT regardless.
+    // Synchronous when nothing is pending, so a swap that brought no new
+    // scripts keeps exactly the timing it always had.
+    Transparent.whenScriptsSettled = function(callback) {
+
+        var pending = pendingScripts.splice(0);
+        if (!pending.length) return callback();
+
+        var remaining = pending.length;
+        var fired = false;
+        var fire = function() {
+            if (fired) return;
+            fired = true;
+            clearTimeout(timer);
+            callback();
+        };
+        var timer = setTimeout(function() {
+            if (Settings.debug) console.warn('Transparent: scripts still loading after ' + SCRIPT_SETTLE_TIMEOUT + 'ms, continuing without them');
+            fire();
+        }, SCRIPT_SETTLE_TIMEOUT);
+
+        for (var i = 0; i < pending.length; i++)
+            pending[i](function() { if (--remaining === 0) fire(); });
+    };
+
     Transparent.evalScript = function(el)
     {
         function scriptCloneEl(el){
@@ -1944,22 +2023,10 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
                 $("head").children().each(function() { found |= this.isEqualNode(el); });
                 if(!found) {
-
-
-                    if(this.tagName != "SCRIPT" || Settings["global_code"] == true) {
-
-                        var clone = this.cloneNode(true);
-                        $("head").append(clone);
-                        // Register the new node as "original" so it falls
-                        // through to URL-pattern matching on the next swap
-                        // (and isn't auto-locked as third-party content).
-                        originalHeadNodes.add(clone);
-
-                    } else {
-
-                        $("head").append(this);
-                        originalHeadNodes.add(this);
-                    }
+                    // Register the new node as "original" so it falls
+                    // through to URL-pattern matching on the next swap
+                    // (and isn't auto-locked as third-party content).
+                    originalHeadNodes.add(Transparent.adoptNode(this, document.head));
                 }
             });
 
@@ -1970,14 +2037,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 var found = false;
 
                 $("body").children().each(function() { found |= this.isEqualNode(el); });
-                if(!found) {
-
-                    if(this.tagName != "SCRIPT" || Settings["global_code"] == true) {
-                        $("body").append(this.cloneNode(true));
-                    } else {
-                        $("body").append(this);
-                    }
-                }
+                if(!found) Transparent.adoptNode(this, document.body);
             });
 
             // Replace canvases..
@@ -2007,8 +2067,6 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             oldPage.remove();
 
             if(Settings["global_code"] == true) Transparent.evalScript($(page)[0]);
-            document.dispatchEvent(new Event('DOMContentLoaded'));
-              window.dispatchEvent(new Event('DOMContentLoaded'));
 
             Transparent.addLayout();
 
@@ -2070,17 +2128,20 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
             }, 0); }); /* end rAF + setTimeout - see the comment above it */
 
-            $('head').append(function() {
+            // Held until every external script this swap brought in has run
+            // (see adoptNode) - the same order a real page load gives them:
+            // deferred scripts first, DOMContentLoaded, then load.
+            Transparent.whenScriptsSettled(function() {
 
-                $(Settings.identifier).append(function() {
+                document.dispatchEvent(new Event('DOMContentLoaded'));
+                  window.dispatchEvent(new Event('DOMContentLoaded'));
 
-                        // Callback if needed, or any other actions
-                        callback();
+                // Callback if needed, or any other actions
+                callback();
 
-                        // Trigger onload event
-                        dispatchEvent(new Event('transparent:load'));
-                        dispatchEvent(new Event('load'));
-                });
+                // Trigger onload event
+                dispatchEvent(new Event('transparent:load'));
+                dispatchEvent(new Event('load'));
             });
 
         }.bind(this);
@@ -2971,7 +3032,33 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                     try {
                         var stillWithinNestScope = !Settings.nest || !Settings.nest.length || matchesPatternList(new URL(responseURL).pathname, Settings.nest);
                         if (parent.Transparent && parent.Transparent.nest && parent.Transparent.nest.isOpen() && stillWithinNestScope) {
-                            parent.history.pushState({ nest: { href: responseURL } }, '', parent.location.href);
+
+                            // Keep this document's <base> (injected by the
+                            // host's mount(), see injectBaseTag) on the page
+                            // actually shown, so document.baseURI - what
+                            // currentPathname() and every relative URL
+                            // resolve against - follows the navigation.
+                            var base = document.querySelector('head > base');
+                            if (base) base.setAttribute('href', responseURL);
+
+                            // The host owns the overlay's history and URL:
+                            // it records which page the overlay now shows
+                            // (what share/Back/resume all key on) and only
+                            // commits the address bar to it once the panel
+                            // is full-page - see nest.notifyNavigated. The
+                            // fallback covers a host still running a
+                            // transparent without it: the panel floating
+                            // over the page keeps the host's own URL, a
+                            // full-page one (share/"expand") visibly IS the
+                            // page and tracks every navigation into the
+                            // address bar.
+                            if (parent.Transparent.nest.notifyNavigated) {
+                                parent.Transparent.nest.notifyNavigated(responseURL, dom.title);
+                            } else {
+                                var nestContainer = parent.Transparent.nest.getContainer && parent.Transparent.nest.getContainer();
+                                var isFullPage = nestContainer && nestContainer.classList.contains('is-full');
+                                parent.history.pushState({ nest: { href: responseURL } }, '', isFullPage ? responseURL : parent.location.href);
+                            }
                         }
                     } catch (err) {
                         if (Settings.debug) console.error('Transparent: parent.history.pushState failed from inside nest', err);
@@ -3314,6 +3401,33 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         api.owns = function(e) {
             if (e.type != 'popstate') return false;
             return closing || api.isOpen() || (e.state && e.state.nest) != null;
+        };
+
+        // Called from INSIDE the nested iframe, by its own transparentJS,
+        // after every in-overlay SPA navigation (the iframe's own history
+        // is a dead end - see the srcdoc comment in the xhr success
+        // handler). Records the page the overlay now shows - the share
+        // button commits it, the popstate handler compares against it,
+        // resume() matches on it; all three were stuck on the page the
+        // overlay was OPENED with, so expanding after a few clicks inside
+        // committed that first page's URL - and gives it its own entry in
+        // the host's history. The address bar follows only while the panel
+        // is full-page; floating, it is "just a panel" over the host page
+        // and the host's own URL stays.
+        api.notifyNavigated = function(href, title) {
+
+            var container = api.getContainer();
+            if (container == null) return false;
+
+            container._currentHref = href;
+            if (title) document.title = title;
+
+            var full = container.classList.contains('is-full');
+            try { history.pushState({ nest: { href: href } }, '', full ? href : location.href); }
+            catch (e) { if (Settings.debug) console.error('Transparent.nest: pushState failed', e); }
+
+            dispatchEvent(new CustomEvent('transparent:nest:navigated', { detail: { href: href, committed: full } }));
+            return true;
         };
 
         // The nested page renders inside a same-origin IFRAME: full CSS/JS
@@ -4272,7 +4386,15 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // (absolute `/...` paths, which this app uses almost everywhere,
         // resolve identically with or without one).
         function injectBaseTag(html, href) {
-            var baseTag = '<base href="' + String(href).replace(/"/g, '&quot;') + '">';
+            // data-headlock: the nested page's own transparentJS swaps its
+            // <head> on every in-overlay navigation and drops whatever the
+            // new page didn't declare - no page declares this tag, so
+            // without the lock it was gone after the first click and
+            // document.baseURI fell back to the HOST page's URL (the srcdoc
+            // fallback), pointing currentPathname() and every relative
+            // reference at the wrong page. The nested side moves the href
+            // along as it navigates (see its xhr success handler).
+            var baseTag = '<base href="' + String(href).replace(/"/g, '&quot;') + '" data-headlock="true">';
             if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, function (m) { return m + baseTag; });
             if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, function (m) { return m + baseTag; });
             return baseTag + html;
