@@ -1512,8 +1512,8 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         });
     }
 
-    // External scripts a swap has inserted that have not run yet - drained
-    // by whenScriptsSettled() at the end of that same swap.
+    // External scripts (and stylesheets) a swap has inserted that have not
+    // loaded yet - drained by whenScriptsSettled() at the end of that swap.
     var pendingScripts = [];
     var SCRIPT_SETTLE_TIMEOUT = 10000;
 
@@ -1534,10 +1534,30 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
     // between several of them (defer/async attributes mean nothing on a
     // dynamically inserted script), and the pending list lets the swap
     // hold its 'load' until they have actually run.
+    // Holds the swap's 'load' until `el` - a <script src> or a stylesheet
+    // <link> - has loaded or failed (a 404 must not hang the page). Attach
+    // BEFORE inserting the element: a cached asset can finish immediately.
+    function awaitAsset(el) {
+        var done = false, waiting = [];
+        var settle = function() { done = true; while (waiting.length) waiting.shift()(); };
+        el.addEventListener('load', settle);
+        el.addEventListener('error', settle);
+        pendingScripts.push(function(callback) { done ? callback() : waiting.push(callback); });
+    }
+
     Transparent.adoptNode = function(node, target) {
 
         if (node.tagName !== 'SCRIPT') {
             var clone = node.cloneNode(true);
+            // A stylesheet that lands after the reveal is the script problem
+            // seen from the other side: a layout switch brings in the new
+            // layout's own sheets, and until they apply, the fresh DOM sits
+            // in whatever the sheets already present make of it - a
+            // hamburger toggle that a breakpoint sheet hides on desktop
+            // popped in, bounced, then vanished (Safari, layout2/3 ->
+            // layout1). The reveal now waits for them like it does for
+            // scripts; cached sheets settle within a frame or two.
+            if (node.tagName === 'LINK' && /\bstylesheet\b/i.test(node.getAttribute('rel') || '') && node.getAttribute('href')) awaitAsset(clone);
             target.appendChild(clone);
             return clone;
         }
@@ -1549,12 +1569,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         if (node.hasAttribute('src')) {
 
             script.async = false;
-
-            var done = false, waiting = [];
-            var settle = function() { done = true; while (waiting.length) waiting.shift()(); };
-            script.addEventListener('load', settle);
-            script.addEventListener('error', settle); // a 404 must not hang the page
-            pendingScripts.push(function(callback) { done ? callback() : waiting.push(callback); });
+            awaitAsset(script);
 
         } else {
 
@@ -1565,8 +1580,9 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         return script;
     };
 
-    // Runs `callback` once every script adoptNode() inserted since the last
-    // call has loaded (or failed), or after SCRIPT_SETTLE_TIMEOUT regardless.
+    // Runs `callback` once every script and stylesheet adoptNode() inserted
+    // since the last call has loaded (or failed), or after
+    // SCRIPT_SETTLE_TIMEOUT regardless.
     // Synchronous when nothing is pending, so a swap that brought no new
     // scripts keeps exactly the timing it always had.
     Transparent.whenScriptsSettled = function(callback) {
