@@ -686,7 +686,10 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
     // click that follows, and what lets a second visit to a page skip the
     // server entirely.
     Transparent._prefetchCache = new Map();
-    Transparent._prefetchInFlight = new Set();
+    // href -> { xhr, waiters:[] }. A Set until claimPrefetch() needed a
+    // handle on the request itself, so a click can adopt a prefetch that is
+    // still on the wire instead of racing it with a duplicate GET.
+    Transparent._prefetchInFlight = new Map();
 
     Transparent.getPrefetched = function(href) {
 
@@ -732,9 +735,12 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // an already-struggling server.
         if (Transparent._prefetchInFlight.size >= 2) return;
 
-        Transparent._prefetchInFlight.add(href);
-
         var request = new XMLHttpRequest();
+        // The entry holds the request and anyone waiting on it, not just the
+        // url - see claimPrefetch() below for why that matters.
+        var entry = { xhr: request, waiters: [] };
+        Transparent._prefetchInFlight.set(href, entry);
+
         request.open("GET", href, true);
         // Marks it as a speculative fetch so a backend can tell it apart from
         // a real navigation (skip write-side effects, analytics, etc.).
@@ -746,12 +752,46 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             if (request.readyState !== 4) return;
             Transparent._prefetchInFlight.delete(href);
 
-            if (request.status >= 200 && request.status < 300 && request.responseText)
-                Transparent.setPrefetched(href, request.responseText);
+            var text = (request.status >= 200 && request.status < 300) ? request.responseText : null;
+            if (text) Transparent.setPrefetched(href, text);
+
+            // Hand the result to whoever claimed this prefetch mid-flight.
+            // A null text means it failed or was aborted; the waiter then
+            // falls back to a real request of its own, which is exactly the
+            // behaviour it would have had with no prefetch running.
+            var waiters = entry.waiters;
+            entry.waiters = [];
+            for (var i = 0; i < waiters.length; i++) {
+                try { waiters[i](text); } catch (e) {}
+            }
         };
 
         try { request.send(); }
         catch (e) { Transparent._prefetchInFlight.delete(href); }
+    };
+
+    // "I am navigating to href right now - is a prefetch of it already on
+    // the wire?" Returns the in-flight XHR (and calls back with its HTML, or
+    // null if it fails) when there is one, null otherwise.
+    //
+    // Without this, hovering a link and clicking it before the prefetch
+    // lands fired a SECOND, identical GET: getPrefetched() only ever looked
+    // in the finished-responses cache, so an in-flight prefetch was
+    // invisible to the click that caused it. Measured on beta with the
+    // article PREV/NEXT buttons, that is two full renders of the same page
+    // back to back (2070ms + 1924ms) - the user waits for the second one
+    // while the first is still being thrown away, and the server does the
+    // work twice. Any link slower to render than the eye is quick to click
+    // hits this, which is why it looked like "it sends a new request instead
+    // of going the lazy way".
+    Transparent.claimPrefetch = function(href, onSettled) {
+
+        var entry = Transparent._prefetchInFlight.get(href);
+        if (!entry) return null;
+
+        entry.waiters.push(onSettled);
+
+        return entry.xhr;
     };
 
     // Would clicking this anchor actually be an in-page navigation? Kept
@@ -3251,6 +3291,66 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                     // responseURL is the only property read off it (twice),
                     // so a one-field stand-in is the whole contract.
                     return handleResponse(uuid, 200, type, data, { responseURL: url.href });
+                }
+
+                // Not finished, but already ON THE WIRE - the usual case for
+                // a link the user hovered and clicked straight away. Adopt
+                // that request instead of opening a second identical one:
+                // waiting on it costs whatever is left of it, racing it cost
+                // a whole new render (see claimPrefetch's own comment).
+                var claimedXhr = Transparent.claimPrefetch(url.href, function(text) {
+
+                    // A newer click has happened since; this response is no
+                    // longer what the user is waiting for. handleResponse
+                    // would discard it on the same uuid check anyway - this
+                    // just avoids the work.
+                    if (currentNavUuid !== uuid) return;
+
+                    // Failed or aborted: pay full price with a real request,
+                    // which is exactly where this click would have been with
+                    // no prefetch running at all. Issued here rather than by
+                    // re-entering __main__ - history has already been pushed
+                    // for this navigation, and __main__ takes the original
+                    // event, not a url.
+                    if (!text) {
+
+                        var retryXhr = new XMLHttpRequest();
+                        currentXhr = retryXhr;
+
+                        return jQuery.ajax({
+                            url: url.href,
+                            type: type,
+                            data: data,
+                            contentType: false,
+                            processData: false,
+                            headers: Settings["headers"] || {},
+                            xhr: function () { return retryXhr; },
+                            success: function (html, status, request) { return handleResponse(uuid, request.status, type, data, retryXhr, request); },
+                            error:   function (request, ajaxOptions, thrownError) { return handleResponse(uuid, request.status, type, data, retryXhr, request); }
+                        });
+                    }
+
+                    Transparent.setResponseText(uuid, text);
+                    handleResponse(uuid, 200, type, data, { responseURL: url.href });
+                });
+
+                if (claimedXhr) {
+
+                    var supersededXhr = currentXhr;
+
+                    // Same ordering rule as the plain-request path below:
+                    // claim THIS navigation first, then abort the previous
+                    // one, because an abort can fire its error callback
+                    // synchronously and that callback compares against
+                    // currentNavUuid as it stands at that moment.
+                    currentXhr = claimedXhr;
+                    currentNavUuid = uuid;
+
+                    if (supersededXhr && supersededXhr !== claimedXhr) {
+                        try { supersededXhr.abort(); } catch (err) {}
+                    }
+
+                    return claimedXhr;
                 }
             }
 
