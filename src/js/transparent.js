@@ -237,23 +237,18 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // prefetch_ttl bounds staleness. A prefetched page is HTML rendered
         // before the click, so it can be out of date by the time it is used;
         // short is safer, and a miss only costs a normal navigation.
+        //
+        // OPT-IN, link by link: only an anchor carrying rel="prefetch" is
+        // ever fetched ahead. A GET is not free of consequences on the
+        // server (a logout link IS a logout, a page render IS a page view in
+        // the analytics), and every fetch is a full render the visitor may
+        // never look at - so the page author names the few links worth it
+        // (a "next article" button, say) rather than the library guessing.
+        // "prefetch": false switches the whole mechanism off.
         "prefetch": true,
         "prefetch_delay": 65,
         "prefetch_ttl": 30000,
         "prefetch_max": 15,
-        // Paths that are navigated normally on click but must NEVER be
-        // fetched on a mere hover or touchstart: any GET that changes state
-        // on the server. A prefetched /logout IS a logout - silent, while
-        // the page keeps drawing itself signed-in - and the form the user
-        // then fills in posts as an anonymous visitor and is lost. Matched
-        // against the pathname with the same wildcards as `exceptions`;
-        // consumers add their own (e.g. "/cart/remove/*").
-        "prefetch_exceptions": ["/logout*"],
-        // Where a submission lands when the session had died under the
-        // form. formMemory keeps that form's draft to fill it back in once
-        // the user has signed in and the form is on screen again (a page
-        // showing a password field counts as well).
-        "form_memory_login": ["/login*"],
         // Milliseconds to hold `html.exiting` after the response arrives and
         // before the DOM is swapped, so the outgoing page can animate away.
         //
@@ -807,16 +802,16 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         return entry.xhr;
     };
 
-    // Would clicking this anchor actually be an in-page navigation? Kept
-    // conservative on purpose - a wrong "yes" costs a pointless request to
-    // the server, and for anything with a side effect (a logout link, a
-    // form action) it could cost far more than that. Anything not clearly a
-    // plain GET navigation to another page of this site is left alone.
+    // May this anchor be fetched before it is clicked? Only when its author
+    // said so (rel="prefetch"), and only if the click would be a plain GET
+    // navigation to another page of this site. Conservative on purpose: a
+    // wrong "yes" is at best a wasted render, at worst a side effect the
+    // user never asked for.
     function isPrefetchable(a) {
 
         if (!a || !a.getAttribute) return false;
+        if (!/(^|\s)prefetch(\s|$)/.test(a.getAttribute("rel") || "")) return false;
         if (a.hasAttribute("download")) return false;
-        if (a.getAttribute("data-no-prefetch") !== null) return false;
 
         var target = a.getAttribute("target");
         if (target && target !== "_self") return false;
@@ -834,13 +829,6 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
         var exceptions = Settings["exceptions"] || [];
         if (exceptions.length && matchesPatternList(url.pathname, exceptions)) return false;
-
-        // Side-effecting GETs (see Settings.prefetch_exceptions). Also honour
-        // rel="nofollow": it is the long-standing way to tell crawlers not to
-        // follow a link that acts, and a prefetch is a crawler in miniature.
-        var noPrefetch = Settings["prefetch_exceptions"] || [];
-        if (noPrefetch.length && matchesPatternList(url.pathname, noPrefetch)) return false;
-        if (/(^|\s)nofollow(\s|$)/.test(a.getAttribute("rel") || "")) return false;
 
         // Nest links open as an overlay through their own path; the main
         // navigation cache is not what serves them.
@@ -2446,11 +2434,12 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
     // Clear: only once the SERVER HAS ANSWERED the submission and the answer
     // has been looked at (settle(), on the load that follows a submit) - never
     // at submit time. Accepted (the form is back on screen, or the user was
-    // sent elsewhere than a login page) → gone. Bounced to a login page (the
-    // session had died under the form; prod 2026-09-11 lost two comment
-    // replies exactly that way) → kept as `lost`, filled back in the next time
-    // that form is on screen. No answer at all (network error, rescue) → stays
-    // a plain draft. Plus TTL expiry (7 days) and `Transparent.formMemory.clear(form)`.
+    // sent elsewhere than a sign-in page) → gone. Bounced to a sign-in page -
+    // recognised by its password field, no path is assumed - (the session had
+    // died under the form; prod 2026-09-11 lost two comment replies exactly
+    // that way) → kept as `lost`, filled back in the next time that form is on
+    // screen. No answer at all (network error, rescue) → stays a plain draft.
+    // Plus TTL expiry (7 days) and `Transparent.formMemory.clear(form)`.
     //
     // Same-named forms (Symfony renders every instance of a type under one
     // name, e.g. a reply form per comment) are told apart by their `action`.
@@ -2529,9 +2518,8 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             } catch (e) {}
         }
 
+        // A page asking for a password is a sign-in page, whatever its URL.
         function isLoginPage() {
-            var patterns = Settings["form_memory_login"] || [];
-            if (patterns.length && matchesPatternList(location.pathname, patterns)) return true;
             return !!document.querySelector('form input[type="password"]');
         }
 
@@ -2688,7 +2676,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             // server has the text.
             if (keysOnPage()[pending.key]) { removeLS(pending.key); return; }
 
-            // Bounced to a login page: the session had died under the form.
+            // Bounced to a sign-in page: the session had died under the form.
             // Keep the text for when the form is back.
             if (isLoginPage()) {
                 var entry;
