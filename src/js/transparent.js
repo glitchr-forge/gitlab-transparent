@@ -241,6 +241,14 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         "prefetch_delay": 65,
         "prefetch_ttl": 30000,
         "prefetch_max": 15,
+        // Paths that are navigated normally on click but must NEVER be
+        // fetched on a mere hover or touchstart: any GET that changes state
+        // on the server. A prefetched /logout IS a logout - silent, while
+        // the page keeps drawing itself signed-in - and the form the user
+        // then fills in posts as an anonymous visitor and is lost. Matched
+        // against the pathname with the same wildcards as `exceptions`;
+        // consumers add their own (e.g. "/cart/remove/*").
+        "prefetch_exceptions": ["/logout*"],
         // Milliseconds to hold `html.exiting` after the response arrives and
         // before the DOM is swapped, so the outgoing page can animate away.
         //
@@ -821,6 +829,13 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
         var exceptions = Settings["exceptions"] || [];
         if (exceptions.length && matchesPatternList(url.pathname, exceptions)) return false;
+
+        // Side-effecting GETs (see Settings.prefetch_exceptions). Also honour
+        // rel="nofollow": it is the long-standing way to tell crawlers not to
+        // follow a link that acts, and a prefetch is a crawler in miniature.
+        var noPrefetch = Settings["prefetch_exceptions"] || [];
+        if (noPrefetch.length && matchesPatternList(url.pathname, noPrefetch)) return false;
+        if (/(^|\s)nofollow(\s|$)/.test(a.getAttribute("rel") || "")) return false;
 
         // Nest links open as an overlay through their own path; the main
         // navigation cache is not what serves them.
