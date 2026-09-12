@@ -249,6 +249,11 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // against the pathname with the same wildcards as `exceptions`;
         // consumers add their own (e.g. "/cart/remove/*").
         "prefetch_exceptions": ["/logout*"],
+        // Where a submission lands when the session had died under the
+        // form. formMemory keeps that form's draft to fill it back in once
+        // the user has signed in and the form is on screen again (a page
+        // showing a password field counts as well).
+        "form_memory_login": ["/login*"],
         // Milliseconds to hold `html.exiting` after the response arrives and
         // before the DOM is swapped, so the outgoing page can animate away.
         //
@@ -1711,6 +1716,9 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
     {
         console.error("Rescue mode.. called");
         rescueMode = true;
+        // Whatever was being submitted got no usable answer: its draft must
+        // survive the reload below.
+        if (Transparent.formMemory) Transparent.formMemory.abandon();
 
         var head = $(dom).find("head").html();
         var body = $(dom).find("body").html();
@@ -2435,8 +2443,17 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
     // Restored fields get `data-restored-from-draft=""` for optional
     // project-level toast / styling.
     //
-    // Clear: on form submit + on TTL expiry (7 days) + manually via
-    // `Transparent.formMemory.clear(form)`.
+    // Clear: only once the SERVER HAS ANSWERED the submission and the answer
+    // has been looked at (settle(), on the load that follows a submit) - never
+    // at submit time. Accepted (the form is back on screen, or the user was
+    // sent elsewhere than a login page) → gone. Bounced to a login page (the
+    // session had died under the form; prod 2026-09-11 lost two comment
+    // replies exactly that way) → kept as `lost`, filled back in the next time
+    // that form is on screen. No answer at all (network error, rescue) → stays
+    // a plain draft. Plus TTL expiry (7 days) and `Transparent.formMemory.clear(form)`.
+    //
+    // Same-named forms (Symfony renders every instance of a type under one
+    // name, e.g. a reply form per comment) are told apart by their `action`.
     //
     // Opt-out:
     //   - `<form data-no-persist>` — entire form skipped
@@ -2484,7 +2501,47 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         }
 
         function getKey(form) {
-            return KEY_PREFIX + location.pathname + ':' + (form.name || form.id);
+            return KEY_PREFIX + location.pathname + ':' + (form.name || form.id) + actionSuffix(form);
+        }
+
+        // Whatever the form's action adds to the page's own URL - a fragment
+        // (`#<comment-uuid>`), a query, another path. Empty for a form that
+        // posts to its own page, so keys written before this existed still match.
+        function actionSuffix(form) {
+            var action = form.getAttribute ? form.getAttribute('action') : null;
+            if (!action) return '';
+            var u;
+            try { u = new URL(action, location.href); } catch (e) { return ''; }
+            var suffix = (u.pathname !== location.pathname ? u.pathname : '') + u.search + u.hash;
+            return suffix ? '@' + suffix : '';
+        }
+
+        // This tab's submission awaiting its verdict. sessionStorage, not
+        // localStorage: another tab must neither settle nor discard it.
+        var PENDING_KEY = KEY_PREFIX + 'pending';
+        function readPending() {
+            try { return JSON.parse(sessionStorage.getItem(PENDING_KEY)); } catch (e) { return null; }
+        }
+        function writePending(value) {
+            try {
+                if (value) sessionStorage.setItem(PENDING_KEY, JSON.stringify(value));
+                else sessionStorage.removeItem(PENDING_KEY);
+            } catch (e) {}
+        }
+
+        function isLoginPage() {
+            var patterns = Settings["form_memory_login"] || [];
+            if (patterns.length && matchesPatternList(location.pathname, patterns)) return true;
+            return !!document.querySelector('form input[type="password"]');
+        }
+
+        function keysOnPage() {
+            var keys = {};
+            var forms = document.querySelectorAll('form');
+            for (var i = 0; i < forms.length; i++) {
+                if (!shouldSkipForm(forms[i])) keys[getKey(forms[i])] = true;
+            }
+            return keys;
         }
 
         function readLS(key) {
@@ -2595,7 +2652,60 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                     field.setAttribute('data-restored-from-draft', '');
                 }
             });
+
+            // A `lost` draft is back where it belongs: from here it is an
+            // ordinary draft again, and its next submit gets its own verdict.
+            if (entry.s) {
+                delete entry.s;
+                writeLS(key, JSON.stringify(entry));
+            }
         };
+
+        // Submit is not a verdict: flush the debounced save so the draft is
+        // exactly what went out, and note that THIS tab owes a verdict.
+        api.markSent = function(form) {
+            if (!api.enabled) return;
+            if (shouldSkipForm(form)) return;
+            var timer = saveTimers.get(form);
+            if (timer) { clearTimeout(timer); saveTimers.delete(form); }
+            api.save(form);
+            writePending({ key: getKey(form), t: Date.now() });
+        };
+
+        // The verdict, read off the page that followed the submission. Runs
+        // before any restore so a draft never fills the form it was just
+        // accepted from.
+        api.settle = function() {
+            var pending = readPending();
+            if (!pending) return;
+            writePending(null);
+
+            var raw = readLS(pending.key);
+            if (!raw) return;
+
+            // The form is on screen again: accepted (redirect-after-post), or
+            // re-rendered by the server with its own values. Either way the
+            // server has the text.
+            if (keysOnPage()[pending.key]) { removeLS(pending.key); return; }
+
+            // Bounced to a login page: the session had died under the form.
+            // Keep the text for when the form is back.
+            if (isLoginPage()) {
+                var entry;
+                try { entry = JSON.parse(raw); } catch (e) { removeLS(pending.key); return; }
+                entry.s = 'lost';
+                entry.t = Date.now();
+                writeLS(pending.key, JSON.stringify(entry));
+                return;
+            }
+
+            // Accepted and sent somewhere else (a thank-you page).
+            removeLS(pending.key);
+        };
+
+        // No answer came (network error, rescue reload): nothing to judge,
+        // the draft stays a draft and comes back with the page.
+        api.abandon = function() { writePending(null); };
 
         api.clear = function(form) {
             if (!form) return;
@@ -2604,6 +2714,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         };
 
         api.restoreAll = function() {
+            api.settle();
             var forms = document.querySelectorAll('form');
             for (var i = 0; i < forms.length; i++) api.restore(forms[i]);
         };
@@ -2659,11 +2770,12 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             debouncedSave(e.target.form);
         }, true);
 
-        // Successful submit clears the draft. We listen in capture so we
-        // run before any user-side submit handler that might cancel.
+        // A submit only ARMS the verdict (see settle()); the draft itself
+        // outlives the request. Capture phase, so it runs before any
+        // user-side submit handler that might cancel.
         document.addEventListener('submit', function(e) {
             if (e.target && e.target.tagName === 'FORM') {
-                api.clear(e.target);
+                api.markSent(e.target);
             }
         }, true);
 
