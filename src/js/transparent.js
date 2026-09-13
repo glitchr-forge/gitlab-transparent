@@ -2981,7 +2981,6 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 e.preventDefault();
                 return;
             }
-            inFlightForm = form;
 
             data = new FormData();
             var formAmbiguity = $("form[name='"+form.name+"']").length > 1;
@@ -3020,11 +3019,8 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             if ($(e.target).hasClass(Transparent.state.RELOAD)) return;
             if ($(form).hasClass(Transparent.state.RELOAD)) return;
 
-            // Disabled on EVERY submission, not only the ones that arrive as a
-            // "submit" event: a click on a type="submit" button is handled by
-            // findLink() and reaches here as a click, which is the common case
-            // and was the one left unguarded.
-            $(form).find(':submit').attr('disabled', 'disabled');
+            // The buttons are disabled further down, once the request is
+            // actually being dispatched - see the comment there.
         }
 
         // Specific page exception
@@ -3521,6 +3517,23 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
                     return claimedXhr;
                 }
+            }
+
+            // Claimed and disabled HERE, not where the submission was first
+            // recognised. Everything between the two is a guard that can still
+            // decline this navigation (an excepted path, a foreign origin, a
+            // RELOAD-classed form), and disabling a submit button before
+            // knowing whether a request will actually go out leaves the form
+            // both unsubmitted and unusable - a browser will not submit
+            // through a disabled button either, so the press is simply lost.
+            // Measured on /login: the button went grey and nothing was sent.
+            //
+            // Disabled on every submission, not only the ones arriving as a
+            // "submit" event: a click on a type="submit" button is what
+            // findLink() handles, and that path was the one left unguarded.
+            if (form) {
+                inFlightForm = form;
+                $(form).find(':submit').attr('disabled', 'disabled');
             }
 
             var previousXhr = currentXhr;
