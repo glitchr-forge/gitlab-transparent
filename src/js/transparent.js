@@ -1705,8 +1705,9 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         console.error("Rescue mode.. called");
         rescueMode = true;
         // Whatever was being submitted got no usable answer: its draft must
-        // survive the reload below.
+        // survive the reload below, and the form must be usable again.
         if (Transparent.formMemory) Transparent.formMemory.abandon();
+        releaseInFlightForm();
 
         var head = $(dom).find("head").html();
         var body = $(dom).find("body").html();
@@ -2378,6 +2379,19 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
     var currentNavUuid = null;
     var formSubmission = false;
 
+    // The form whose submission is currently on the wire, if any. A navigation
+    // aborts whatever navigation preceded it (see __main__), so a second press
+    // during a slow POST -> redirect -> GET cycle cancels the page the first
+    // press was loading and sends the whole form again - which files the same
+    // record twice. One submission per form at a time; released as soon as any
+    // answer arrives, so a failed one can be retried.
+    var inFlightForm = null;
+    function releaseInFlightForm() {
+        if (!inFlightForm) return;
+        try { $(inFlightForm).find(":submit").removeAttr("disabled"); } catch (e) {}
+        inFlightForm = null;
+    }
+
     // ── User-typed form dirty tracking ──────────────────────────────────────
     //
     // True if the user has modified any form input via a real keystroke /
@@ -2940,6 +2954,16 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
         if (form) {
 
+            // Already sending this one. Left to run, the navigation started
+            // below would abort the in-flight one and post the form a second
+            // time (production, 2026-09-12: one reply filed three times while
+            // the author waited on a slow render).
+            if (inFlightForm === form) {
+                e.preventDefault();
+                return;
+            }
+            inFlightForm = form;
+
             data = new FormData();
             var formAmbiguity = $("form[name='"+form.name+"']").length > 1;
             
@@ -2977,8 +3001,11 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             if ($(e.target).hasClass(Transparent.state.RELOAD)) return;
             if ($(form).hasClass(Transparent.state.RELOAD)) return;
 
-            if(e.type == "submit") // NB: This doesn't work if a button is generated afterward.. 
-                $(form).find(':submit').attr('disabled', 'disabled');
+            // Disabled on EVERY submission, not only the ones that arrive as a
+            // "submit" event: a click on a type="submit" button is handled by
+            // findLink() and reaches here as a click, which is the common case
+            // and was the one left unguarded.
+            $(form).find(':submit').attr('disabled', 'disabled');
         }
 
         // Specific page exception
@@ -3076,6 +3103,9 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             // navigation before applying it.
             if (uuid !== currentNavUuid) return;
             if (currentXhr === xhr) currentXhr = null;
+
+            // An answer arrived - whatever it says, this form is free again.
+            releaseInFlightForm();
 
             var responseURL;
             responseURL = xhr !== null ? xhr.responseURL : url.href;
