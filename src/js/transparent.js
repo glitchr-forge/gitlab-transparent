@@ -1264,10 +1264,20 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
             case "INPUT":
             case "BUTTON":
-                var domainBaseURI = el.baseURI.split('/').slice(0, 3).join('/');
-                var domainFormAction = el.formAction.split('/').slice(0, 3).join('/');
+                // Where the form goes: the button's own formaction, else the
+                // form's action, else the page. Not el.formAction - by the HTML
+                // spec that property falls back to the DOCUMENT's address, not
+                // the form's, so every form whose action is not the page it
+                // sits on was sent to that page instead: a forum search posted
+                // to the forum index, a vote to the page listing the votes.
+                var owner = el.form || $(el).closest("form")[0];
+                var actionAttribute = el.getAttribute("formaction") || (owner ? owner.getAttribute("action") : null);
+                var formAction = actionAttribute ? new URL(actionAttribute, el.baseURI).href : el.formAction;
 
-                var pathname = el.formAction.replace(domainFormAction, "");
+                var domainBaseURI = el.baseURI.split('/').slice(0, 3).join('/');
+                var domainFormAction = formAction.split('/').slice(0, 3).join('/');
+
+                var pathname = formAction.replace(domainFormAction, "");
                 if(!pathname) return null;
 
                 if (domainBaseURI == domainFormAction && el.getAttribute("type") == "submit") {
@@ -1284,9 +1294,17 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                         return null;
                     }
 
+                    // The form's own method. This was a hardcoded POST, so a
+                    // <form method="get"> submitted by its button - or by Enter,
+                    // which the browser turns into a click on that button - went
+                    // out as a POST and lost its query: every search box came
+                    // back empty. A form that names no method keeps POST, as it
+                    // always had here.
+                    var method = (el.getAttribute("formmethod") || form.getAttribute("method") || "POST").toUpperCase();
+
                     var pat  = /^https?:\/\//i;
-                    if (pat.test(href)) return ["POST", new URL(pathname), form];
-                    return ["POST", new URL(pathname, currentOrigin()), form];
+                    if (pat.test(href)) return [method, new URL(pathname), form];
+                    return [method, new URL(pathname, currentOrigin()), form];
                 }
         }
 
@@ -3016,6 +3034,26 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             // Force page reload
             formSubmission = true; // mark as form submission
             formTrigger = e.target;
+
+            // A GET carries its fields in the address, not in a body. The
+            // request below goes out with processData: false, which leaves
+            // `data` untouched - and a GET has no body - so a GET form's
+            // fields were silently dropped. Put in the query instead, exactly
+            // as a browser would (the form's data replaces the action's own
+            // query), the result is also a real address: reload, back button
+            // and sharing all keep the search. A file cannot travel in an
+            // address and is left out, as a browser leaves it out of a GET.
+            if (String(type).toUpperCase() === "GET" && data instanceof FormData) {
+                var query = new URLSearchParams();
+                data.forEach(function (value, name) {
+                    // A control without a name - the submit button usually -
+                    // is not a field: a browser leaves it out, and kept it
+                    // put a stray "=" on the end of every search address.
+                    if (name && typeof value === "string") query.append(name, value);
+                });
+                url.search = query.toString();
+                data = undefined;
+            }
             if ($(e.target).hasClass(Transparent.state.RELOAD)) return;
             if ($(form).hasClass(Transparent.state.RELOAD)) return;
 
