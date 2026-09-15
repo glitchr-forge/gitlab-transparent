@@ -347,15 +347,14 @@ html.nested { overflow: hidden; }
 	height: 14px;
 	margin-right: 4px;
 	border-radius: 50%;
-	border: 2px solid rgba(0, 0, 0, 0.15);
-	border-top-color: #444;
+	/* Light in both schemes, like .transparent-nest-btn: it sits on the
+	   chrome's dark pill, where the old #444 on a dark ring was invisible. */
+	border: 2px solid rgba(255, 255, 255, 0.25);
+	border-top-color: #f2f4f7;
 	animation: transparent-nest-spin 0.7s linear infinite;
 	align-self: center;
 }
 #transparent-nest.is-busy .transparent-nest-busy { display: inline-block; }
-@media (prefers-color-scheme: dark) {
-	.transparent-nest-busy { border-color: rgba(255, 255, 255, 0.2); border-top-color: #ddd; }
-}
 
 /* ── Panel interactions: move / resize / magnetic snap ─────────────────
    The first drag "frees" the panel out of flex centering into explicit

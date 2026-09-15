@@ -1108,7 +1108,8 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         window.previousScroll = {top: scrollTop, left: scrollLeft};
 
         if($(Transparent.html).hasClass(Transparent.state.FIRST)) {
-            Transparent.scrollToHash(location.hash, {}, function() {
+            // A reload already went back to where the page was left.
+            Transparent.scrollToHash(reloadRestored ? "" : location.hash, {}, function() {
                 Transparent.activeOut(() => Transparent.html.removeClass(Transparent.state.FIRST));
             });
         }
@@ -2889,6 +2890,27 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
     function currentPathname() { return new URL(document.baseURI).pathname; }
     function currentSearch() { return new URL(document.baseURI).search; }
 
+    // From inside a nest iframe: hand a navigation whose target is outside
+    // the nest's scope to the host (nest.leave) and report whether it was
+    // taken. The host's own Settings.nest decides the scope; the iframe's
+    // copy is only the fallback for a host that cannot be reached.
+    function leaveNest(url) {
+
+        if (location.origin !== 'null') return false;
+
+        try {
+            var host = parent.Transparent && parent.Transparent.nest;
+            if (host && host.leave && host.isOpen()) {
+                if (host.inScope(url.href)) return false;
+                return host.leave(url.href);
+            }
+        } catch (err) {}
+
+        if (!Settings.nest || !Settings.nest.length || matchesPatternList(url.pathname, Settings.nest)) return false;
+        try { window.top.location.href = url.href; } catch (err) { return false; }
+        return true;
+    }
+
     // Shared by Settings.exceptions (__main__) and Settings.nest
     // (Transparent.nest) - both are lists of RegExp objects or wildcard
     // strings ('*' matches any sequence, everything else literal), tested
@@ -2928,6 +2950,12 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // while an overlay is open (or the state targets one), the host page
         // underneath must not be swapped
         if (Transparent.nest && Transparent.nest.owns(e)) return;
+
+        // ...and one it has already dealt with itself. Which of the two
+        // popstate handlers runs first differs between engines (see the nest
+        // listener), so the nest marks the events it handles, and replays
+        // the ones that also need a page swap through a copy of its own.
+        if (e.type == Transparent.state.POPSTATE && e.transparentNestHandled) return;
 
         // Determine link
         const link = Transparent.findLink(e);
@@ -3092,25 +3120,17 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         if (url.origin != currentOrigin()) return;
 
         // Inside a nest iframe (Transparent.nest's overlay), a link whose
-        // target falls OUTSIDE the nest's own configured scope
-        // (Settings.nest, e.g. "/admin*") isn't a page the nest should ever
-        // render itself - it's the user leaving the nested app back toward
-        // the host site. Close the overlay and let the HOST page navigate
-        // there for real, instead of AJAX-swapping the iframe's own content
-        // to something it was never scoped for (previously: a link back to
-        // "/" rendered the public homepage INSIDE the admin overlay).
-        if (location.origin === 'null' && Settings.nest && Settings.nest.length && !matchesPatternList(url.pathname, Settings.nest)) {
+        // target falls OUTSIDE the nest's scope (Settings.nest, e.g.
+        // "/admin*") is the user leaving the nested app for the host site.
+        // The overlay closes and the HOST navigates there, as an ordinary
+        // page of its own, while the overlay's history entry is kept: Back
+        // brings the overlay back exactly as it was left (nest.leave).
+        // Rendering that page inside the iframe instead is what showed the
+        // main website looping inside the overlay. A POST goes out from
+        // here as usual - its answer is checked the same way in
+        // handleResponse, since leaving would re-send it as a GET.
+        if (location.origin === 'null' && String(type).toUpperCase() !== "POST" && leaveNest(url)) {
             e.preventDefault();
-            try {
-                if (parent.Transparent && parent.Transparent.nest) {
-                    parent.Transparent.nest.close(false);
-                    parent.window.location.href = url.href;
-                } else {
-                    window.top.location.href = url.href;
-                }
-            } catch (err) {
-                window.top.location.href = url.href;
-            }
             return;
         }
 
@@ -3278,6 +3298,19 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 return Transparent.rescue(dom);
             }
 
+            // A nested navigation that ended up outside the nest's scope
+            // (a redirect after saving, typically) leaves the overlay rather
+            // than showing the host site inside it - see leaveNest().
+            if (xhr && location.origin === 'null') {
+                var landedOutside = false;
+                try { landedOutside = leaveNest(new URL(responseURL)); } catch (err) {}
+                if (landedOutside) {
+                    Transparent.html.removeClass(Transparent.state.LOADING);
+                    Transparent.activeOut();
+                    return;
+                }
+            }
+
             // From here the page is valid..
             // so the new page is added to history..
             //
@@ -3327,6 +3360,11 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                             // resolve against - follows the navigation.
                             var base = document.querySelector('head > base');
                             if (base) base.setAttribute('href', responseURL);
+
+                            // A POST answer is not replayed: Back to it fetches the page.
+                            if (String(method).toUpperCase() !== "POST")
+                                nestRecord({ uuid: uuid, status: status, method: method, data: {}, href: responseURL });
+                            else nestCurrent = null;
 
                             // The host owns the overlay's history and URL:
                             // it records which page the overlay now shows
@@ -3452,16 +3490,17 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             return swap();
         }
 
-        if(history.state && !Transparent.hasResponse(history.state.uuid))
-            Transparent.setResponse(history.state.uuid, Transparent.html[0], Transparent.getScrollableElementXY());
+        var shownEntry = currentEntry();
+        if(shownEntry && shownEntry.uuid && !Transparent.hasResponse(shownEntry.uuid))
+            Transparent.setResponse(shownEntry.uuid, Transparent.html[0], Transparent.getScrollableElementXY());
 
         // This append on user click (e.g. when user push a link)
         // It is null when dev is pushing or replacing state
         var addNewState = !e.state;
         if (addNewState) {
 
-            if(history.state)
-                Transparent.setResponse(history.state.uuid, Transparent.html[0], Transparent.getScrollableElementXY());
+            if(shownEntry && shownEntry.uuid)
+                Transparent.setResponse(shownEntry.uuid, Transparent.html[0], Transparent.getScrollableElementXY());
 
             $(Transparent.html).prop("user-scroll", false); // make sure to avoid page jump during transition (cancelled in activeIn callback)
 
@@ -3620,8 +3659,12 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // there's no actual staleness race here, but handleResponse's
         // uuid check would still spuriously discard this if
         // currentNavUuid weren't also updated for this path.
-        currentNavUuid = history.state.uuid;
-        return handleResponse(history.state.uuid, history.state.status, history.state.method, history.state.data);
+        //
+        // e.state, not history.state: for a real popstate they are the same
+        // object, but the nest module replays a HOST entry while the
+        // current entry is its own (see nest.reopen).
+        currentNavUuid = e.state.uuid;
+        return handleResponse(e.state.uuid, e.state.status, e.state.method, e.state.data);
     }
 
     // Update history if not refreshing page or different page (avoid double pushState)
@@ -3642,6 +3685,135 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             history.replaceState({uuid: uuidv4(), status: history.state ? history.state.status : 200, data:{}, method: history.state ? history.state.method : "GET", href: location.origin + location.pathname + location.hash}, '', location.origin + location.pathname + location.hash);
     } catch (e) {
         if (Settings.debug) console.error('Transparent: initial replaceState failed (likely a srcdoc iframe) - continuing without it', e);
+    }
+
+    // The entry this document was loaded as. currentNavUuid only exists once
+    // a navigation has happened; the nest compares against whichever page the
+    // host is actually showing (see nest.reopen).
+    var initialUuid = history.state && history.state.uuid ? history.state.uuid : null;
+
+    // ── History of a nest iframe ─────────────────────────────────────────
+    // A srcdoc iframe has no history of its own (pushState throws there), so
+    // the entry it is showing and the pages it has shown are kept here: the
+    // outgoing page is cached under its entry like on the host, and the host
+    // replays one on Back/Forward (nest.replayInFrame) as an ordinary cached
+    // swap. Without it every history step inside the overlay downloaded the
+    // page again and reloaded the whole iframe, scripts and styles included.
+    var nestCurrent = null;
+    var nestEntries = {};
+
+    function nestKey(href) {
+        try { return new URL(href, document.baseURI).href; } catch (e) { return href; }
+    }
+
+    function nestRecord(state) {
+        nestCurrent = state;
+        nestEntries[nestKey(state.href)] = state;
+    }
+
+    // The entry the document is showing: history.state on the host, the
+    // recorded one inside a nest iframe.
+    function currentEntry() {
+        return location.origin === 'null' ? nestCurrent : history.state;
+    }
+
+    if (location.origin === 'null') {
+        nestRecord({ uuid: uuidv4(), status: 200, method: "GET", data: {}, href: document.baseURI });
+    }
+
+    // Whether this nest iframe can show href again from its cache.
+    Transparent.nestCanReplay = function(href) {
+        var state = nestEntries[nestKey(href)];
+        if (!state) return false;
+        if (nestCurrent && nestKey(nestCurrent.href) === nestKey(href)) return true;
+        return Transparent.hasResponse(state.uuid);
+    };
+
+    // Show href again from the cache, as a Back/Forward step. Called by the
+    // host; returns false when there is nothing cached to show.
+    Transparent.nestReplay = function(href) {
+
+        if (!isReady || !Transparent.nestCanReplay(href)) return false;
+
+        var state = nestEntries[nestKey(href)];
+        if (nestCurrent === state) return true;
+
+        // Kept as it is now, not as it was first cached: Forward comes back to it.
+        if (nestCurrent && nestCurrent.uuid)
+            Transparent.setResponse(nestCurrent.uuid, Transparent.html[0], Transparent.getScrollableElementXY());
+
+        var base = document.querySelector('head > base');
+        if (base) base.setAttribute('href', state.href);
+        nestCurrent = state;
+
+        addEventListener('transparent:load', function() {
+            try { parent.document.title = document.title; } catch (e) {}
+        }, { once: true });
+
+        __main__({ type: Transparent.state.POPSTATE, state: state, preventDefault: function() {} });
+        return true;
+    };
+
+    // ── Reload keeps the scroll position ─────────────────────────────────
+    // The browser's own restoration cannot be relied on: it restores against
+    // a document that is still growing (deferred bundles, images), and any
+    // page that sets history.scrollRestoration = "manual" turns it off for
+    // every later reload of that entry. So the position is saved when the
+    // page goes, and put back on a reload of the same address - at once,
+    // again when the DOM is parsed and again once everything has loaded, and
+    // no more after the visitor scrolls, clicks or types themselves.
+    //
+    // Stored in sessionStorage["transparent[reload]"] as {href, top, left}:
+    // a page script that runs before this bundle (to avoid painting the top
+    // of the page first) may read it too. Transparent.getReloadPosition()
+    // returns it when this load is such a reload, null otherwise.
+    var RELOAD_KEY = 'transparent[reload]';
+    var reloadRestored = false;
+
+    Transparent.getReloadPosition = function() {
+        try {
+            var entry = performance.getEntriesByType('navigation')[0];
+            if (!entry || entry.type !== 'reload') return null;
+            var saved = JSON.parse(sessionStorage.getItem(RELOAD_KEY) || 'null');
+            if (!saved || saved.href !== location.href) return null;
+            return { top: +saved.top || 0, left: +saved.left || 0 };
+        } catch (e) {
+            return null;
+        }
+    };
+
+    if (location.origin !== 'null') { // not inside a nest iframe: the host owns the scroll
+
+        window.addEventListener('pagehide', function() {
+            try {
+                sessionStorage.setItem(RELOAD_KEY, JSON.stringify({ href: location.href, top: window.scrollY, left: window.scrollX }));
+            } catch (e) {}
+        });
+
+        (function() {
+            var position = Transparent.getReloadPosition();
+            if (!position) return;
+
+            reloadRestored = true;
+
+            var USER_EVENTS = ['wheel', 'touchstart', 'keydown', 'mousedown'];
+            var stopped = false;
+            var stop = function() {
+                stopped = true;
+                USER_EVENTS.forEach(function(type) { window.removeEventListener(type, stop, true); });
+            };
+            var apply = function() { if (!stopped) window.scrollTo(position.left, position.top); };
+
+            USER_EVENTS.forEach(function(type) { window.addEventListener(type, stop, { capture: true, passive: true }); });
+
+            apply();
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', apply, { once: true });
+            if (document.readyState !== 'complete') {
+                window.addEventListener('load', function() { apply(); setTimeout(function() { apply(); stop(); }, 0); }, { once: true });
+            } else {
+                setTimeout(function() { apply(); stop(); }, 0);
+            }
+        })();
     }
 
     if($("html").hasClass(Transparent.state.DISABLE))
@@ -3740,6 +3912,79 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // and resume() at the bottom of this module.
         var parked = null;
 
+        // The overlay's own classes on <html> must survive a swap of the
+        // host page underneath it (nest.reopen replays one while it opens).
+        [HTML_CLASS, 'nest-docked', 'nest-loading'].forEach(function(name) { Persist.add(name); });
+
+        // Every nest history entry remembers the HOST entry under the
+        // overlay ({uuid, href, ...}). Once the overlay has been left for
+        // another page (api.leave), Back onto a nest entry has to put that
+        // page back under the overlay, not just re-show the overlay over
+        // whatever the host is showing now.
+        function hostStateNow() {
+            var state = history.state;
+            if (state && state.nest) return state.nest.host || null;
+            return state && state.uuid ? state : null;
+        }
+
+        function nestState(href, container) {
+            return { nest: { href: href, host: container && container._hostState ? container._hostState : null } };
+        }
+
+        function shownHostUuid() {
+            return currentNavUuid || initialUuid;
+        }
+
+        // A host entry replayed as though Back/Forward had landed on it. A
+        // copy of the event, not the event: __main__ skips the real one once
+        // the nest has marked it.
+        function replayHost(state) {
+            __main__({ type: Transparent.state.POPSTATE, state: state, preventDefault: function() {} });
+        }
+
+        // Back/Forward onto a nest entry with no overlay showing: put the host
+        // page it was over back if another one is showing, then bring the
+        // overlay back - the parked session when it is still that page,
+        // otherwise a fresh open.
+        function reopen(state) {
+            var host = state.host;
+            if (host && host.uuid && host.uuid !== shownHostUuid()) replayHost(host);
+
+            // The parked session, when it is on that page or can go back to it
+            // from its own cache - resume() alone would also accept the page it
+            // was OPENED with while showing another one.
+            var container = parked;
+            if (container && (sameTarget(state.href, container._currentHref) || canReplayInFrame(container, state.href))) {
+                resume(container._currentHref);
+                if (!sameTarget(state.href, container._currentHref)) replayInFrame(container, state.href);
+                return;
+            }
+
+            fetchNested(state.href, function() { window.location.href = state.href; });
+        }
+
+        function innerTransparent(container) {
+            try {
+                var frame = container.querySelector('.transparent-nest-body iframe');
+                return frame && frame.contentWindow ? frame.contentWindow.Transparent || null : null;
+            } catch (e) { return null; }
+        }
+
+        function canReplayInFrame(container, href) {
+            var inner = innerTransparent(container);
+            try { return !!(inner && inner.nestCanReplay && inner.nestCanReplay(href)); } catch (e) { return false; }
+        }
+
+        // A Back/Forward step inside the overlay, served by the nested page's
+        // own transparent from its cache instead of a new fetch and mount.
+        function replayInFrame(container, href) {
+            var inner = innerTransparent(container);
+            try { if (!inner || !inner.nestReplay || !inner.nestReplay(href)) return false; }
+            catch (e) { return false; }
+            container._currentHref = href;
+            return true;
+        }
+
         api.isOpen = function() {
             var el = document.getElementById(CONTAINER_ID);
             // a container mid-close-fade doesn't count as "open" - a fast
@@ -3787,7 +4032,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             if (title) document.title = title;
 
             var full = container.classList.contains('is-full');
-            try { history.pushState({ nest: { href: href } }, '', full ? href : location.href); }
+            try { history.pushState(nestState(href, container), '', full ? href : location.href); }
             catch (e) { if (Settings.debug) console.error('Transparent.nest: pushState failed', e); }
 
             dispatchEvent(new CustomEvent('transparent:nest:navigated', { detail: { href: href, committed: full } }));
@@ -3835,6 +4080,8 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             // the page this session was opened WITH, kept alongside the one
             // it has since navigated to - resume() accepts either
             container._openHref = href;
+            // the host entry this overlay sits over - see hostStateNow()
+            container._hostState = hostStateNow();
 
             // Standard modal convention: clicking the dimmed backdrop
             // (outside the panel) closes the nest. `e.target !== container`
@@ -4035,8 +4282,8 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 // pushed yet), push one now instead - replacing there
                 // would destroy the HOST's own entry.
                 try {
-                    if (history.state && history.state.nest) history.replaceState({ nest: { href: target } }, '', target);
-                    else history.pushState({ nest: { href: target } }, '', target);
+                    if (history.state && history.state.nest) history.replaceState(nestState(target, container), '', target);
+                    else history.pushState(nestState(target, container), '', target);
                 } catch (err) {}
             });
             chromeBar.appendChild(shareBtn);
@@ -4056,7 +4303,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             collapseBtn.addEventListener('click', function(e) {
                 e.preventDefault();
                 if (preShareHref) {
-                    try { history.replaceState({ nest: { href: container._currentHref } }, '', preShareHref); } catch (err) {}
+                    try { history.replaceState(nestState(container._currentHref, container), '', preShareHref); } catch (err) {}
                     preShareHref = null;
                 }
                 restoreDefault();
@@ -4778,6 +5025,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 frame = document.createElement('iframe');
                 frame.setAttribute('title', title || 'nested');
                 body.appendChild(frame);
+                frame.addEventListener('load', function() { guardFrameLocation(container, frame); });
             }
 
             // Reveal only once the iframe has actually finished loading -
@@ -4952,6 +5200,42 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             try { frame.contentDocument.addEventListener('keydown', handleEscKeydown, true); } catch (e) {}
         }
 
+        // The overlay only ever shows documents it mounted itself (srcdoc). A
+        // real navigation inside the iframe - anything the nested page's
+        // transparent did not handle - loads a document of its own there, with
+        // a real origin, and without the guards a nested page relies on. A page
+        // outside the nest's scope leaves the overlay for the host (api.leave);
+        // one inside it is mounted again, like any nested page.
+        function guardFrameLocation(container, frame) {
+
+            var href;
+            try { href = frame.contentWindow.location.href; } catch (e) { return; }
+
+            if (api.getContainer() !== container) return;
+
+            if (!href || href === 'about:srcdoc' || href === 'about:blank') {
+                // A mounted document: hide it the moment it starts unloading,
+                // so a real navigation never shows its page inside the panel.
+                try {
+                    frame.contentWindow.addEventListener('pagehide', function() {
+                        if (closing || api.getContainer() !== container) return;
+                        container.classList.remove('is-entering');
+                        container.classList.add('is-loading');
+                    });
+                } catch (e) {}
+                return;
+            }
+
+            if (api.inScope(href)) {
+                fetchNested(href, function() { window.location.href = href; });
+                return;
+            }
+
+            // Nothing worth parking: the iframe holds the host's page now.
+            container._mounted = false;
+            if (!api.leave(href)) window.location.href = href;
+        }
+
         // Called by the nested page itself - `parent.Transparent.notifyNestReady()`
         // - once it knows it's visually complete. Authoritative: pre-empts
         // the automatic load+settle heuristic in mount(). A no-op if there's
@@ -5051,7 +5335,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 // already pushed the nest entry itself - pushing a second
                 // one here would strand an extra Back press.
                 if (fresh && !(history.state && history.state.nest)) {
-                    history.pushState({ nest: { href: url } }, '', location.href);
+                    history.pushState(nestState(url, container), '', location.href);
                 }
                 done();
             };
@@ -5155,6 +5439,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             var container = parked;
             parked = null;
             container.classList.remove('is-parked', 'is-closing');
+            container._hostState = hostStateNow();
 
             hostTitle = document.title;
             hostOverflow = document.body.style.overflow;
@@ -5168,7 +5453,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             // the nest history entry was popped by the close - put an
             // equivalent one back so Back still closes the overlay
             if (!(history.state && history.state.nest)) {
-                try { history.pushState({ nest: { href: container._currentHref } }, '', location.href); } catch (e) {}
+                try { history.pushState(nestState(container._currentHref, container), '', location.href); } catch (e) {}
             }
 
             if (container._updateChromePlacement) container._updateChromePlacement();
@@ -5305,6 +5590,61 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             dispatchEvent(new CustomEvent('transparent:nest:close'));
         };
 
+        // Whether a URL belongs in the overlay (Settings.nest).
+        api.inScope = function(href) {
+            try { return matchesPatternList(new URL(href, location.href).pathname, Settings.nest); }
+            catch (e) { return false; }
+        };
+
+        // Leave the overlay for a page outside its scope - called from INSIDE
+        // the nested iframe (leaveNest). The overlay closes without popping
+        // its history entry and is parked, and the host navigates to the page
+        // like any link of its own, pushing a new entry after the overlay's.
+        // Back then lands on that entry again and brings the overlay back over
+        // the page it was opened on (reopen); Forward closes it again and goes
+        // back to the page it was left for (the popstate listener below).
+        api.leave = function(href) {
+
+            var container = api.getContainer();
+            if (container == null) return false;
+
+            var target;
+            try { target = new URL(href, location.href); } catch (e) { return false; }
+
+            // Leaving for the very page under the overlay is simply closing it.
+            var host = container._hostState;
+            var hostHref = host && host.href ? host.href : location.href;
+            try {
+                var under = new URL(hostHref, location.href);
+                if (target.origin + target.pathname + target.search === under.origin + under.pathname + under.search) {
+                    api.close();
+                    return true;
+                }
+            } catch (e) {}
+
+            api.close(false);
+
+            // The page under the overlay is going away through a navigation
+            // __main__ does not see it leave (history.state is the overlay's
+            // entry, which has no uuid), so keep it here for Back to replay.
+            if (host && host.uuid) {
+                try { Transparent.setResponse(host.uuid, Transparent.html[0], Transparent.getScrollableElementXY()); } catch (e) {}
+            }
+
+            dispatchEvent(new CustomEvent('transparent:nest:leave', { detail: { href: target.href } }));
+
+            // Through a real link of the host document: every rule a click
+            // follows applies (exceptions, a different layout, a full load
+            // as the fallback when transparent is off).
+            var anchor = document.createElement('a');
+            anchor.href = target.href;
+            anchor.hidden = true;
+            document.body.appendChild(anchor);
+            try { anchor.click(); } finally { anchor.remove(); }
+
+            return true;
+        };
+
         // host-side half of the ESC handler - see handleEscKeydown's own
         // comment for why the iframe-side half is attached separately,
         // inside mount(), on every single mount rather than once here
@@ -5342,7 +5682,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             // see currentOrigin()). A nested document must never open a
             // second overlay level, regardless of how a consumer configures
             // Settings.nest inside it.
-            if (location.origin === 'null') return;
+            if (location.origin === 'null') { leaveFromFrame(e); return; }
             if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
             if (e.defaultPrevented) return;
 
@@ -5362,6 +5702,35 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 window.location.href = url.href;
             }
         }, true);
+
+        // Inside a nest iframe: a click on a link that leaves the nest's scope
+        // leaves the overlay, whatever the nested page's own transparent would
+        // have done with it - an excepted path, a .reload link, transparent
+        // disabled on that page. Each of those used to fall through to a real
+        // navigation of the iframe, which showed the host site inside the
+        // overlay. A new tab, a download or an explicit target stays the
+        // browser's; the frame's load guard (guardFrameLocation) catches
+        // whatever still gets through, a native form submission for one.
+        function leaveFromFrame(e) {
+
+            if (e.defaultPrevented || e.button) return;
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+
+            var anchor = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+            if (anchor == null || anchor.hasAttribute('download')) return;
+
+            var target = (anchor.getAttribute('target') || '').toLowerCase();
+            if (target && target !== '_self') return;
+
+            var url;
+            try { url = new URL(anchor.getAttribute('href'), document.baseURI); } catch (_) { return; }
+            if (url.origin !== currentOrigin()) return;
+
+            if (leaveNest(url)) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+            }
+        }
 
         // Back closes the overlay; __main__ defers to api.owns() for every
         // popstate the overlay is involved in
@@ -5383,11 +5752,16 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             // `closing===true` during their synchronous handling, regardless
             // of relative order; only after the event has fully finished
             // dispatching does the flag actually clear.
-            if (closing) { setTimeout(function() { closing = false; }, 0); return; }
+            if (closing) { e.transparentNestHandled = true; setTimeout(function() { closing = false; }, 0); return; }
 
             if (api.isOpen()) {
+                e.transparentNestHandled = true;
                 if (!(e.state && e.state.nest)) {
                     api.close(false);                  // back onto the host entry
+                    // Forward onto the page the overlay was left for
+                    // (api.leave), or any host entry other than the page the
+                    // overlay sits over: swap the host to it as well.
+                    if (e.state && e.state.uuid && e.state.uuid !== shownHostUuid()) replayHost(e.state);
                     return;
                 }
                 // Back/Forward landed on a DIFFERENT internal nest page
@@ -5402,16 +5776,18 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 // is already this exact entry).
                 var container = api.getContainer();
                 var target = e.state.nest.href;
-                if (container && container._currentHref !== target) {
+                if (container && !sameTarget(container._currentHref, target) && !replayInFrame(container, target)) {
                     fetchNested(target, function () { window.location.href = target; });
                 }
                 return;
             }
 
             if (e.state && e.state.nest) {
-                // forward into a nested entry with no overlay mounted
-                // (e.g. after a reload): fall back to a real navigation
-                window.location.href = e.state.nest.href;
+                // Back/Forward onto an overlay entry with no overlay showing:
+                // it was left for another page (api.leave), or the page was
+                // reloaded since. Bring it back over the page it was on.
+                e.transparentNestHandled = true;
+                reopen(e.state.nest);
             }
         }, true);
 
