@@ -3019,14 +3019,32 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
             formInput.each(function() {
 
-                if(this.tagName == "BUTTON") {
+                // Only what a browser would send (the HTML form data set). Every
+                // control went in whatever its state: both radios of a POUR /
+                // CONTRE choice were posted, and PHP kept the last - on
+                // Chapaland every vote POUR was filed CONTRE, every wedding OUI
+                // answered "non". A box or a radio goes only when ticked, a
+                // control without a name or disabled not at all, and of the
+                // buttons only the one that was pressed.
+                if (!this.name || this.disabled) return;
+
+                if(this.tagName == "BUTTON" || this.type == "submit" || this.type == "image") {
 
                     if(this == e.target) data.append(this.name, this.value);
+
+                } else if(this.type == "checkbox" || this.type == "radio") {
+
+                    if(this.checked) data.append(this.name, this.value);
 
                 } else if(this.type == "file") {
 
                     for(var i = 0; i < this.files.length; i++)
                         data.append(this.name, this.files[i]);
+
+                } else if(this.tagName == "SELECT" && this.multiple) {
+
+                    for(var j = 0; j < this.options.length; j++)
+                        if(this.options[j].selected) data.append(this.name, this.options[j].value);
 
                 } else data.append(this.name, this.value);
             });
