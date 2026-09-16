@@ -1143,6 +1143,72 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         return layout.data("layout");
     }
 
+    /**
+     * Why the browser refuses a form: each invalid control as "name: message".
+     *
+     * "Invalid form submission." on its own said nothing about WHICH field,
+     * and the browser's own bubble is easily missed - it appears at the
+     * control, which may be off screen, and the next scroll dismisses it. The
+     * reasons are the browser's own (validationMessage), so they read in the
+     * visitor's language.
+     */
+    Transparent.formInvalidity = function (form) {
+
+        var reasons = [];
+        var controls = form.querySelectorAll("input, select, textarea");
+
+        for (var i = 0; i < controls.length; i++) {
+
+            var control = controls[i];
+            if (control.willValidate === false || control.checkValidity()) continue;
+
+            reasons.push((control.name || control.id || control.type) + ": " + control.validationMessage);
+        }
+
+        return reasons;
+    }
+
+    /**
+     * Refuse a submission the browser has already refused, and SAY SO.
+     *
+     * Returning null here stops the submission for good: the page is never
+     * sent, and whatever else would have shown the reason does not run. In a
+     * plain form the browser's own interactive validation follows the click
+     * and puts its bubble on the first invalid control, but a form submitted
+     * by script - a jQuery .submit(), a requestSubmit() - never reaches it,
+     * and the visitor is left with a button that does nothing and an error in
+     * a console they will never open. reportValidity() is that same bubble,
+     * asked for explicitly: it names the control, focuses it and brings it on
+     * screen. Guarded, because a control that cannot be focused (hidden, in a
+     * closed disclosure) makes the browser refuse to show anything.
+     */
+    Transparent.refuseInvalidForm = function (form, el) {
+
+        console.error("Invalid form submission.", Transparent.formInvalidity(form), el);
+        form.classList.add('was-validated');
+
+        // On the CONTROL, not on the form. A form carrying `novalidate` -
+        // which is what the Bootstrap "custom feedback" pattern does to every
+        // form on the page, base-bundle included - answers form.reportValidity()
+        // with nothing at all on WebKit, so the visitor was left with a button
+        // that did nothing. A control reports its own validity whatever its
+        // form says, and brings itself on screen while it is at it.
+        var controls = form.querySelectorAll("input, select, textarea");
+        for (var i = 0; i < controls.length; i++) {
+
+            if (controls[i].willValidate === false || controls[i].checkValidity()) continue;
+
+            // Guarded: a control that cannot be focused (hidden, inside a
+            // closed disclosure) makes the browser refuse to show anything.
+            try { controls[i].reportValidity(); } catch (e) {}
+            return null;
+        }
+
+        try { form.reportValidity(); } catch (e) {}
+
+        return null;
+    }
+
     Transparent.findNearestForm = function (el) {
 
         switch (el.tagName) {
@@ -1240,11 +1306,8 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                     return null;
                 }
 
-                if(!$(el).hasClass("skip-validation") && !form.checkValidity()) {
-                    console.error("Invalid form submission.", el);
-                    form.classList.add('was-validated');
-                    return null;
-                }
+                if(!$(el).hasClass("skip-validation") && !form.checkValidity())
+                    return Transparent.refuseInvalidForm(form, el);
 
                 var pat  = /^https?:\/\//i;
                 if (pat.test(href)) return [method, new URL(href), form];
@@ -1296,11 +1359,8 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                         return null;
                     }
 
-                    if(!$(el).hasClass("skip-validation") && !form.checkValidity()) {
-                        console.error("Invalid form submission.", el);
-                        form.classList.add('was-validated');
-                        return null;
-                    }
+                    if(!$(el).hasClass("skip-validation") && !form.checkValidity())
+                        return Transparent.refuseInvalidForm(form, el);
 
                     // The form's own method. This was a hardcoded POST, so a
                     // <form method="get"> submitted by its button - or by Enter,
