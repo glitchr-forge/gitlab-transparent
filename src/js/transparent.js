@@ -19,15 +19,22 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
     window.replaceHash = function(newHash, triggerHashChange = true, skipIfEmptyIdentifier = true) {
 
+        // The query string stays: rebuilding the address as origin + pathname
+        // + hash silently dropped it, so changing the fragment on
+        // "/list?page=3#item-12" rewrote the address to "/list#item-12" - the
+        // page still showed page 3 while the address claimed page 1, and any
+        // reload or shared link landed on the wrong page.
+        var base = location.origin + location.pathname + location.search;
+
         var oldHash = location.hash;
-        var oldURL = location.origin+location.pathname+location.hash;
+        var oldURL = base+location.hash;
         var oldHashElement = $(oldHash);
 
         if(!newHash) newHash = "";
         if (newHash !== "" && (''+newHash).charAt(0) !== '#')
             newHash = '#' + newHash;
 
-        var newURL = location.origin+location.pathname+newHash;
+        var newURL = base+newHash;
         var newHashElement = $(newHash);
 
         var fallback  = $(newHash).length === 0;
@@ -38,8 +45,8 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             dispatchEvent(new HashChangeEvent("hashfallback", {oldURL:oldURL, newURL:newURL}));
             newHash = skipIfEmptyIdentifier && !newHash ? "" : (newHashElement.length == 0 ? "" : oldHash);
 
-            oldURL = location.origin+location.pathname+location.hash;
-            newURL = location.origin+location.pathname+newHash;
+            oldURL = base+location.hash;
+            newURL = base+newHash;
         }
 
         if(oldURL == newURL) return false;
@@ -3680,9 +3687,15 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
     // inside the admin overlay; every click there fell through to a real
     // full-page reload of the iframe instead of an SPA swap.
     try {
+        // Query string included, for the same reason as replaceHash above:
+        // this runs on every page open, and without location.search it
+        // rewrote "/list?page=3" to "/list" straight away - losing the page
+        // the reader was on, and making every later "is this the same page?"
+        // comparison fail, so in-page anchors did full navigations.
+        var here = location.origin + location.pathname + location.search + location.hash;
         var href = history.state ? history.state.href : null;
-        if (href != location.origin + location.pathname + location.hash)
-            history.replaceState({uuid: uuidv4(), status: history.state ? history.state.status : 200, data:{}, method: history.state ? history.state.method : "GET", href: location.origin + location.pathname + location.hash}, '', location.origin + location.pathname + location.hash);
+        if (href != here)
+            history.replaceState({uuid: uuidv4(), status: history.state ? history.state.status : 200, data:{}, method: history.state ? history.state.method : "GET", href: here}, '', here);
     } catch (e) {
         if (Settings.debug) console.error('Transparent: initial replaceState failed (likely a srcdoc iframe) - continuing without it', e);
     }
