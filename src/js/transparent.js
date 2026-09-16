@@ -1184,6 +1184,10 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
      */
     Transparent.refuseInvalidForm = function (form, el) {
 
+        // __main__ reads it: a refusal is not "nothing to do here", and the
+        // default action has to be stopped - see there.
+        Transparent.formRefused = true;
+
         console.error("Invalid form submission.", Transparent.formInvalidity(form), el);
         form.classList.add('was-validated');
 
@@ -3060,8 +3064,22 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         if (e.type == Transparent.state.POPSTATE && e.transparentNestHandled) return;
 
         // Determine link
+        Transparent.formRefused = false;
         const link = Transparent.findLink(e);
         if (link == null) {
+
+            // A form the browser refused is not "not a navigation": it is one
+            // this code has just stopped, and the default action must go with
+            // it. Left to run, the click went on to submit the form; the form
+            // carries `novalidate` on any Bootstrap-flavoured page, so the
+            // browser raised `submit` all the same, and every submit listener
+            // in turn - the host's, this module's own, the base bundle's -
+            // refused it again and showed the reason again. The bubble was
+            // drawn, cleared and redrawn several times over: it blinked.
+            if (Transparent.formRefused) {
+                e.preventDefault();
+                return;
+            }
 
             // findLink() returning null means "this click is not a navigation".
             // preventDefault()ing it anyway suppressed the DEFAULT ACTION of
