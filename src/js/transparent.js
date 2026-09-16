@@ -2544,12 +2544,19 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         function shouldSkipForm(form) {
             if (!form) return true;
             if (form.hasAttribute && form.hasAttribute('data-no-persist')) return true;
-            if (!form.name && !form.id) return true; // need identity for key
+            // getAttribute, not form.name/form.id: a field called "name" or "id"
+            // shadows the property - see the note in __main__'s form block.
+            if (!formIdentity(form)) return true; // need identity for key
             return false;
         }
 
+        /** A form's own name or id, from its attributes - see shouldSkipForm. */
+        function formIdentity(form) {
+            return (form.getAttribute && (form.getAttribute('name') || form.getAttribute('id'))) || '';
+        }
+
         function getKey(form) {
-            return KEY_PREFIX + location.pathname + ':' + (form.name || form.id) + actionSuffix(form);
+            return KEY_PREFIX + location.pathname + ':' + formIdentity(form) + actionSuffix(form);
         }
 
         // Whatever the form's action adds to the page's own URL - a fragment
@@ -3036,10 +3043,27 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             }
 
             data = new FormData();
-            var formAmbiguity = $("form[name='"+form.name+"']").length > 1;
-            
+
+            // The name ATTRIBUTE, never form.name. A form's named controls are
+            // exposed as properties of the form element itself, so one field
+            // called "name" - a group's name, a member's name, a file's name -
+            // IS form.name: an HTMLInputElement where a string was expected.
+            // Interpolated into the selectors below it became
+            // "form[name='[object HTMLInputElement]']", which matches nothing,
+            // so formInput came out empty and the request went out with NO
+            // FIELDS AT ALL - the same silent failure as the unnamed form
+            // described below, and reported the same way: the server sees an
+            // empty POST, refuses the CSRF token that is not there, and
+            // re-renders the page it was sent from, so the button reads as
+            // doing nothing at all (Chapaland, founding a group: <input
+            // name="name">). "id", "action", "method", "submit" and "length"
+            // are the same trap.
+            var formName = form.getAttribute("name") || "";
+
+            var formAmbiguity = formName !== "" && $("form[name='"+formName+"']").length > 1;
+
             var formInput = undefined; // In case of form ambiguity (two form with same name, restrict the data to the target form, if not extends it to each element with standard name)
-            // An UNNAMED form matches neither clause below: form.name is "",
+            // An UNNAMED form matches neither clause below: its name is "",
             // so `form[name='']` selects nothing and `[name^='[']` selects
             // nothing either - formInput came out empty and the request went
             // out with NO FIELDS AT ALL. Every plain <form method="post">
@@ -3048,9 +3072,9 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             // action URL as a GET - which reads as "the button does nothing"
             // plus a 404. Found on an admin page whose restore/destroy buttons
             // were each their own small unnamed form.
-            if(!form.name) formInput = $(form).find(":input");
-            else if(formAmbiguity) formInput = $(form).find(":input, [name^='"+form.name+"\[']");
-            else formInput = $("form[name='"+form.name+"'] :input, [name^='"+form.name+"\[']");
+            if(!formName) formInput = $(form).find(":input");
+            else if(formAmbiguity) formInput = $(form).find(":input, [name^='"+formName+"\[']");
+            else formInput = $("form[name='"+formName+"'] :input, [name^='"+formName+"\[']");
 
             formInput.each(function() {
 
