@@ -2099,7 +2099,25 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         });
     }
 
-    Transparent.onLoad = function(uuid, dom, callback = null, scrollTo = false) {
+    Transparent.onLoad = function(uuid, dom, callback = null, scrollTo = false, keepScroll = false) {
+
+        // Where the reader is, read BEFORE the swap takes the page apart.
+        //
+        // A swap that does not scroll - a form's answer, see the scrollTo
+        // argument - must leave the reader where they were, and leaving the
+        // scroll alone is not enough to do that: between the moment the old
+        // page is removed and the moment the new one is laid out the document
+        // is briefly shorter than the scroll position, and the browser CLAMPS
+        // the scroll to what is left. On a page whose content is most of its
+        // height that means the very top, and nothing ever puts it back: a
+        // form sent from halfway down came back with the page at its top and
+        // its error messages off screen. Reported on Chapaland, whose header
+        // is a full screen of sky - so "the form was refused" read as "the
+        // page jumped to the sky". Put back after the swap, below.
+        var keptScroll = {
+            top:  window.scrollY || window.pageYOffset || 0,
+            left: window.scrollX || window.pageXOffset || 0
+        };
 
         window.previousHash     = window.location.hash;
         window.previousLocation = window.location.toString();
@@ -2297,6 +2315,16 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                         else Transparent.scrollTo({top:0, left:0, duration:0}, el);
                     }
                 }
+
+            } else if (keepScroll && keptScroll.top && !location.hash && (window.scrollY || window.pageYOffset || 0) !== keptScroll.top) {
+
+                // The swap lost the reader's place - see keptScroll above.
+                // Only when it was actually lost, so a page that scrolled
+                // itself as it came in (an anchor, a script of its own) is
+                // left to it; and only for a page that came back to its own
+                // address, since a POST that lands somewhere else is a page
+                // the reader has not seen, and starts where its own top is.
+                window.scrollTo(keptScroll.left, keptScroll.top);
             }
 
             }, 0); }); /* end rAF + setTimeout - see the comment above it */
@@ -3061,7 +3089,20 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             return;
         }
 
-        dispatchEvent(new CustomEvent('transparent:link', {link:link}));
+        // What findLink() made of the interaction, for the page to read:
+        // where it is going, and what sent it - a link, a button, or the FORM
+        // itself for a submission. The payload was passed as a plain `link`
+        // option, which CustomEvent ignores, so every listener got an event
+        // with a null `detail` and nothing to go on; a page that wants to know
+        // a form was sent (to keep the reader at it when the server sends it
+        // back refused) had no way to tell. Dispatched here, before history is
+        // touched, so `location` is still the address the reader came from.
+        dispatchEvent(new CustomEvent('transparent:link', {detail: {method: link[0], url: link[1], target: link[2]}}));
+
+        // The address this navigation starts from, read before history is
+        // touched: a POST that comes back to it is a form the server refused,
+        // and the reader keeps their place in it - see onLoad's keptScroll.
+        const fromHref = location.href;
 
         const uuid   = uuidv4();
         const type   = link[0];
@@ -3537,7 +3578,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                             .removeClass(Transparent.state.NEW);
                     });
 
-                }, type != "POST");
+                }, type != "POST", type == "POST" && location.href === fromHref);
             };
 
             // Give the outgoing page a window to animate away in, if the host
