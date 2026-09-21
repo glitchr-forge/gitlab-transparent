@@ -3679,8 +3679,32 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
             $(Transparent.html).prop("user-scroll", false); // make sure to avoid page jump during transition (cancelled in activeIn callback)
 
-            // Submit ajax request..
-            if(form) form.dispatchEvent(new SubmitEvent("submit", { submitter: formTrigger }));
+            // Let every submit listener see this submission (validation,
+            // formMemory's markSent, the host's own handlers) - but only SEE
+            // it. The request itself is ours and goes out below.
+            //
+            // Firefox, unlike Chromium, carries out the form submission for a
+            // SYNTHETIC submit event when nobody cancels it. So every form
+            // sent through here was sent twice from Firefox: our XHR, and 5ms
+            // later the browser's own native POST. Reproduced headless on
+            // Firefox 140 (a bare page, no library, one dispatchEvent - it
+            // posts); seen in production as two identical comments filed in
+            // the same second, and two POST /login a few minutes earlier in
+            // the same visit. Only Firefox visitors, only forms, which is why
+            // it looked occasional.
+            //
+            // So the event is cancelable, and cancelled by a listener added
+            // on the form right before dispatch: it runs after every handler
+            // already bound there, and the event does not bubble, so nothing
+            // at all runs after it - no other listener can tell the
+            // difference. Chromium never had a default action to cancel.
+            if (form) {
+                var submitEvent = new SubmitEvent("submit", { submitter: formTrigger, cancelable: true });
+                var noNativeSubmit = function (ev) { if (ev === submitEvent) ev.preventDefault(); };
+                form.addEventListener("submit", noNativeSubmit);
+                try { form.dispatchEvent(submitEvent); }
+                finally { form.removeEventListener("submit", noNativeSubmit); }
+            }
 
             // A navigation already in flight is now stale - the user's
             // most recent click always wins. Abort it (best-effort; a
