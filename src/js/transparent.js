@@ -5712,8 +5712,20 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 // history.state guard covers share-during-loading, which
                 // already pushed the nest entry itself - pushing a second
                 // one here would strand an extra Back press.
+                //
+                // Guarded like notifyNavigated's own pushState: the overlay is
+                // already mounted by now, and a history entry it could not
+                // write is no reason to tear it down. Unguarded, the throw
+                // reached fetchRaw's catch, which reads any exception as
+                // "not nestable" - closing a working overlay and navigating
+                // the whole page away instead. Browsers do refuse this call:
+                // Firefox when the document URL carries user:password@
+                // (seen driving beta through basic auth that way), WebKit and
+                // Gecko past their pushState rate limits. The cost of the
+                // guard is only that Back will not close this one overlay.
                 if (fresh && !(history.state && history.state.nest)) {
-                    history.pushState(nestState(url, container), '', location.href);
+                    try { history.pushState(nestState(url, container), '', location.href); }
+                    catch (e) { if (Settings.debug) console.error('Transparent.nest: history entry not written', e); }
                 }
                 done();
             };
