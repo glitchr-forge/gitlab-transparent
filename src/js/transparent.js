@@ -328,6 +328,31 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // one session is ever parked; opening a different page discards it.
         // Set false to go back to tearing the iframe down on every close.
         "nest_keepalive": true,
+        // nest_remember: the panel's LAYOUT - where the user put it, how big
+        // they made it, whether they docked it and against which edge -
+        // survives the close and comes back on the next open. Unlike
+        // nest_keepalive, which preserves the nested SESSION in memory and
+        // therefore only lasts as long as the host document, this is written
+        // to localStorage: a reload, a new tab, tomorrow morning, all reopen
+        // the panel where it was left.
+        //
+        // Two states are deliberately NOT remembered, because restoring them
+        // would make the next open look broken rather than familiar:
+        //   - fullscreen (is-full), which is not a panel geometry at all but
+        //     a commitment of the address bar to the nested page's own URL;
+        //     silently re-entering it on open would navigate, not restore.
+        //   - tucked-away (is-hidden), where the panel is pushed off-screen
+        //     with only its grab tab showing - reopening into it would look
+        //     exactly like clicking the link did nothing.
+        // Both fall back to the state underneath them (default / docked).
+        //
+        // Below the mobile breakpoint the panel is always fullscreen and none
+        // of this applies, so nothing is read or written there either - a
+        // phone visit can't overwrite what was set up on a desktop.
+        "nest_remember": true,
+        // Storage key for the above. Worth changing only when one origin
+        // hosts several independent nests that should not share a layout.
+        "nest_remember_key": "transparent[nest][layout]",
         // headlock: list of URL substrings or regex patterns to preserve in
         // <head> across page transitions (e.g. third-party widgets that
         // inject <style>/<link> dynamically). Anything matching is treated
@@ -4141,6 +4166,35 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             return true;
         }
 
+        // ── Remembered panel layout (Settings.nest_remember) ─────────────
+        // localStorage, not the sessionStorage the response cache uses: the
+        // point is to outlive the tab. Every access is wrapped - a private
+        // window, blocked site data or a full quota all throw or hand back
+        // null, and none of that is a reason for the overlay not to open.
+        // Shape is versioned so a future change to what gets stored
+        // discards old entries instead of half-applying them.
+        var LAYOUT_VERSION = 1;
+
+        function readLayout() {
+
+            if (Settings["nest_remember"] === false) return null;
+            try {
+                var raw = localStorage.getItem(Settings["nest_remember_key"]);
+                if (!raw) return null;
+                var state = JSON.parse(raw);
+                return (state && state.v === LAYOUT_VERSION) ? state : null;
+            } catch (e) { return null; }
+        }
+
+        function writeLayout(state) {
+
+            if (Settings["nest_remember"] === false) return;
+            try {
+                if (state == null) localStorage.removeItem(Settings["nest_remember_key"]);
+                else localStorage.setItem(Settings["nest_remember_key"], JSON.stringify(state));
+            } catch (e) { if (Settings.debug) console.error('Transparent.nest: layout not stored', e); }
+        }
+
         api.isOpen = function() {
             var el = document.getElementById(CONTAINER_ID);
             // a container mid-close-fade doesn't count as "open" - a fast
@@ -4826,6 +4880,125 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 dispatchEvent(new CustomEvent('transparent:nest:dock', { detail: { href: container._currentHref, edge: edge } }));
             }
 
+            // ── Remembered layout: capture / apply ───────────────────────
+            // Exposed on the container (same pattern as _teardownDock and
+            // _updateChromePlacement) because closeShell lives outside this
+            // closure and has no other way to reach the panel - and must
+            // read it BEFORE it undoes a container-dock.
+            //
+            // Nothing is stored on the mobile breakpoint: the panel is
+            // always fullscreen there, so a snapshot would only record "no
+            // geometry" and wipe whatever the desktop left behind.
+            container._captureLayout = function() {
+
+                if (Settings["nest_remember"] === false || isMobile()) return;
+                // A shell torn down before anything mounted (an ineligible
+                // target - see fetchNested's ineligible()) is a shell the
+                // user never saw, let alone arranged. It closes through the
+                // same closeShell, and must not be allowed to write over a
+                // layout they set up for real.
+                if (!container._mounted) return;
+                // Fullscreen has no position or size of its own to
+                // remember - share() cleared both on the way in. Leaving
+                // the previous entry alone (rather than recording "no
+                // geometry", which reads as the centered default) is what
+                // makes going full page a temporary excursion: dock it
+                // left, expand, close, and the next open is docked left
+                // again, not back at square one.
+                if (container.classList.contains('is-full')) return;
+
+                var docked = container.classList.contains('is-docked');
+                var free = panel.classList.contains('is-free');
+
+                // Nothing was ever moved, resized or docked - the panel is
+                // still the pristine centered default. Clear the entry
+                // rather than storing that: "I put it back in the middle"
+                // should stick just as much as "I put it on the left".
+                if (!docked && !free) return writeLayout(null);
+
+                writeLayout({
+                    v: LAYOUT_VERSION,
+                    docked: docked,
+                    containerDocked: container.classList.contains('is-container-docked'),
+                    edge: container.dataset.dockEdge || null,
+                    // Read off the inline styles rather than the rect: while
+                    // docked, the span dimension is deliberately CSS-driven
+                    // (100vh/100vw) and an empty string here is what keeps
+                    // it responsive on the way back in. A rect would freeze
+                    // today's viewport into it.
+                    left: panel.style.left,
+                    top: panel.style.top,
+                    width: panel.style.width,
+                    height: panel.style.height
+                });
+            };
+
+            // Puts a stored layout back on a FRESH shell. (A parked session
+            // resumed by resume() needs none of this - that container never
+            // left the document and still carries its own classes and inline
+            // px.) Called once, from openShell's tail, before the first
+            // paint, so the panel appears where it belongs instead of
+            // visibly jumping there from the centered default.
+            function applyLayout() {
+
+                var state = readLayout();
+                if (state == null || isMobile()) return;
+                if (Settings["nest_dock"] === false && state.docked) return; // docking forbidden since it was stored
+
+                // Re-parenting into a host element replaces geometry
+                // entirely, so it is tried first and nothing else applies.
+                // Falls through when nest_dock_target is gone or unset.
+                if (state.containerDocked && containerDock()) return;
+
+                var vw = window.innerWidth, vh = window.innerHeight;
+                var num = function(v) { var n = parseFloat(v); return isFinite(n) ? n : null; };
+                var w = num(state.width), h = num(state.height);
+                var l = num(state.left), t = num(state.top);
+
+                if (w != null || h != null || l != null || t != null) {
+                    panel.classList.add('is-free');
+                    // Clamped against TODAY's viewport, which may be another
+                    // monitor or a resized window: a panel stored 1200 wide
+                    // at x=1320 has to come back usable on a 900px screen,
+                    // not as a corner poking in from off-stage.
+                    //
+                    // Size first, down to the viewport - which is what then
+                    // makes full containment free: with w <= vw the range
+                    // [0, vw - w] is never empty, so the panel always lands
+                    // wholly on screen. Deliberately stricter than a drag,
+                    // which is free to push a panel off the edge (that IS
+                    // the dock gesture); a reopen is not a gesture and has
+                    // to land somewhere the user can work.
+                    if (w != null) w = Math.min(Math.max(w, MIN_W), vw);
+                    if (h != null) h = Math.min(Math.max(h, MIN_H), vh);
+                    if (l != null) l = Math.min(Math.max(l, 0), Math.max(0, vw - (w != null ? w : MIN_W)));
+                    if (t != null) t = Math.min(Math.max(t, 0), Math.max(0, vh - (h != null ? h : MIN_H)));
+
+                    panel.style.left = l != null ? l + 'px' : '';
+                    panel.style.top = t != null ? t + 'px' : '';
+                    panel.style.width = w != null ? w + 'px' : '';
+                    panel.style.height = h != null ? h + 'px' : '';
+                }
+
+                if (state.edge) {
+                    applyDock(state.edge);
+                    // applyDock re-derives the dock DEPTH through a clamp
+                    // sized for a panel arriving from the centered default
+                    // (<=480/360). That is right for a fresh dock and wrong
+                    // here: a sidebar the user deliberately widened past it
+                    // would come back narrower than they left it every time.
+                    // The stored depth wins, bounded only by the viewport.
+                    if (state.edge === 'left' || state.edge === 'right') {
+                        if (w != null) panel.style.width = Math.min(w, vw) + 'px';
+                    } else if (h != null) {
+                        panel.style.height = Math.min(h, vh) + 'px';
+                    }
+                    updateChromePlacement();
+                } else if (state.docked) {
+                    enterPassthrough();
+                }
+            }
+
             if (Settings["nest_move"] !== false) {
                 container.classList.add('is-movable');
                 // Manual double-click detection, NOT a native 'dblclick'
@@ -5100,6 +5273,14 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             document.body.style.overflow = 'hidden';
             document.body.appendChild(container);
             Transparent.html.addClass(HTML_CLASS);
+
+            // Where the user left it last time, put back before the
+            // synchronous style flush below commits the first frame - so
+            // the panel is simply THERE, never centered-then-jumping. Has
+            // to run after the append (its helpers measure the panel) and
+            // after hostOverflow is captured (docking hands the host page
+            // its scrollbar back through it).
+            applyLayout();
 
             // Force a SYNCHRONOUS style flush (reading a layout-dependent
             // property forces the browser to commit the base opacity:0
@@ -5655,6 +5836,11 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         function closeShell(container) {
             var href = container._currentHref;
             var park = canPark(container);
+            // Remember where the user left the panel - FIRST, while the
+            // layout is still intact: the teardown below undoes a
+            // container-dock, and is-closing/is-parked are about to change
+            // what the classes say.
+            if (container._captureLayout) container._captureLayout();
             // if the panel was re-parented into a host container
             // (nest_dock_target), pull it back under this shell FIRST - it
             // lives outside `container` while docked that way, so removing
@@ -5805,6 +5991,16 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // comment for why the iframe-side half is attached separately,
         // inside mount(), on every single mount rather than once here
         document.addEventListener('keydown', handleEscKeydown, true);
+
+        // Closing is not the only way to leave: reloading the host page, or
+        // navigating off it, with the overlay still open would otherwise
+        // throw away a layout the user had just set up. pagehide (not
+        // unload) because it is the one that still fires on mobile Safari
+        // and on a bfcache freeze.
+        window.addEventListener('pagehide', function() {
+            var container = api.getContainer();
+            if (container && container._captureLayout) container._captureLayout();
+        });
 
         // hover prefetch: by the time the click lands the page is usually
         // already in the cache, so the overlay opens instantly
