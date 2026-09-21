@@ -1789,6 +1789,18 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             pending[i](function() { if (--remaining === 0) fire(); });
     };
 
+    /*
+     * Only the scripts a browser would run: no type, a JavaScript MIME type,
+     * or a module. A <script> also carries data - application/json,
+     * application/ld+json, a text/template - and eval'd as code that data
+     * threw a SyntaxError out of the page swap: the new page stayed half in,
+     * its transition classes on and its load hooks never called.
+     */
+    var SCRIPT_TYPES = /^(?:|module|(?:text|application)\/(?:x-)?(?:java|ecma)script(?:1\.[0-5])?|text\/(?:jscript|livescript))$/i;
+    function isExecutableScript(el) {
+        return SCRIPT_TYPES.test((el.getAttribute('type') || '').split(';')[0].trim());
+    }
+
     Transparent.evalScript = function(el)
     {
         function scriptCloneEl(el){
@@ -1801,11 +1813,16 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 script.setAttribute( (attr = attrs[i]).name, attr.value );
             }
 
-            eval($(script).text());
+            // One broken inline script is that script's failure, not the
+            // swap's: reported, and the page goes on loading.
+            try { eval($(script).text()); }
+            catch (e) { console.error('Transparent: a page script failed', e); }
             return script;
         }
 
-        if (el.tagName === 'SCRIPT' ) el.parentNode.replaceChild( scriptCloneEl(el) , el );
+        if (el.tagName === 'SCRIPT' ) {
+            if (isExecutableScript(el)) el.parentNode.replaceChild( scriptCloneEl(el) , el );
+        }
         else if (typeof el.querySelectorAll === 'function') {
 
             // One native query instead of recursing the entire node tree.
