@@ -6043,20 +6043,43 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             if (container && container._captureLayout) container._captureLayout();
         });
 
+        // The one answer to "would a click on this link open the overlay?" -
+        // the URL to open it with, or null. Shared by the click handler and
+        // the hover prefetch below so the two cannot disagree again.
+        //
+        // They did: the prefetch asked only "is it same-origin and in scope?",
+        // not "does it have target=_blank?", so hovering the admin pencil of
+        // a comment (an <a target="_blank">) fetched the edit page for an
+        // overlay that the click was never going to open - the click leaves
+        // it to the browser, which opens a new tab and fetches the page
+        // again. Two renders of the same admin page at once, in one session;
+        // production, 2026-09-21, and that is what cost the delete button on
+        // that page its CSRF token (a 403): the session kept the token one
+        // render minted, the tab showed the other's. Reproduced in real
+        // Firefox on beta with a real pointer, hover then click: the edit
+        // page requested twice.
+        function nestUrlFor(anchor) {
+
+            if (anchor == null || anchor.target == '_blank') return null;
+
+            var url;
+            try { url = new URL(anchor.href, currentOrigin()); } catch (_) { return null; }
+            if (url.origin != currentOrigin()) return null;
+            if (!matchesPatternList(url.pathname, Settings.nest)) return null;
+
+            return url;
+        }
+
         // hover prefetch: by the time the click lands the page is usually
-        // already in the cache, so the overlay opens instantly
+        // already in the cache, so the overlay opens instantly - for links
+        // the click will actually open in the overlay, and only those
         document.addEventListener('mouseover', function(e) {
 
             if (Settings.disable || !e.target.closest) return;
             if (location.origin === 'null') return; // inside a nest iframe - see the click handler's nest-within-nest guard
 
-            var anchor = e.target.closest('a[href]');
-            if (anchor == null) return;
-
-            try {
-                var url = new URL(anchor.href, location.origin);
-                if (url.origin == location.origin && matchesPatternList(url.pathname, Settings.nest)) api.prefetch(url.href);
-            } catch (_) {}
+            var url = nestUrlFor(e.target.closest('a[href]'));
+            if (url) api.prefetch(url.href);
         }, true);
 
         // capture phase: runs before __main__'s bubble-phase handler and
@@ -6079,13 +6102,8 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
             if (e.defaultPrevented) return;
 
-            var anchor = e.target.closest ? e.target.closest('a[href]') : null;
-            if (anchor == null || anchor.target == '_blank') return;
-
-            var url;
-            try { url = new URL(anchor.href, currentOrigin()); } catch (_) { return; }
-            if (url.origin != currentOrigin()) return;
-            if (!matchesPatternList(url.pathname, Settings.nest)) return;
+            var url = nestUrlFor(e.target.closest ? e.target.closest('a[href]') : null);
+            if (!url) return;
 
             e.preventDefault();
             e.stopImmediatePropagation();
