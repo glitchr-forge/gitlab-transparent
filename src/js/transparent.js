@@ -4092,7 +4092,30 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
         document.addEventListener('click', __main__, false);
 
-        $("form").on("submit", __main__);
+        // Delegated from the document, not bound to the forms that exist now.
+        // `$("form").on(...)` reached only the forms of the first page loaded:
+        // every page swapped in afterwards brought forms nothing listened to,
+        // so a submission that is not a click on a submit button - Enter in a
+        // form with no button (a search box), a script's requestSubmit() -
+        // went to the browser, and the browser posted it the old way: a full
+        // page load, no transition, the app started over. A click on a button
+        // never showed it, because the click listener above is on the document.
+        //
+        // Delegation also means it runs after the handlers bound on the form
+        // itself, so their verdict is respected: base-bundle's form.js cancels
+        // a disabled form and stops an invalid one, and neither must turn into
+        // a navigation here. The submit event this module dispatches itself
+        // (see the Firefox note in __main__) does not bubble, so it never
+        // comes back through here.
+        //
+        // Called with the document as `this`, like the click listener:
+        // __main__ gives up unless `this` contains Settings.identifier, and a
+        // form never does - which is why the old per-form binding had in fact
+        // never sent anything, even on the first page.
+        $(document).on("submit", "form", function (e) {
+            if (e.isDefaultPrevented()) return;
+            return __main__.call(document, e);
+        });
     }
 
     // ─────────────────────────────────────────────────────────────────────
