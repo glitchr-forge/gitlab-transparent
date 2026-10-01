@@ -1,5 +1,5 @@
 {
-  "name": "@glitchr/transparent",
+  "name": "@glitchr/transparentjs",
   "version": "3.0.25",
   "description": "Transparent SPA Application",
   "main": "src/index.js",
