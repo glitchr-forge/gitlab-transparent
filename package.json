@@ -5,12 +5,16 @@
   "main": "src/index.js",
   "access": "public",
   "repository": {
-    "url": "ssh://git@gitlab.glitchr.dev:public-repository/javascript/transparent.git",
-    "type": "git"
+    "type": "git",
+    "url": "git+https://github.com/glitchr-studio/transparentjs.git"
   },
   "author": "Marco Meyer <marco.meyer@glitchr.io>",
   "license": "LGPL-3.0-or-later",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "homepage": "https://github.com/glitchr-studio/transparentjs#readme",
+  "bugs": {
+    "url": "https://github.com/glitchr-studio/transparentjs/issues"
   }
 }
