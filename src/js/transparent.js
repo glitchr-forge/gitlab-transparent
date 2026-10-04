@@ -4305,7 +4305,9 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             container._currentHref = href;
             // A form was sent from this session and accepted: the page it
             // was opened with has done its job (see resume).
+            // (told by the nested page, or heard as a submit event in the frame)
             if (info && String(info.method).toUpperCase() === 'POST' && info.status < 400) container._submitted = true;
+            if (container._pendingSubmit) { container._submitted = true; container._pendingSubmit = false; }
             if (title) document.title = title;
 
             var full = container.classList.contains('is-full');
@@ -5429,7 +5431,16 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 frame = document.createElement('iframe');
                 frame.setAttribute('title', title || 'nested');
                 body.appendChild(frame);
-                frame.addEventListener('load', function() { guardFrameLocation(container, frame); });
+                frame.addEventListener('load', function() {
+                    guardFrameLocation(container, frame);
+                    // Heard from the host itself: the nested page may run an
+                    // older transparent that does not say a form was sent
+                    // (see notifyNavigated). Capture, so a submission the
+                    // nested page takes over and cancels is heard too.
+                    try {
+                        frame.contentDocument.addEventListener('submit', function() { container._pendingSubmit = true; }, true);
+                    } catch (e) {}
+                });
             }
 
             // Reveal only once the iframe has actually finished loading -
