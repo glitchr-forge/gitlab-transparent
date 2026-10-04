@@ -3570,7 +3570,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                             // page and tracks every navigation into the
                             // address bar.
                             if (parent.Transparent.nest.notifyNavigated) {
-                                parent.Transparent.nest.notifyNavigated(responseURL, dom.title);
+                                parent.Transparent.nest.notifyNavigated(responseURL, dom.title, { method: method, status: status });
                             } else {
                                 var nestContainer = parent.Transparent.nest.getContainer && parent.Transparent.nest.getContainer();
                                 var isFullPage = nestContainer && nestContainer.classList.contains('is-full');
@@ -4297,12 +4297,15 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // the host's history. The address bar follows only while the panel
         // is full-page; floating, it is "just a panel" over the host page
         // and the host's own URL stays.
-        api.notifyNavigated = function(href, title) {
+        api.notifyNavigated = function(href, title, info) {
 
             var container = api.getContainer();
             if (container == null) return false;
 
             container._currentHref = href;
+            // A form was sent from this session and accepted: the page it
+            // was opened with has done its job (see resume).
+            if (info && String(info.method).toUpperCase() === 'POST' && info.status < 400) container._submitted = true;
             if (title) document.title = title;
 
             var full = container.classList.contains('is-full');
@@ -5844,10 +5847,18 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         // I had", not "load the dashboard fresh". A link to any OTHER page
         // is a deliberate request for that page and falls through to a
         // normal open, which discards the parked session (see openShell).
+        //
+        // The page it was opened with stops counting once a form has been
+        // sent from the session: opening "new article", saving it (the
+        // overlay moves on to that article's edit form), closing, then
+        // asking for "new article" again means a blank form, not the
+        // article just saved - which is what coming back gave. The page
+        // the session is ON still brings it back.
         function resume(href) {
 
             if (!parked) return false;
-            if (!sameTarget(href, parked._currentHref) && !sameTarget(href, parked._openHref)) return false;
+            var opened = !parked._submitted && sameTarget(href, parked._openHref);
+            if (!sameTarget(href, parked._currentHref) && !opened) return false;
 
             var container = parked;
             parked = null;
@@ -5869,14 +5880,26 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 try { history.pushState(nestState(container._currentHref, container), '', location.href); } catch (e) {}
             }
 
+            untuck(container);
             if (container._updateChromePlacement) container._updateChromePlacement();
             dispatchEvent(new CustomEvent('transparent:nest:resume', { detail: { href: container._currentHref } }));
             return true;
         }
 
+        // Asking for a page is asking to SEE it. A panel tucked away against
+        // its edge (is-hidden) kept loading the page off-screen: from the
+        // reader's side the click did nothing.
+        function untuck(container) {
+
+            if (!container || !container.classList.contains('is-hidden')) return;
+            container.classList.remove('is-hidden');
+            if (container._updateChromePlacement) container._updateChromePlacement();
+            dispatchEvent(new CustomEvent('transparent:nest:show', { detail: { href: container._currentHref, edge: container.dataset.dockEdge } }));
+        }
+
         api.open = function(href) {
 
-            if (api.isOpen()) return api.navigate(href);
+            if (api.isOpen()) { untuck(api.getContainer()); return api.navigate(href); }
             if (resume(href)) return;
 
             fetchNested(href, function() { window.location.href = href; });
