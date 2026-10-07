@@ -1319,11 +1319,18 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
             if(el.target && el.target.tagName == "FORM") {
 
+                // A form without an action is sent to its own document's
+                // address, query included - as the browser itself would.
+                // Not location.pathname: inside a nest iframe that is
+                // "srcdoc", and `+ href` added the missing attribute's null,
+                // so such a form went to /srcdocnull (to /loginnull on a
+                // plain page sent with Enter). currentPathname() and
+                // currentSearch() read document.baseURI, the nested page's
+                // real address (see their comment).
                 var href = el.target.getAttribute("action");
-                if(!href) href = location.pathname + href;
+                if(!href) href = currentPathname() + currentSearch();
 
-
-                if (href.startsWith("#")) href = location.pathname + href;
+                if (href.startsWith("#")) href = currentPathname() + currentSearch() + href;
                 if (href.endsWith  ("#")) href = href.slice(0, -1);
 
                 var method = el.target.getAttribute("method") || "GET";
