@@ -1246,11 +1246,19 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 return (form.length ? form[0] : undefined);
             case "INPUT":
             case "BUTTON":
+                // A control bound to its form by the form ATTRIBUTE (HTML5:
+                // form="admin-form") belongs to that form wherever it sits -
+                // a back office hoists its "Enregistrer" and "Supprimer" out of
+                // the form into its top bar. el.form is the browser's answer.
+                if (el.form) return el.form;
+
                 var form = $(el).closest("form");
                 if (form.length) return form[0];
 
-                var formName = $(el).attr("name").split("[")[0];
-                form = $("form[name="+formName+"]");
+                // A button without a name (most are) used to throw here.
+                var formName = ($(el).attr("name") || "").split("[")[0];
+                if (!formName) return undefined;
+                form = $("form[name='"+formName+"']");
                 return (form.length ? form[0] : undefined);
         }
 
@@ -3244,6 +3252,14 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
             else if(formAmbiguity) formInput = $(form).find(":input, [name^='"+formName+"\[']");
             else formInput = $("form[name='"+formName+"'] :input, [name^='"+formName+"\[']");
 
+            // The controls bound to the form by the form ATTRIBUTE (HTML5:
+            // form="admin-form") are part of it wherever they sit in the
+            // document - a back office's save buttons hoisted out of the form
+            // into its top bar. Neither selector above reaches them, so the
+            // button pressed never told the server which one it was ("save
+            // and continue" came back as a plain save). .add() keeps each once.
+            if (form.id) formInput = formInput.add($("[form='"+form.id+"']"));
+
             formInput.each(function() {
 
                 // Only what a browser would send (the HTML form data set). Every
@@ -3257,7 +3273,10 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
 
                 if(this.tagName == "BUTTON" || this.type == "submit" || this.type == "image") {
 
-                    if(this == e.target) data.append(this.name, this.value);
+                    // The button pressed: the event's own target, or what holds it
+                    // (a click lands on the button's icon or label as often as on
+                    // the button), or the submitter a submit event names.
+                    if(this == e.target || (e.target && this.contains && this.contains(e.target)) || this == e.submitter) data.append(this.name, this.value);
 
                 } else if(this.type == "checkbox" || this.type == "radio") {
 
