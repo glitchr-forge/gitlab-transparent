@@ -1335,13 +1335,23 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 // plain page sent with Enter). currentPathname() and
                 // currentSearch() read document.baseURI, the nested page's
                 // real address (see their comment).
-                var href = el.target.getAttribute("action");
+                //
+                // The button that sent it speaks first: its formaction and its
+                // formmethod (the submit event names it, e.submitter). A list's
+                // row "Supprimer" is such a button inside the list's batch
+                // form, formaction="/admin/redirections/1/delete": sent through
+                // here - after a confirmation, or by a button transparentJS's
+                // click handler does not take - it went to the form's action,
+                // the batch delete, and deleted nothing.
+                // (jQuery's event leaves it on originalEvent.)
+                var submitter = el.submitter || (el.originalEvent && el.originalEvent.submitter) || null;
+                var href = (submitter && submitter.getAttribute("formaction")) || el.target.getAttribute("action");
                 if(!href) href = currentPathname() + currentSearch();
 
                 if (href.startsWith("#")) href = currentPathname() + currentSearch() + href;
                 if (href.endsWith  ("#")) href = href.slice(0, -1);
 
-                var method = el.target.getAttribute("method") || "GET";
+                var method = (submitter && submitter.getAttribute("formmethod")) || el.target.getAttribute("method") || "GET";
                 method = method.toUpperCase();
 
                 var form = Transparent.findNearestForm(el);
@@ -3276,7 +3286,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                     // The button pressed: the event's own target, or what holds it
                     // (a click lands on the button's icon or label as often as on
                     // the button), or the submitter a submit event names.
-                    if(this == e.target || (e.target && this.contains && this.contains(e.target)) || this == e.submitter) data.append(this.name, this.value);
+                    if(this == e.target || (e.target && this.contains && this.contains(e.target)) || this == (e.submitter || (e.originalEvent && e.originalEvent.submitter))) data.append(this.name, this.value);
 
                 } else if(this.type == "checkbox" || this.type == "radio") {
 
