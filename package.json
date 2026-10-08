@@ -9,7 +9,7 @@
     "url": "git+https://github.com/glitchr-studio/transparentjs.git"
   },
   "author": "Marco Meyer <marco.meyer@glitchr.io>",
-  "license": "LGPL-3.0-or-later",
+  "license": "MIT",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
