@@ -1,0 +1,43 @@
+<!doctype html>
+<!--
+  Transparent.replaceCanvases(): the canvases of the page are kept across a swap. A canvas without an id
+  that the new page has no place for is left out - and the loop goes on: the canvas with an id after it
+  is still kept (3.0.30 stopped at the first one, `return false` in $.each). Opened by tests/run.mjs in a
+  headless browser; the page writes its verdict in #result.
+-->
+<html>
+<head><meta charset="utf-8"><title>replaceCanvases</title></head>
+<body>
+<div id="page">
+    <section class="player"><canvas class="music-wave"></canvas></section>
+    <div class="chart"><canvas id="kept" data-drawn="yes"></canvas></div>
+</div>
+<pre id="result">pending</pre>
+<script src="jquery.js"></script>
+<script src="../src/js/transparent.js"></script>
+<script>
+    (function () {
+        var errors = [];
+        var error = console.error;
+        console.error = function () { errors.push([].slice.call(arguments).join(' ')); error.apply(console, arguments); };
+
+        // The response of the next page: the chart is there, the player is not.
+        var dom = new DOMParser().parseFromString('<html><body><div id="page"><div class="chart"><canvas id="kept"></canvas></div></div></body></html>', 'text/html');
+        var live = document.getElementById('kept');
+        var verdict;
+        try {
+            Transparent.replaceCanvases(dom);
+            var inNew = dom.getElementById('kept');
+            verdict = [
+                inNew === live ? 'ok kept' : 'FAIL the canvas with an id after one without was not kept',
+                inNew && inNew.getAttribute('data-drawn') === 'yes' ? 'ok drawn' : 'FAIL not the drawn canvas',
+                errors.length === 0 ? 'ok quiet' : 'FAIL ' + errors.join(' | '),
+            ].join('\n');
+        } catch (e) {
+            verdict = 'FAIL ' + e;
+        }
+        document.getElementById('result').textContent = verdict;
+    })();
+</script>
+</body>
+</html>

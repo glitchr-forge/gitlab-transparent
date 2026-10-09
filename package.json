@@ -1,6 +1,6 @@
 {
   "name": "@glitchr/transparentjs",
-  "version": "3.0.30",
+  "version": "3.0.31",
   "description": "Transparent SPA Application",
   "main": "src/index.js",
   "access": "public",
@@ -11,7 +11,7 @@
   "author": "Marco Meyer <marco.meyer@glitchr.io>",
   "license": "MIT",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node tests/run.mjs"
   },
   "homepage": "https://github.com/glitchr-studio/transparentjs#readme",
   "bugs": {
