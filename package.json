@@ -1,7 +1,7 @@
 {
   "name": "@glitchr/transparentjs",
   "version": "3.1.0",
-  "description": "Navigation without page loads, sticky scroll effects, scroll stops and sortable lists - one library, one module per feature",
+  "description": "Navigation without page loads, sticky scroll effects, scroll stops, sortable lists and AJAX channels - one library, one module per feature",
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js",
@@ -9,6 +9,7 @@
     "./sticky": "./src/sticky.js",
     "./stops": "./src/stops.js",
     "./sortable": "./src/sortable.js",
+    "./ajaxer": "./src/ajaxer.js",
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },

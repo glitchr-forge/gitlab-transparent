@@ -1,0 +1,75 @@
+<!doctype html>
+<!--
+  Ajaxer: a named channel sends through $.ajax to its url and calls back with the JSON, a loader
+  appears in the target and the "ajaxer-success" class is set; a url that answers nothing ends in
+  "ajaxer-error" with the error shown; two sends within a channel's throttle go once, none when
+  the channel's throttle is 0; the durations are the core's. The files beside the page stand for
+  the server (a local file answers 200 or 404 to jQuery). Opened by tests/run.mjs in a headless
+  browser; the page writes its verdict in #result.
+-->
+<html>
+<head><meta charset="utf-8"><title>ajaxer</title></head>
+<body>
+<div id="target" style="position: relative; height: 100px"></div>
+<pre id="result">pending</pre>
+<script src="jquery.js"></script>
+<script src="harness.js"></script>
+<script src="../src/js/core.js"></script>
+<script src="../src/js/ajaxer.js"></script>
+<script>
+    (async function () {
+        var H = Harness;
+        var target = document.getElementById('target');
+        H.check(Ajaxer.version === '1.0.56' && Flow.ajaxer === Ajaxer, 'Ajaxer is the core\'s ajaxer module');
+        H.check(Ajaxer.parseTime('250ms') === 0.25 && Ajaxer.parseTime('1s, 250ms') === 1, 'the durations are the core\'s', Ajaxer.parseTime('250ms'));
+        H.check(typeof $.fn.serializeObject === 'function', 'serializeObject is installed by the core');
+
+        Ajaxer.ready();
+        Ajaxer.setUrl('ping', 'ajaxer-ping.json');
+        Ajaxer.setMethod('ping', 'GET');
+        Ajaxer.setTarget('ping', target);
+        Ajaxer.setLoaderDebounce('ping', 0);
+
+        var answers = [];
+        var sent = new Promise(function (resolve) {
+            Ajaxer.send('ping', { q: 1 }, function (data) { answers.push(data); resolve(); }, function () { answers.push('error'); resolve(); });
+        });
+        H.check(target.classList.contains('ajaxer-call'), 'the target is marked while the call is out', target.className);
+        await sent;
+        await H.after(20);
+        H.check(answers.length === 1 && answers[0] && answers[0].pong === true, 'the channel answers with the JSON', JSON.stringify(answers));
+        H.check(target.querySelector('.ajaxer-loader') !== null, 'a loader was put in the target');
+        H.check(target.classList.contains('ajaxer-success') && !target.classList.contains('ajaxer-call'), 'the target is marked successful afterwards', target.className);
+
+        // The throttle: a second send within the channel's window goes nowhere.
+        // The first send above opened the default throttle's window (1s); let it close.
+        await H.after(1100);
+        Ajaxer.setThrottle('ping', '1s');
+        answers = [];
+        Ajaxer.send('ping', {}, function (data) { answers.push(data); });
+        Ajaxer.send('ping', {}, function (data) { answers.push(data); });
+        await H.after(300);
+        H.check(answers.length === 1, 'two sends within the throttle go once', answers.length);
+        Ajaxer.setThrottle('ping', 0);
+        answers = [];
+        Ajaxer.send('ping', {}, function (data) { answers.push(data); });
+        Ajaxer.send('ping', {}, function (data) { answers.push(data); });
+        await H.after(300);
+        H.check(answers.length === 2, 'with the throttle off both go', answers.length);
+
+        // A url that answers nothing: the error path, the status shown.
+        Ajaxer.setUrl('missing', 'ajaxer-missing.json');
+        Ajaxer.setMethod('missing', 'GET');
+        Ajaxer.setTarget('missing', target);
+        Ajaxer.setRetryLimit('missing', 1);
+        Ajaxer.send('missing', {});
+        await H.after(400);
+        H.check(target.classList.contains('ajaxer-error'), 'a failed call marks the target in error', target.className);
+        var status = target.querySelector('.ajaxer-loader .ajaxer-status');
+        // A file:// page has no HTTP status: jQuery answers statusText "error", shown as "Unexpected error".
+        H.check(status && /Unexpected error/.test(status.textContent), 'the status is shown in the loader', status && status.textContent);
+        H.done();
+    })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
+</script>
+</body>
+</html>

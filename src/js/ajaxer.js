@@ -1,34 +1,28 @@
+// Ajaxer - named AJAX channels over jQuery's $.ajax: a channel has its url,
+// method, output and target set once (Ajaxer.setUrl('search', '/search'), ...),
+// then Ajaxer.send('search', data, success, error, complete) sends, throttled
+// and debounced per channel, with a loader (.ajaxer-loader, after a delay) in
+// the target, the "ajaxer-call" / "ajaxer-success" / "ajaxer-error" classes on
+// it, a retry on failure and a limit of requests in flight (the oldest aborted,
+// or the new one refused, as `cancelable` says). What it shares with the other
+// modules - the durations ("250ms"), $.fn.serializeObject - is the core's.
 (function (root, factory) {
 
-    if (typeof define === 'function' && define.amd) {
-        define(factory);
-    } else if (typeof exports === 'object') {
-        module.exports = factory();
-    } else {
-        root.Ajaxer = factory();
-    }
+    var core = root.Flow && root.Flow.core === true ? root.Flow : (typeof require === 'function' ? require('./core.js') : null);
+    if (!core) throw new Error('ajaxer.js: load core.js first');
 
-})(this, function () {
+    var api = factory(root, core, core.jquery());
+    if (typeof module === 'object' && module.exports) module.exports = api;
+    root.Ajaxer = api;
+    core.ajaxer = api;
 
-    $.fn.serializeObject = function () {
+})(typeof window !== 'undefined' ? window : this, function (window, Flow, $) {
 
-        const o = {};
-        const a = this.serializeArray();
-        $.each(a, function () {
-            if (o[this.name]) {
-                if (!o[this.name].push) {
-                    o[this.name] = [o[this.name]];
-                }
-                o[this.name].push(this.value || '');
-            } else {
-                o[this.name] = this.value || '';
-            }
-        });
-        return o;
-    };
+    if (!$) throw new Error('ajaxer.js: jQuery is needed');
+    var document = window.document;
 
     const Ajaxer = window.Ajaxer = {};
-          Ajaxer.version = '0.1.0';
+          Ajaxer.version = '1.0.56';
 
     const defaultAjaxer  = {
         method:"POST",
@@ -51,17 +45,8 @@
         Ajaxer.abortAll();
     }
 
-    Ajaxer.parseTime = function(str) {
-
-        const array = String(str).split(", ");
-        const mapped = array.map(function (t) {
-
-            if (String(t).endsWith("ms")) return parseFloat(String(t)) / 1000;
-            return parseFloat(String(t));
-        });
-
-        return Math.max(...mapped);
-    }
+    // "250ms", "1s", or several: the longest, in seconds (the core's parseDuration).
+    Ajaxer.parseTime = Flow.parseDuration;
 
     Ajaxer.ready = function (list = {}, options = {}) {
 

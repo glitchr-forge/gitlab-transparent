@@ -1,3 +1,4 @@
-// The whole library's stylesheet: the navigation's and the sticky effects'.
+// The whole library's stylesheet: the navigation's, the sticky effects' and the AJAX channels'.
 @use 'navigation';
 @use 'sticky';
+@use 'ajaxer';
