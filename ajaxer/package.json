@@ -1,0 +1,15 @@
+{
+  "name": "@glitchr/ajaxer",
+  "version": "1.0.56",
+  "description": "AJAX query library",
+  "main": "src/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/glitchr-studio/ajaxer.git"
+  },
+  "author": "Marco Meyer <marco.meyer@glitchr.io>",
+  "license": "LGPL-3.0-or-later",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  }
+}

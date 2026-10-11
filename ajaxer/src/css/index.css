@@ -1,0 +1,77 @@
+
+@keyframes ajaxerLoader {
+    0% {
+        transform: translate3d(-50%, -50%, 0) rotate(0deg);
+    }
+    100% {
+        transform: translate3d(-50%, -50%, 0) rotate(360deg);
+    }
+}
+.ajaxer-status:empty { display:none; }
+.ajaxer-status {
+    margin-left: 45px;
+    padding: 15px;
+    margin-right:10px;
+
+    overflow: scroll;
+    width: 100%;
+    text-align:center;
+}
+
+.ajaxer-loader.ajaxer-success{
+    display:none;
+}
+
+.ajaxer-loader {
+    transition: opacity 0.25s ease-out, margin 0.25s ease-out;
+    opacity: 0;
+    height: 0;
+    margin-top:5px;
+    overflow: hidden;
+    border-radius:30px;
+}
+
+.ajaxer-loader.ajaxer-call:hover { background-color:#FCFCFCEE; cursor:pointer; }
+.ajaxer-loader.ajaxer-call {
+
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate3d(-50%, -50%, 0);
+    background-color:white;
+
+    display: flex;
+    justify-content: center;
+    align-items: center;
+
+    height: auto;
+    min-height: 60px;
+    min-width: 60px;
+    box-shadow: 1px 1px 5px #0001;
+    z-index:10;
+
+    opacity:1;
+    margin-top:0px;
+}
+
+.ajaxer-error .ajaxer-status
+{
+    margin-left:10px;
+}
+.ajaxer-loader.ajaxer-call:not(.ajaxer-error):after {
+
+    animation: 0.5s linear infinite ajaxerLoader;
+    animation-play-state: inherit;
+    border: solid 5px #cfd0d1;
+    border-bottom-color: #1c87c9;
+    border-radius: 50%;
+    content: "";
+    height: 40px;
+    width: 40px;
+    position: absolute;
+    top: 50%;
+    left: 30px;
+    will-change: transform;
+
+    z-index: 10;
+}
