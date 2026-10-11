@@ -1,4 +1,6 @@
-# Sticky JS library
+# Sticky and stops
+
+`src/js/sticky.js` (global `Sticky`) and `src/js/stops.js` (global `StickyStops`). The options of Sticky are listed in the README and in `Sticky.settings`; this page describes the address following the reading and the scroll stops.
 
 ## The address follows the reading
 
@@ -18,7 +20,7 @@ it adds nothing to the history.
 ## Scroll stops
 
 `src/js/stops.js` - places on the page a scroll settles on, once it has come
-to rest. Standalone: no jQuery, and `import '@glitchr/stickyjs/src/js/stops.js'`
+to rest. Standalone: no jQuery, and `import '@glitchr/transparentjs/stops'`
 brings in nothing else.
 
 ```html

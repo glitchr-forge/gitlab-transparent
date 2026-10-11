@@ -6,12 +6,12 @@ Needs jQuery and the core (`src/js/core.js`, loaded first), which provides the
 durations (`"250ms"`, `"1s"`) and `$.fn.serializeObject`.
 
 ```js
-import '@glitchr/flowjs/ajaxer';   // the module, with its stylesheet
+import '@glitchr/transparentjs/ajaxer';   // the module, with its stylesheet
 
 Ajaxer.setUrl('search', '/search');
 Ajaxer.setMethod('search', 'GET');
 Ajaxer.setTarget('search', '#results');      // gets the ajaxer-* classes and the loader
-Ajaxer.setThrottle('search', '400ms');
+Ajaxer.setThrottle('search', 400);          // milliseconds, see below
 
 Ajaxer.send('search', { q: 'miso' },
     function (data) { /* success */ },
@@ -36,17 +36,23 @@ is the default for every channel.
 | `setOutput(name, dataType)` | `output` | `"json"` | jQuery's `dataType` |
 | `setTarget(name, el)` | `target` | the caller (`this`) | the element marked while the call is out |
 | `setLoaderContainer(name, el)` | `loader_container` | the target | where the `.ajaxer-loader` is put |
-| `setThrottle(name, d)` | `throttle` | `1000` | a send within this time of the last is dropped; `0` for none |
-| `setDebounce(name, d)` | `debounce` | `0` | wait this long after the last call |
-| `setLoaderDebounce(name, d)` | `loader_debounce` | `1500` | the loader appears only after this time |
+| `setThrottle(name, d)` | `throttle` | `1000` | a send within this many ms of the last is dropped; `0` for none |
+| `setDebounce(name, d)` | `debounce` | `0` | wait this many ms after the last call |
+| `setLoaderDebounce(name, d)` | `loader_debounce` | `1500` | the loader appears only after this many ms |
 | `setRetryLimit(name, n)` | `retry_limit` | `1` | tries after a failure |
 | `setQueryLimit(name, n)` | `query_limit` | none | requests in flight at most |
 | `cancelable(name, bool)` | `cancelable` | `false` | at the limit, abort the oldest (true) or refuse the new one |
 | `setLoaderThrottle(name, d)` | `loader_throttle` | none | stored; the code reads no `loader_throttle` (kept as it was) |
 
-Durations are numbers of milliseconds-as-text like `"250ms"` or `"1s"` (several,
-comma-separated, give the longest); a plain number is read as seconds by
-`Ajaxer.parseTime`, which is the core's `Flow.parseDuration`.
+Throttle and debounce are read as 1.0.56 reads them, and the unit is a quirk
+worth knowing: the value goes through `Ajaxer.parseTime` (the core's
+`Flow.parseDuration`, which turns `"250ms"` into 0.25 and `"1s"` or `1000` into
+1 and 1000), a result under 1 means "off", and anything else is then used as a
+number of milliseconds. So `1000` (the default) and `400` are milliseconds,
+`0` is off, and `"250ms"` or `"1s"` do not mean what they say (off, and 1 ms).
+Write plain millisecond numbers for `throttle` and `debounce`. `loader_debounce`
+goes through the same function and then to `setTimeout` too: `1500` is 1.5 s.
+Kept as it was, not corrected.
 
 ## States
 

@@ -44,7 +44,7 @@
         // The throttle: a second send within the channel's window goes nowhere.
         // The first send above opened the default throttle's window (1s); let it close.
         await H.after(1100);
-        Ajaxer.setThrottle('ping', '1s');
+        Ajaxer.setThrottle('ping', 1000);
         answers = [];
         Ajaxer.send('ping', {}, function (data) { answers.push(data); });
         Ajaxer.send('ping', {}, function (data) { answers.push(data); });
