@@ -1,0 +1,81 @@
+<!doctype html>
+<!--
+  StickySortable: an item dragged below the others (pointer events, past the drag threshold) is
+  reordered and onChange told once; a handle focused and ArrowDown moves its item; a press that
+  does not move is a click, not a drag. Pointer capture is stubbed: a synthetic pointer has no
+  active pointer to capture. Opened by tests/run.mjs in a headless browser; the page writes its
+  verdict in #result.
+-->
+<html>
+<head>
+<meta charset="utf-8"><title>sortable</title>
+<style>
+    body { margin: 0; }
+    #list { width: 300px; }
+    li { list-style: none; height: 40px; margin: 0; padding: 0; border: 1px solid #999; }
+    .handle { display: inline-block; width: 20px; height: 20px; touch-action: none; }
+    .is-sortable-placeholder { height: var(--sortable-item-height); border: 1px dashed #333; }
+</style>
+</head>
+<body>
+<ul id="list">
+    <li data-sortable-item id="i1"><button class="handle">::</button> one</li>
+    <li data-sortable-item id="i2"><button class="handle">::</button> two</li>
+    <li data-sortable-item id="i3"><button class="handle">::</button> three</li>
+</ul>
+<pre id="result">pending</pre>
+<script src="jquery.js"></script>
+<script src="harness.js"></script>
+<script src="../src/js/core.js"></script>
+<script src="../src/js/sortable.js"></script>
+<script>
+    (async function () {
+        var H = Harness;
+        Element.prototype.setPointerCapture = function () {};
+        Element.prototype.releasePointerCapture = function () {};
+
+        var list = document.getElementById('list');
+        var changes = [];
+        $(list).stickySortable({ handle: '.handle', onChange: function (items) { changes.push(items.map(function (el) { return el.id; }).join(',')); } });
+        H.check(list._stickySortable instanceof StickySortable && Flow.sortable === StickySortable, 'attached through the jQuery plugin');
+
+        var order = function () { return Array.prototype.map.call(list.querySelectorAll('[data-sortable-item]'), function (el) { return el.id; }).join(','); };
+        function pointer(type, target, x, y) {
+            target.dispatchEvent(new PointerEvent(type, { pointerId: 7, pointerType: 'mouse', button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: x, clientY: y, bubbles: true, cancelable: true }));
+        }
+        var handle1 = document.querySelector('#i1 .handle');
+        var r = handle1.getBoundingClientRect();
+        var x = r.left + 5, y = r.top + 5;
+
+        // A press that does not move: a click, nothing reordered.
+        pointer('pointerdown', handle1, x, y);
+        pointer('pointerup', handle1, x, y);
+        H.check(order() === 'i1,i2,i3' && changes.length === 0, 'a press without a move is a click', order());
+
+        // Dragged below the third item.
+        pointer('pointerdown', handle1, x, y);
+        pointer('pointermove', handle1, x, y + 3);               // under the threshold
+        H.check(!document.getElementById('i1').classList.contains('is-dragging'), 'under the drag threshold nothing moves yet');
+        pointer('pointermove', handle1, x, y + 10);              // past it: the drag begins
+        H.check(document.getElementById('i1').classList.contains('is-dragging') && list.querySelector('.is-sortable-placeholder'), 'past the threshold the item is dragged and a placeholder holds its place');
+        var r3 = document.getElementById('i3').getBoundingClientRect();
+        pointer('pointermove', document, x, r3.bottom - 2);
+        pointer('pointerup', document, x, r3.bottom - 2);
+        H.check(order() === 'i2,i3,i1', 'the item dropped below the others comes last', order());
+        H.check(changes.length === 1 && changes[0] === 'i2,i3,i1', 'onChange told once, with the new order', JSON.stringify(changes));
+        H.check(!list.querySelector('.is-sortable-placeholder') && document.getElementById('i1').style.position === '', 'the placeholder is gone and the item\'s style cleared');
+
+        // The keyboard: ArrowUp on a focused handle moves its item up.
+        var handle = document.querySelector('#i1 .handle');
+        handle.focus();
+        H.key('ArrowUp', {}, handle);
+        H.check(order() === 'i2,i1,i3' && changes.length === 2, 'ArrowUp on the handle moves the item up', order());
+        H.key('ArrowDown', {}, handle);
+        H.check(order() === 'i2,i3,i1', 'ArrowDown moves it down again', order());
+
+        H.check(StickySortable.defaults.items === '[data-sortable-item]', 'the defaults are exposed');
+        H.done();
+    })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
+</script>
+</body>
+</html>

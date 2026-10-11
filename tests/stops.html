@@ -1,0 +1,117 @@
+<!doctype html>
+<!--
+  StickyStops: a scroll that comes to rest between two stops glides on to the one it was heading
+  for; a nudge inside a stop's band settles back; the keys go from stop to stop (an arrow), and a
+  page key reads a section taller than the screen a screen at a time, never past its end; such a
+  section is read freely. smooth: false, so that every glide is a jump the page can measure at once.
+  Opened by tests/run.mjs in a headless browser; the page writes its verdict in #result.
+-->
+<html>
+<head>
+<meta charset="utf-8"><title>stops</title>
+<style>
+    html { scroll-behavior: auto; }
+    body { margin: 0; }
+    section { height: 100vh; }
+    #tall { height: 250vh; }
+    #result { position: fixed; top: 0; left: 0; margin: 0; }
+</style>
+</head>
+<body>
+<header id="head" class="sticky-stop" data-sticky-band-down="0" style="height: 60px"></header>
+<section id="a" class="sticky-stop"></section>
+<section id="b" class="sticky-stop" data-sticky-band-up="100" data-sticky-band-down="100"></section>
+<section id="tall" class="sticky-stop" data-sticky-band-up="100" data-sticky-band-down="100"></section>
+<section id="d" class="sticky-stop"></section>
+<footer style="height: 50vh"></footer>
+<pre id="result">pending</pre>
+<script src="harness.js"></script>
+<script src="../src/js/core.js"></script>
+<script src="../src/js/stops.js"></script>
+<script>
+    (async function () {
+        var H = Harness;
+        var SETTLE = 40;
+        var top = function (id) { return Math.round(document.getElementById(id).getBoundingClientRect().top + window.scrollY); };
+        var y = function () { return Math.round(window.scrollY); };
+        var vh = window.innerHeight;
+        var stopped = [];
+        window.addEventListener('sticky:stop', function (e) { stopped.push(e.detail.stop.id + (e.detail.key ? ' (key)' : '')); });
+
+        var stops = StickyStops.attach(window, { smooth: false, keys: true, settle: SETTLE });
+        H.check(stops === StickyStops.get(window), 'attached to the window');
+        H.check(stops.measure().length === 5, 'five stops measured', stops.measure().length);
+
+        // A rest between a and b, heading down: on to b.
+        H.scroll(top('b') - 300);
+        await H.after(SETTLE * 3);
+        H.check(H.near(y(), top('b')), 'a rest heading down glides on to the next stop', y() + ' vs ' + top('b'));
+
+        // A nudge down inside b's band below it: back to b.
+        H.scroll(top('b') + 50);
+        await H.after(SETTLE * 3);
+        H.check(H.near(y(), top('b')), 'a nudge inside the band settles back', y() + ' vs ' + top('b'));
+
+        // Heading up from b, resting between a and b (past b's band above): back to a.
+        H.scroll(top('b') - 300);
+        await H.after(SETTLE * 3);
+        H.check(H.near(y(), top('a')), 'a rest heading up glides back to the stop above', y() + ' vs ' + top('a'));
+
+        // ArrowDown goes from stop to stop; ArrowUp back.
+        var down = H.key('ArrowDown');
+        await H.after(SETTLE * 3);
+        H.check(down.defaultPrevented && H.near(y(), top('b')), 'ArrowDown goes to the next stop', y() + ' vs ' + top('b'));
+        H.key('ArrowDown');
+        await H.after(SETTLE * 3);
+        H.check(H.near(y(), top('tall')), 'ArrowDown again goes to the tall stop', y() + ' vs ' + top('tall'));
+        H.key('ArrowUp');
+        await H.after(SETTLE * 3);
+        H.check(H.near(y(), top('b')), 'ArrowUp goes back to the stop above', y() + ' vs ' + top('b'));
+
+        // Inside the tall stop, the scroll is free: a rest 400px in stays there.
+        H.scroll(top('tall') + 400);
+        await H.after(SETTLE * 3);
+        H.check(H.near(y(), top('tall') + 400), 'a tall stop is read freely', y() + ' vs ' + (top('tall') + 400));
+
+        // A page key reads it a screen (7/8) at a time, never past its end.
+        var before = y();
+        H.key('PageDown');
+        await H.after(SETTLE * 3);
+        var page = Math.round(vh * 0.875);
+        var end = stops.measure().filter(function (s) { return s.element.id === 'tall'; })[0].end;
+        H.check(H.near(y(), Math.min(before + page, end), 6), 'PageDown reads a screen inside the tall stop', y() + ' vs ' + Math.min(before + page, end));
+        H.key('PageDown'); await H.after(SETTLE * 3);
+        H.check(H.near(y(), end), 'PageDown stops at the end of the tall stop, never past it', y() + ' vs end ' + end);
+        H.key('PageDown'); await H.after(SETTLE * 3);
+        H.check(H.near(y(), top('d')), 'from the end, PageDown goes on to the next stop', y() + ' vs ' + top('d'));
+
+        // End and Home: the last and the first stop.
+        H.key('End'); await H.after(SETTLE * 3);
+        H.check(H.near(y(), top('d')), 'End rests at the last stop', y());
+        H.key('Home'); await H.after(SETTLE * 3);
+        H.check(y() === 0, 'Home goes to the first stop', y());
+
+        // Keys left alone: in a field, with a modifier, and when the page took the key.
+        var input = document.createElement('input'); input.style.cssText = 'position: fixed; top: 0; right: 0'; document.body.appendChild(input); input.focus();
+        var typed = H.key('ArrowDown', {}, input);
+        H.check(!typed.defaultPrevented, 'an arrow in a field is left to the field');
+        input.remove();
+        var meta = H.key('ArrowDown', { metaKey: true });
+        H.check(!meta.defaultPrevented, 'an arrow with Meta is left to the browser');
+        document.body.addEventListener('keydown', function (e) { if (e.key === ' ') e.preventDefault(); }, { once: true });
+        H.key(' ');
+        await H.after(SETTLE * 3);
+        H.check(y() === 0, 'a key the page took is the page\'s', y());
+
+        // Progress: the custom properties on <html>.
+        H.check(document.documentElement.style.getPropertyValue('--sticky-stop') === '0', 'progress written to --sticky-stop', document.documentElement.style.getPropertyValue('--sticky-stop'));
+        H.check(stopped.length >= 8, 'sticky:stop announced each glide', stopped.join(', '));
+
+        // One listener of each kind, through the core.
+        var l = H.listeners(/^window (scroll|wheel|touchstart|mousedown|resize|keydown)$/);
+        H.check(l['window scroll'] === 1 && l['window keydown'] === 1 && l['window wheel'] === 1, 'one native listener per kind on the window', JSON.stringify(l));
+        H.done();
+    })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
+</script>
+</body>
+</html>

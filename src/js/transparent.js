@@ -1,216 +1,31 @@
-// Modern browser: use passive event listeners where appropriate for better performance
-jQuery.event.special.touchstart = { setup: function( _, ns, handle ) { this.addEventListener("touchstart", handle, { passive: !ns.includes("noPreventDefault") }); } };
-jQuery.event.special.touchmove  = { setup: function( _, ns, handle ) { this.addEventListener("touchmove", handle, { passive: !ns.includes("noPreventDefault") }); } };
-jQuery.event.special.wheel      = { setup: function( _, ns, handle ) { this.addEventListener("wheel", handle, { passive: true }); } };
-jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addEventListener("mousewheel", handle, { passive: true }); } };
-
-// Transparent.js
+// Transparent.js - the navigation: links and forms load the next page in the
+// background and swap the page's block in place, with the history, the scroll
+// positions, the head and the scripts kept in step; the nest (a page opened as
+// a website-in-website panel), the prefetch, the form memory, the lazy loading.
+//
+// The core (Flow) carries what the modules share: the units, the scroll
+// padding, the scrollers, the programmatic scroll (and the "user-scroll" flag),
+// the hash of the address, the jQuery plugins, and the moments a page is loaded
+// - which this module announces (transparent:load) so that the others attach
+// themselves again to the page swapped in. Needs jQuery.
 (function (root, factory) {
 
-    if (typeof define === 'function' && define.amd) {
-        define(factory);
-    } else if (typeof exports === 'object') {
-        module.exports = factory();
-    } else {
-        root.Transparent = factory();
-    }
+    var core = root.Flow && root.Flow.core === true ? root.Flow : (typeof require === 'function' ? require('./core.js') : null);
+    if (!core) throw new Error('transparent.js: load core.js first');
 
-})(this, function () {
+    var api = factory(root, core, core.jquery());
+    if (typeof module === 'object' && module.exports) module.exports = api;
+    root.Transparent = api;
+    core.navigation = api;
 
-    window.replaceHash = function(newHash, triggerHashChange = true, skipIfEmptyIdentifier = true) {
+})(typeof window !== 'undefined' ? window : this, function (window, Flow, $) {
 
-        // The query string stays: rebuilding the address as origin + pathname
-        // + hash silently dropped it, so changing the fragment on
-        // "/list?page=3#item-12" rewrote the address to "/list#item-12" - the
-        // page still showed page 3 while the address claimed page 1, and any
-        // reload or shared link landed on the wrong page.
-        var base = location.origin + location.pathname + location.search;
+    if (!$) throw new Error('transparent.js: jQuery is needed');
+    var jQuery = $;
+    var document = window.document;
 
-        var oldHash = location.hash;
-        var oldURL = base+location.hash;
-        var oldHashElement = $(oldHash);
-
-        if(!newHash) newHash = "";
-        if (newHash !== "" && (''+newHash).charAt(0) !== '#')
-            newHash = '#' + newHash;
-
-        var newURL = base+newHash;
-        var newHashElement = $(newHash);
-
-        var fallback  = $(newHash).length === 0;
-        fallback |= newHashElement.has(oldHashElement).length > 0;
-
-        if((skipIfEmptyIdentifier && !newHash) || fallback){
-
-            dispatchEvent(new HashChangeEvent("hashfallback", {oldURL:oldURL, newURL:newURL}));
-            newHash = skipIfEmptyIdentifier && !newHash ? "" : (newHashElement.length == 0 ? "" : oldHash);
-
-            oldURL = base+location.hash;
-            newURL = base+newHash;
-        }
-
-        if(oldURL == newURL) return false;
-
-        var state = Object.assign({}, history.state, {href: newURL});
-        // Same srcdoc-iframe restriction as the pushState() call in
-        // handleResponse() - see its comment for the full explanation.
-        try { history.replaceState(state, '', newURL); } catch (e) {}
-
-        if(triggerHashChange)
-            dispatchEvent(new HashChangeEvent("hashchange", {oldURL:oldURL, newURL:newURL}));
-
-        return true;
-    };
-
-    $.fn.serializeObject = function() {
-        var o = {};
-        var a = this.serializeArray();
-        $.each(a, function() {
-            if (o[this.name]) {
-                if (!o[this.name].push) {
-                    o[this.name] = [o[this.name]];
-                }
-                o[this.name].push(this.value || '');
-            } else {
-                o[this.name] = this.value || '';
-            }
-        });
-        return o;
-    };
-
-    /* Scroll test for ONE node, no jQuery wrapper. The jQuery plugins below
-       are the public API and keep working exactly as before, but they cost a
-       $() allocation (two, since isScrollable calls both X and Y) for every
-       element they touch - which is fine per element and ruinous for
-       getScrollableElement, whose whole job is to test every element in the
-       document. Sharing one implementation here rather than open-coding it
-       there keeps the two from drifting apart.
-
-       Same short-circuit as the plugins: the cheap layout comparison decides
-       the answer for nearly every element, so getComputedStyle - by far the
-       expensive half - is only reached for the few that could actually
-       qualify. */
-    function isScrollableNode(node)
-    {
-        if (node === window || node === document) node = document.documentElement;
-        if (!node || node.nodeType !== 1) return false;
-
-        var isDom = node === document.documentElement;
-
-        if (node.scrollWidth > node.clientWidth
-            && (isDom || window.getComputedStyle(node).overflowX.indexOf('scroll') !== -1)) return true;
-
-        if (node.scrollHeight > node.clientHeight
-            && (isDom || window.getComputedStyle(node).overflowY.indexOf('scroll') !== -1)) return true;
-
-        return false;
-    }
-
-    $.fn.isScrollable  = function()
-    {
-        for (let el of $(this).isScrollableX())
-            if(el) return true;
-
-        for (let el of $(this).isScrollableY())
-            if(el) return true;
-
-        return false;
-    }
-
-    $.fn.isScrollableX = function() {
-
-        return $(this).map(function(i) {
-
-            var el = this[i] === window ? document.documentElement : this[i];
-            var isDom = el == document.documentElement;
-
-            // Cheap test first, and bail on it. The result is
-            // `hasScrollableContent && (isOverflowScroll || isDom)`, so an
-            // element with nothing to scroll can never qualify however it is
-            // styled - yet getComputedStyle() was being called for every one
-            // of them anyway.
-            //
-            // That matters because of who calls this: getScrollableElement()
-            // runs `$(el).find('*')` over the WHOLE document and tests every
-            // element, immediately after a page swap has inserted a fresh
-            // subtree. At ~1600 elements that was ~3200 getComputedStyle
-            // calls plus the layout flush they force, measured at 136.6ms of
-            // the swap's blocking task - the single most expensive phase in
-            // it, larger than every piece of transparentJS's own work
-            // combined. Almost none of those elements scroll.
-            //
-            // Same short-circuit for isDom: the documentElement qualifies on
-            // that flag alone, so its overflow never needed reading either.
-            if (!(el.scrollWidth > el.clientWidth)) return false;
-            if (isDom) return true;
-
-            return window.getComputedStyle(el).overflowX.indexOf('scroll') !== -1;
-
-        }.bind(this));
-    }
-
-    $.fn.isScrollableY = function() {
-
-        return $(this).map(function(i) {
-
-            var el = this[i] === window ? document.documentElement : this[i];
-            var isDom = el == document.documentElement;
-
-            // Same short-circuit as isScrollableX above - see that comment
-            // for why this one call site dominated the swap.
-            if (!(el.scrollHeight > el.clientHeight)) return false;
-            if (isDom) return true;
-
-            return window.getComputedStyle(el).overflowY.indexOf('scroll') !== -1;
-
-        }.bind(this));
-    }
-
-    $.fn.closestScrollable = function()
-    {
-        return $(this).map((i) => {
-
-            var target = this[i] === window ? document.documentElement : this[i];
-            if (target === undefined) target = document.documentElement;
-
-            while (target !== document.documentElement) {
-
-                if($(target).isScrollable()) return target;
-
-                if(target.parentElement === undefined) return undefined;
-                if(target.parentElement === null) return null;
-
-                target = target.parentElement;
-            }
-
-            return $(target).isScrollable() ? target : undefined;
-        });
-    }
-
-    $.fn.repaint = function(duration = 1000, reiteration=5) {
-
-        var time = 0;
-        var interval = undefined;
-        var fn = function () {
-
-            $(this).each(function (_, el) {
-
-                var displayBak = el.style.display;
-
-                el.style.display = "none";
-                el.style.display = displayBak;
-                el.offsetHeight;
-            });
-
-            if (time > duration) clearInterval(interval);
-            time += duration/reiteration;
-
-        }.bind(this);
-
-        fn();
-        if(reiteration > 0)
-            interval = setInterval(fn, duration/reiteration);
-    };
+    // The core's, kept here by their old names.
+    var isScrollableNode = Flow.isScrollableNode;
 
     var Transparent = window.Transparent = {};
     Transparent.version = '3.0.31';
@@ -1561,17 +1376,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         return name == newName;
     }
 
-    Transparent.parseDuration = function(str) {
-
-        var array = String(str).split(", ");
-        array = array.map(function(t) {
-
-            if(String(t).endsWith("ms")) return parseFloat(String(t))/1000;
-            return parseFloat(String(t));
-        });
-
-        return Math.max(...array);
-    }
+    Transparent.parseDuration = Flow.parseDuration;
 
     Transparent.callback = function(fn = function() {}, delay = 0) {
 
@@ -1905,100 +1710,22 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         Transparent.activeOut();
     }
 
-    Transparent.userScroll = function(el = undefined) { return $(el === undefined ? document.documentElement : el).closestScrollable().prop("user-scroll") ?? true; }
+    Transparent.userScroll = Flow.userScroll;
+
+    /** Scroll an element (the window by default) through the core's engine, a tick later (the element rendered first). */
     Transparent.scrollTo = function(dict, el = window, callback = function() {})
     {
         setTimeout(function() {
 
             el = $(el).length ? $(el)[0] : window;
-            if (el === window  )
-                el = document.documentElement;
-            if (el === document)
-                el = document.documentElement;
+            Flow.scrollTo(el, dict, callback);
 
-            var maxScrollX = $(el).prop("scrollWidth") - Math.round($(el).prop("clientWidth"));
-            if (maxScrollX == 0) maxScrollX = Math.round($(el).prop("clientWidth"));
-            var maxScrollY = $(el).prop("scrollHeight") - Math.round($(el).prop("clientHeight"));
-            if (maxScrollY == 0) maxScrollY = Math.round($(el).prop("clientHeight"));
-
-            scrollTop  = Math.max(0, Math.min(dict["top"] ?? $(el).prop("scrollTop"), maxScrollY));
-            scrollLeft = Math.max(0, Math.min(dict["left"] ?? $(el).prop("scrollLeft"), maxScrollX));
-
-            speed    = parseFloat(dict["speed"] ?? 0);
-            easing   = dict["easing"] ?? "swing";
-            debounce = dict["debounce"] ?? 0;
-
-            duration  = 1000*Transparent.parseDuration(dict["duration"] ?? 0);
-            durationX = 1000*Transparent.parseDuration(dict["duration-x"] ?? dict["duration"] ?? 0);
-            durationY = 1000*Transparent.parseDuration(dict["duration-y"] ?? dict["duration"] ?? 0);
-
-            if(speed) {
-
-                var currentScrollX = $(el)[0].scrollLeft;
-                if(currentScrollX < scrollLeft || scrollLeft == 0) // Going to the right
-                    distanceX = Math.abs(scrollLeft - currentScrollX);
-                else // Going back to 0 position
-                    distanceX = currentScrollX;
-
-                var currentScrollY = $(el)[0].scrollTop;
-                if(currentScrollY <= scrollTop || scrollTop == 0) // Going to the right
-                    distanceY = Math.abs(scrollTop - currentScrollY);
-                else // Going back to 0 position
-                    distanceY = currentScrollY;
-
-                durationX = speed ? 1000*distanceX/speed : durationX;
-                durationY = speed ? 1000*distanceY/speed : durationY;
-                duration = durationX+durationY;
-            }
-
-            var callbackWrapper = function() {
-
-                el.dispatchEvent(new Event('scroll'));
-                callback();
-
-                $(el).prop("user-scroll", true);
-            };
-
-            if(duration == 0) {
-
-                el.scrollTo(scrollLeft, scrollTop);
-                el.dispatchEvent(new Event('scroll'));
-                callback();
-
-                $(el).prop("user-scroll", true);
-
-            } else {
-
-                $(el).stop(true).animate({scrollTop: scrollTop}, durationY, easing,
-                    () => $(el).stop(true).animate({scrollLeft: scrollLeft}, durationX, easing, Transparent.debounce(callbackWrapper, debounce))
-                );
-            }
-
-        }.bind(this), 1);
+        }, 1);
 
         return this;
     }
 
-    Transparent.debounce = function(func, wait, immediate) {
-
-        var timeout;
-
-        return function() {
-
-            var context = this, args = arguments;
-            var later = function() {
-
-                timeout = null;
-                if (!immediate) func.apply(context, args);
-            };
-
-            var callNow = immediate && !timeout;
-            clearTimeout(timeout);
-
-            timeout = setTimeout(later, wait);
-            if (callNow) func.apply(context, args);
-        };
-    };
+    Transparent.debounce = Flow.debounce;
 
 
     Transparent.findImages = function () {
@@ -2194,13 +1921,9 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         window.previousLocation = window.location.toString();
         if(callback === null) callback = function() {};
 
+        // (The reader taking over - a wheel, a finger - gives the scroll back
+        // to them: the core's one listener on the window, see Flow.release.)
         $(Transparent.html).data("autoscroll-prevent", false);
-        $(Transparent.html).off("wheel.autoscroll DOMMouseScroll.autoscroll mousewheel.autoscroll touchstart.autoscroll");
-        $(Transparent.html).on("wheel.autoscroll DOMMouseScroll.autoscroll mousewheel.autoscroll touchstart.autoscroll", function(e) {
-
-            $(this).prop("user-scroll", true);
-            $(this).stop();
-        });
 
         activeInRemainingTime = activeInRemainingTime - (Date.now() - activeInTime);
 
@@ -2395,7 +2118,7 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
                 // left to it; and only for a page that came back to its own
                 // address, since a POST that lands somewhere else is a page
                 // the reader has not seen, and starts where its own top is.
-                window.scrollTo(keptScroll.left, keptScroll.top);
+                Flow.jump(window, keptScroll.top, keptScroll.left);
             }
 
             }, 0); }); /* end rAF + setTimeout - see the comment above it */
@@ -2459,41 +2182,11 @@ jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addE
         } catch (error) { return false; }
     }
 
-    Transparent.remToPixel     = function(rem)     { return parseFloat(rem) * parseFloat(getComputedStyle(document.documentElement).fontSize); }
-    Transparent.emToPixel      = function(em, el)  { return parseFloat(em ) * parseFloat(getComputedStyle(el.parentElement).fontSize); }
+    Transparent.remToPixel     = Flow.remToPixel;
+    Transparent.emToPixel      = Flow.emToPixel;
     Transparent.percentToPixel = function(p , el)  { return parseFloat(p  ) * $(el).outerWidth(); }
-    Transparent.parseToPixel   = function(str, el) {
-
-        if(str === undefined) return undefined;
-
-        var array = String(str).split(", ");
-        array = array.map(function(s) {
-
-            if(s.endsWith("rem")) return Transparent.remToPixel    (s);
-            else if(s.endsWith("em") ) return Transparent.emToPixel     (s, el);
-            else if(s.endsWith("%")  ) return Transparent.percentToPixel(s, el);
-            return parseFloat(s);
-        });
-
-        return Math.max(...array);
-    }
-
-    Transparent.getScrollPadding = function(el = document.documentElement) {
-
-        var style  = window.getComputedStyle(el);
-        var dict = {};
-        dict["top"   ] = Transparent.parseToPixel(style["scroll-padding-top"   ] || 0, el);
-        dict["left"  ] = Transparent.parseToPixel(style["scroll-padding-left"  ] || 0, el);
-        dict["right" ] = Transparent.parseToPixel(style["scroll-padding-right" ] || 0, el);
-        dict["bottom"] = Transparent.parseToPixel(style["scroll-padding-bottom"] || 0, el);
-
-        if(isNaN(dict["top"   ])) dict["top"]    = 0;
-        if(isNaN(dict["left"  ])) dict["left"]   = 0;
-        if(isNaN(dict["right" ])) dict["right"]  = 0;
-        if(isNaN(dict["bottom"])) dict["bottom"] = 0;
-
-        return dict;
-    }
+    Transparent.parseToPixel   = Flow.parseToPixel;
+    Transparent.getScrollPadding = Flow.scrollPadding;
 
     Transparent.scrollToHash = function(hash = window.location.hash, options = {}, callback = function() {}, el = window)
     {

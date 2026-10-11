@@ -1,204 +1,57 @@
-import $ from 'jquery';
+// Sticky - the classic scroll effects: a header that hides as the page scrolls
+// down and shows again on the way up (.sticky-top), a bar that rises from the
+// bottom (.sticky-bottom), widgets that stay in view (.sticky-widget), blocks
+// that fade in and out as they pass (.sticky-easein, .sticky-easeout), the
+// address following the headline being read (.sticky-headlines, replacehash),
+// magnets the scroll snaps to (.sticky-magnet), scroll-percent triggers,
+// swipes, and the autoscroll of long blocks (.sticky-autoscroll).
+//
+// The scroll is heard through the core (Flow): one native listener per
+// scroller, the event computed once per frame for every effect - not once per
+// effect, as the jQuery "scrolldelta" special event did - and bound once,
+// however many pages the navigation swaps in. The core also carries the units,
+// the scroll padding, the scrollers and the programmatic scroll the effects
+// share with the other modules. Needs jQuery.
+(function (root, factory) {
 
-// Modern browser: use passive event listeners where appropriate for better performance
-jQuery.event.special.touchstart = { setup: function( _, ns, handle ) { this.addEventListener("touchstart", handle, { passive: !ns.includes("noPreventDefault") }); } };
-jQuery.event.special.touchmove  = { setup: function( _, ns, handle ) { this.addEventListener("touchmove", handle, { passive: !ns.includes("noPreventDefault") }); } };
-jQuery.event.special.wheel      = { setup: function( _, ns, handle ) { this.addEventListener("wheel", handle, { passive: true }); } };
-jQuery.event.special.mousewheel = { setup: function( _, ns, handle ) { this.addEventListener("mousewheel", handle, { passive: true }); } };
+    var core = root.Flow && root.Flow.core === true ? root.Flow : (typeof require === 'function' ? require('./core.js') : null);
+    if (!core) throw new Error('sticky.js: load core.js first');
 
-var scrollState = {};
-var replaceHashFlag = false;
+    var api = factory(root, core, core.jquery());
+    if (typeof module === 'object' && module.exports) module.exports = api;
+    root.Sticky = api;
+    core.sticky = api;
 
-// Sticky.js
-(function(namespace) {
+})(typeof window !== 'undefined' ? window : this, function (window, Flow, $) {
 
-    namespace.replaceHash = function(newHash, triggerHashChange = true, skipIfEmptyIdentifier = true) {
+    if (!$) throw new Error('sticky.js: jQuery is needed');
+    var jQuery = $;
+    var document = window.document;
 
-        replaceHashFlag = true;
-        var oldHash = location.hash;
-        var oldURL = location.origin+location.pathname+location.hash;
-        var oldHashElement = $(oldHash);
+    /* The scroll event, computed: Sticky.compute(event) on a jQuery handler
+       bound to "scrolldelta" - kept for a page's own handlers; the effects
+       themselves are run through the core's scroll channel, once per frame. */
+    jQuery.event.special.scrolldelta = {
 
-        if(!newHash) newHash = "";
-        if (newHash !== "" && (''+newHash).charAt(0) !== '#')
-            newHash = '#' + newHash;
-        var newURL = location.origin+location.pathname+newHash;
-        var newHashElement = $(newHash);
+        delegateType: "scroll",
+        bindType: "scroll",
+        handle: function (event) {
 
-        var fallback  = $(newHash).length === 0;
-            fallback |= newHashElement.has(oldHashElement).length > 0;
+            var handleObj = event.handleObj;
 
-        if((skipIfEmptyIdentifier && !newHash) || fallback){
+            event = Sticky.compute(event);
+            event.type = handleObj.origType;
 
-            dispatchEvent(new HashChangeEvent("hashfallback", {oldURL:oldURL, newURL:newURL}));
-            newHash = skipIfEmptyIdentifier && !newHash ? "" : (newHashElement.length == 0 ? "" : oldHash);
-
-            oldURL = location.origin+location.pathname+location.hash;
-            newURL = location.origin+location.pathname+newHash;
+            var ret    = handleObj.handler.apply(this, arguments);
+            event.type = handleObj.type;
+            return ret;
         }
+    };
 
-        if(oldURL == newURL) return false;
-
-        var state = Object.assign({}, history.state, {href: newURL});
-        history.replaceState(state, '', newURL);
-        
-        if(triggerHashChange)
-            dispatchEvent(new HashChangeEvent("hashchange", {oldURL:oldURL, newURL:newURL}));
-
-        replaceHashFlag = false;
-        return true;
-    }
-
-})(window);
-
-$.fn.serializeObject = function() {
-    var o = {};
-    var a = this.serializeArray();
-    $.each(a, function() {
-        if (o[this.name]) {
-            if (!o[this.name].push) {
-                o[this.name] = [o[this.name]];
-            }
-            o[this.name].push(this.value || '');
-        } else {
-            o[this.name] = this.value || '';
-        }
-    });
-    return o;
-};
-
-$.fn.isScrollable  = function()
-{
-    for (let el of $(this).isScrollableX())
-        if(el) return true;
-
-    for (let el of $(this).isScrollableY())
-        if(el) return true;
-
-    return false;
-}
-
-$.fn.isScrollableX = function() {
-
-    return $(this).map(function(i) {
-
-        var el = this[i] === window ? document.documentElement : this[i];
-        var isDom = el == document.documentElement;
-
-        var hasScrollableContent = el.scrollWidth > el.clientWidth;
-
-        var overflowStyle   = window.getComputedStyle(el).overflowX;
-        var isOverflowScroll = overflowStyle.indexOf('scroll') !== -1 || overflowStyle.indexOf('auto') !== -1;
-
-        return hasScrollableContent && (isOverflowScroll || isDom);
-
-    }.bind(this));
-}
-$.fn.isScrollableY = function() {
-
-    return $(this).map(function(i) {
-
-        var el = this[i] === window ? document.documentElement : this[i];
-        var isDom = el == document.documentElement;
-
-        var hasScrollableContent = el.scrollHeight > el.clientHeight;
-
-        var overflowStyle   = window.getComputedStyle(el).overflowY;
-        var isOverflowScroll = overflowStyle.indexOf('scroll') !== -1 || overflowStyle.indexOf('auto') !== -1;
-
-        return hasScrollableContent && (isOverflowScroll || isDom);
-
-    }.bind(this));
-}
-
-$.fn.closestScrollable = function()
-{
-    return $(this).map((i) => {
-
-        var target = this[i] === window ? document.documentElement : this[i];
-        if (target === undefined) target = document.documentElement;
-
-        while (target !== document.documentElement) {
-
-            if($(target).isScrollable()) return target;
-
-            if(target.parentElement === undefined) return undefined;
-            if(target.parentElement === null) return null;
-
-            target = target.parentElement;
-        }
-
-        return $(target).isScrollable() ? target : undefined;
-    });
-}
-
-$.fn.closestScrollableWindow = function()
-{
-    return $(this).closestScrollable().map(function(i) {
-
-        if (this === document.documentElement)
-            return window;
-        if (this === document)
-            return window;
-        if (this === undefined  )
-            return window;
-
-        return this;
-
-    });
-}
-
-/* Internal event */
-jQuery.event.special.scrolldelta = {
-
-    delegateType: "scroll",
-    bindType: "scroll",
-    handle: function (event) {
-
-        var handleObj = event.handleObj;
-
-        event = Sticky.compute(event);
-        event.type = handleObj.origType;
-
-        var ret    = handleObj.handler.apply(this, arguments);
-        event.type = handleObj.type;
-        return ret;
-    }
-};
-
-$.fn.serializeObject = function () {
-
-    var o = {};
-    var a = this.serializeArray();
-    $.each(a, function () {
-        if (o[this.name]) {
-            if (!o[this.name].push) {
-                o[this.name] = [o[this.name]];
-            }
-            o[this.name].push(this.value || '');
-        } else {
-            o[this.name] = this.value || '';
-        }
-    });
-    return o;
-};
-
-
-(function(root, factory) {
-
-    if (typeof define === 'function' && define.amd) {
-        define(factory);
-    } else if (typeof exports === 'object') {
-        module.exports = factory();
-    } else {
-        root = window;
-        root.Sticky = factory();
-    }
-
-})(this, function() {
+    var scrollState = {};
 
     var Sticky = window.Sticky = {};
-    Sticky.version = '1.0.0';
+    Sticky.version = '1.7.0';
 
     var Settings = Sticky.settings = {
 
@@ -268,55 +121,15 @@ $.fn.serializeObject = function () {
         "replacehash" : true
     };
 
-    Sticky.parseDuration = function(str) {
-
-        var array = String(str).split(", ");
-        array = array.map(function(t) {
-
-            if(String(t).endsWith("ms")) return parseFloat(String(t))/1000;
-
-            return parseFloat(String(t));
-        });
-
-        return Math.max(...array);
-    }
-
-    Sticky.remToPixel     = function(rem)     { return parseFloat(rem) * parseFloat(getComputedStyle(document.documentElement).fontSize); }
-    Sticky.emToPixel      = function(em, el)  { return parseFloat(em ) * parseFloat(getComputedStyle(el.parentElement).fontSize); }
-    Sticky.percentToPixel = function(p , el)  { return parseFloat(p  ) * el.outerWidth(); }
-    Sticky.parseToPixel   = function(str, el) {
-
-        if(str === undefined) return undefined;
-
-        var array = String(str).split(", ");
-        array = array.map(function(s) {
-
-            if(s.endsWith("rem")) return Sticky.remToPixel    (s);
-            else if(s.endsWith("em") ) return Sticky.emToPixel     (s, el);
-            else if(s.endsWith("%")  ) return Sticky.percentToPixel(s, el);
-            return parseFloat(s);
-        });
-
-        return Math.max(...array);
-    }
-
+    // The units and the scroll padding: the core's. getScrollPadding reads the
+    // closest scroller of the element (the window's for the page).
+    Sticky.parseDuration  = Flow.parseDuration;
+    Sticky.remToPixel     = Flow.remToPixel;
+    Sticky.emToPixel      = Flow.emToPixel;
+    Sticky.percentToPixel = function(p, el) { return parseFloat(p) * $(el).outerWidth(); };
+    Sticky.parseToPixel   = Flow.parseToPixel;
     Sticky.getScrollPadding = function(el = document.documentElement) {
-
-        var scroller = $(el).closestScrollable()[0];
-        var style    = scroller instanceof Element ? window.getComputedStyle(scroller) : {};
-
-        var dict = {};
-        dict["top"   ] = Sticky.parseToPixel(style["scroll-padding-top"   ] || 0, scroller);
-        dict["left"  ] = Sticky.parseToPixel(style["scroll-padding-left"  ] || 0, scroller);
-        dict["right" ] = Sticky.parseToPixel(style["scroll-padding-right" ] || 0, scroller);
-        dict["bottom"] = Sticky.parseToPixel(style["scroll-padding-bottom"] || 0, scroller);
-
-        if(isNaN(dict["top"   ])) dict["top"]    = 0;
-        if(isNaN(dict["left"  ])) dict["left"]   = 0;
-        if(isNaN(dict["right" ])) dict["right"]  = 0;
-        if(isNaN(dict["bottom"])) dict["bottom"] = 0;
-
-        return dict;
+        return Flow.scrollPadding(Flow.closestScrollable(el));
     }
 
     Sticky.epsilon = function(x1, x0) { return Math.abs(x1-x0) < 1; }
@@ -332,25 +145,7 @@ $.fn.serializeObject = function () {
         return this;
     }
 
-    Sticky.debounce = function(func, wait, immediate) {
-
-        var timeout;
-        return function() {
-
-            var context = this, args = arguments;
-            var later = function() {
-
-                timeout = null;
-                if (!immediate) func.apply(context, args);
-            };
-
-            var callNow = immediate && !timeout;
-            clearTimeout(timeout);
-
-            timeout = setTimeout(later, wait);
-            if (callNow) func.apply(context, args);
-        };
-    };
+    Sticky.debounce = Flow.debounce;
 
     Sticky.ready = function (options = {}) {
 
@@ -677,87 +472,16 @@ $.fn.serializeObject = function () {
         return parseInt(closest);
     }
 
-    Sticky.userScroll = function(el = undefined) {
-        // Defensive: closestScrollable() can return a value without .prop in
-        // some race conditions (transient DOM during transparent.js page
-        // transitions, sticky-scrollpercent triggers fired against detached
-        // nodes). Default to true so the autoscroll falls back to "user is
-        // scrolling, don't auto-advance."
-        try {
-            var $target = $(el === undefined ? document.documentElement : el);
-            if (!$target || !$target.length) return true;
-            var $scroll = $target.closestScrollable && $target.closestScrollable();
-            if (!$scroll || typeof $scroll.prop !== "function") return true;
-            return $scroll.prop("user-scroll") ?? true;
-        } catch (e) { return true; }
-    }
+    Sticky.userScroll = Flow.userScroll;
+
+    /** Scroll an element (the window by default) through the core's engine - unless a script has the scroll already. */
     Sticky.scrollTo = function(dict, callback = function() {}, el = window)
     {
         el = $(el).length ? $(el)[0] : window;
-        if (el === window  )
-            el = document.documentElement;
-        if (el === document)
-            el = document.documentElement;
+        el = Flow.element(el);
 
         if(Sticky.userScroll(el) == false) return;
-        $(el).prop("user-scroll", false);
-
-        var maxScrollX = $(el).prop("scrollWidth") - Math.round($(el).prop("clientWidth"));
-        if (maxScrollX == 0) maxScrollX = Math.round($(el).prop("clientWidth"));
-        var maxScrollY = $(el).prop("scrollHeight") - Math.round($(el).prop("clientHeight"));
-        if (maxScrollY == 0) maxScrollY = Math.round($(el).prop("clientHeight"));
-
-        var scrollTop  = Math.max(0, Math.min(dict["top"] ?? $(el).prop("scrollTop"), maxScrollY));
-        var scrollLeft = Math.max(0, Math.min(dict["left"] ?? $(el).prop("scrollLeft"), maxScrollX));
-
-        var speed    = parseFloat(dict["speed"] ?? 0);
-        var easing   = dict["easing"] ?? "swing";
-        var debounce = dict["debounce"] ?? 0;
-
-        var duration  = 1000*Sticky.parseDuration(dict["duration"] ?? 0);
-        var durationX = 1000*Sticky.parseDuration(dict["duration-x"] ?? dict["duration"] ?? 0);
-        var durationY = 1000*Sticky.parseDuration(dict["duration-y"] ?? dict["duration"] ?? 0);
-
-        if(speed) {
-
-            var distanceX = 0, distanceY = 0;
-
-            var currentScrollX = $(el)[0].scrollLeft;
-            if(currentScrollX < scrollLeft || scrollLeft == 0) // Going to the right
-                distanceX = Math.abs(scrollLeft - currentScrollX);
-            else // Going back to 0 position
-                distanceX = currentScrollX;
-
-            var currentScrollY = $(el)[0].scrollTop;
-            if(currentScrollY <= scrollTop || scrollTop == 0) // Going to the right
-                distanceY = Math.abs(scrollTop - currentScrollY);
-            else // Going back to 0 position
-                distanceY = currentScrollY;
-
-            durationX = speed ? 1000*distanceX/speed : durationX;
-            durationY = speed ? 1000*distanceY/speed : durationY;
-            duration = durationX+durationY;
-        }
-
-        var callbackWrapper = function() {
-
-            el.dispatchEvent(new Event('scroll'));
-            callback();
-
-            $(el).prop("user-scroll", true);
-        };
-
-        if(duration == 0) {
-
-            el.scrollTo(scrollLeft, scrollTop);
-            callbackWrapper();
-
-        } else {
-
-            $(el).animate({scrollTop: scrollTop}, durationY, easing,
-                () => $(el).animate({scrollLeft: scrollLeft}, durationX, easing, Sticky.debounce(callbackWrapper, debounce))
-            );
-        }
+        Flow.scrollTo(el, dict, callback);
 
         return this;
     }
@@ -891,7 +615,16 @@ $.fn.serializeObject = function () {
     }
 
 
+    // The swipes (.sticky-swipe): the window's two touch listeners are bound
+    // once, for whichever elements the last call named - not again at every
+    // page the navigation swaps in.
+    var swipeTargets = window;
+    var swipeBound = false;
     Sticky.onSwipe = function (el = window) {
+
+        swipeTargets = el;
+        if (swipeBound) return;
+        swipeBound = true;
 
         var t0 = 0, x0 = 0, y0 = 0;
 
@@ -899,13 +632,13 @@ $.fn.serializeObject = function () {
 
             if (swipeDirection > 0) {
 
-                if(debug) console.log("Swipe right in ", that)
-                that.dispatchEvent("sticky.swipe_right");
+                if(Settings.debug) console.log("Swipe right in ", that)
+                that.dispatchEvent(new Event("sticky.swipe_right"));
 
             } else if (swipeDirection < 0) {
 
-                if(debug) console.log("Swipe left in ", that);
-                that.dispatchEvent("sticky.swipe_left");
+                if(Settings.debug) console.log("Swipe left in ", that);
+                that.dispatchEvent(new Event("sticky.swipe_left"));
             }
         };
 
@@ -930,7 +663,7 @@ $.fn.serializeObject = function () {
             var swipeDirection = 0;
             if(trigger) swipeDirection = Math.abs(dX) >= parseInt(Sticky.get("swipe_threshold")) ? (dX > 0 ? 1 : -1) : 0;
 
-            $(el).each(function() {
+            $(swipeTargets).each(function() {
 
                 if(this === e.target || this.contains(e.target))
                     handleSwipe(this, swipeDirection);
@@ -1530,7 +1263,7 @@ $.fn.serializeObject = function () {
 
         Sticky.set("overscroll", overscroll);
         if(overscroll.top || overscroll.bottom || overscroll.left || overscroll.right)
-            $(e.target).trigger('scrolldelta.sticky');
+            Sticky.trigger(e.target);
 
         return this;
     }
@@ -1656,13 +1389,14 @@ $.fn.serializeObject = function () {
             Sticky.reset(el);
 
             if(Sticky.get("passive") == false)
-                $(el).on('wheel.sticky', Sticky.onWheel);
+                $(el).off('wheel.sticky').on('wheel.sticky', Sticky.onWheel);
 
-            $(el).on('scrolldelta.sticky', Sticky.onScrollDelta);
-            $(el).on('scrolldelta.sticky', Sticky.debounce(Sticky.onScrollDebounce, 1000*Sticky.parseDuration(Sticky.get("debounce"))));
+            // The scroll, once per frame, through the core; bound once however
+            // many pages the navigation swaps in (every load came back here).
+            Sticky.listen(el);
 
             // Sticky top anchor
-            $(el === window ? "html" : el).find('a[href^="#"]').on('click', function () {
+            $(el === window ? "html" : el).find('a[href^="#"]').off('click.sticky').on('click.sticky', function () {
 
                 var split = this.href.split("#");
                 var anchorElem = $(split[1] == "" ? "body" : "#"+split[1]);
@@ -1706,21 +1440,18 @@ $.fn.serializeObject = function () {
             // Sticky magnet control
             if(Sticky.get("scrollsnap"))
             {
-                $(".sticky-magnet-first").on("click", function() { Sticky.scrollToFirstSnap(); });
-                $(".sticky-magnet-prev" ).on("click", function() { Sticky.scrollToPreviousSnap(); });
-                $(".sticky-magnet-next" ).on("click", function() { Sticky.scrollToNextSnap(); });
-                $(".sticky-magnet-last" ).on("click", function() { Sticky.scrollToLastSnap(); });
-
-                $(el).on('scrolldelta.sticky.snap', Sticky.onScrollSnap);
+                $(".sticky-magnet-first").off("click.sticky").on("click.sticky", function() { Sticky.scrollToFirstSnap(); });
+                $(".sticky-magnet-prev" ).off("click.sticky").on("click.sticky", function() { Sticky.scrollToPreviousSnap(); });
+                $(".sticky-magnet-next" ).off("click.sticky").on("click.sticky", function() { Sticky.scrollToNextSnap(); });
+                $(".sticky-magnet-last" ).off("click.sticky").on("click.sticky", function() { Sticky.scrollToLastSnap(); });
             }
 
             // Sticky percent scroll
             if(Sticky.get("scrollpercent"))
             {
-                $(el).on('scrolldelta.sticky.percent', Sticky.onScrollPercent);
                 $(".sticky-scrollpercent").each(function() {
                     if(el == this) return;
-                    $(this).on('scrolldelta.sticky.percent', Sticky.onScrollPercent);
+                    Sticky.listen(this, false);
                 });
             }
 
@@ -1768,12 +1499,8 @@ $.fn.serializeObject = function () {
                         var noScrollX = (atLeft && atRight) || scrollWidth  < thresholdMinX;
 
                         $(scroller).data("autoscroll-prevent", false);
-                        $(scroller).off("wheel.autoscroll DOMMouseScroll.autoscroll mousewheel.autoscroll touchstart.autoscroll");
-                        $(scroller).on("wheel.autoscroll DOMMouseScroll.autoscroll mousewheel.autoscroll touchstart.autoscroll", function(e) {
-
-                            $(this).prop("user-scroll", true);
-                            $(this).stop();
-                        });
+                        // The reader taking over gives the scroll back (the core's one listener per scroller).
+                        Flow.onInterrupt(scroller, Flow.release);
 
                         var autoscrollTimeout = undefined;
                         var payloadAutoscroll = function() {
@@ -1845,10 +1572,78 @@ $.fn.serializeObject = function () {
 
                 Settings.ready = true;
 
+                // The first pass: the effects placed as the page stands.
+                Sticky.trigger(el);
+
         }, 1);
 
         return this;
     }
+
+    // ── The scroll, through the core ─────────────────────────────────────
+    // One function per scroller, run by the core once per frame in which the
+    // scroller scrolled: the event is computed once and every effect reads it
+    // (the jQuery "scrolldelta" binding computed it once per handler, four
+    // times a scroll event). Bound again on a later load, not added to.
+    var runs = typeof WeakMap === 'function' ? new WeakMap() : null;
+    var runList = [];
+
+    function runOf(scroller, run) {
+        if (runs) {
+            if (run !== undefined) runs.set(scroller, run);
+            return runs.get(scroller);
+        }
+        for (var i = 0; i < runList.length; i++) {
+            if (runList[i].scroller !== scroller) continue;
+            if (run !== undefined) runList[i].run = run;
+            return runList[i].run;
+        }
+        if (run !== undefined) runList.push({ scroller: scroller, run: run });
+        return run;
+    }
+
+    /** Hear a scroller (the window by default) scroll: every effect, or the scroll-percent triggers only. */
+    Sticky.listen = function(el = window, full = true) {
+
+        var scroller = Flow.normalize(el);
+        var target = Flow.element(scroller);
+        var previous = runOf(scroller);
+        if (previous) Flow.offScroll(scroller, previous);
+
+        var reset = Sticky.debounce(Sticky.onScrollDebounce, 1000*Sticky.parseDuration(Sticky.get("debounce")));
+        var run = function(native) {
+
+            var e = Sticky.compute({ type: "scrolldelta", target: target, timeStamp: Flow.now(), originalEvent: native || undefined });
+            if (!e.target || !e.target.length) return;
+
+            if (full) {
+                Sticky.onScrollDelta.call(scroller, e);
+                reset(e);
+                if (Sticky.get("scrollsnap")) Sticky.onScrollSnap.call(scroller, e);
+            }
+            if (Sticky.get("scrollpercent")) Sticky.onScrollPercent.call(scroller, e);
+        };
+
+        runOf(scroller, run);
+        Flow.onScroll(scroller, run);
+        return this;
+    };
+
+    /** Stop hearing a scroller. */
+    Sticky.unlisten = function(el = window) {
+        var scroller = Flow.normalize(el);
+        var run = runOf(scroller);
+        if (run) { Flow.offScroll(scroller, run); runOf(scroller, null); }
+        return this;
+    };
+
+    /** Run the effects now, as if the target's scroller had scrolled. */
+    Sticky.trigger = function(target = window) {
+        var scroller = Flow.normalize(target === window ? window : Flow.closestScrollable(target));
+        var run = runOf(scroller);
+        if (run) run(null);
+        return this;
+    };
 
     $(window).on("beforeunload", function() {
 
@@ -1856,17 +1651,15 @@ $.fn.serializeObject = function () {
         Sticky.reset();
 
         $(window).off('wheel.sticky');
-        $(window).off('scrolldelta.sticky');
+        Sticky.unlisten(window);
         $(window).off("hashchange");
-        $('a[href^="#"]').off();
+        $('a[href^="#"]').off('click.sticky');
     });
 
-    $(window).on("DOMContentLoaded", function() {
-
-        Sticky.onLoad();
-        $(window).trigger("scroll.sticky");
-        // $(window).on("hashchange", (e) => Sticky.reset());
-    });
+    // On the document parsed, and on every page the navigation swaps in (it
+    // dispatches DOMContentLoaded again); now, for a script loaded later.
+    $(window).on("DOMContentLoaded", function() { Sticky.onLoad(); });
+    if (document.readyState !== 'loading') Sticky.onLoad();
 
     return Sticky;
 });

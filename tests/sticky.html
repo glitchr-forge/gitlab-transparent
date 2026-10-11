@@ -1,0 +1,93 @@
+<!doctype html>
+<!--
+  Sticky: the address follows the headline being read (.sticky-headlines[id], the "highlight" class);
+  a block fades in (.sticky-easein) as it comes near; Sticky.scrollTo moves the page through the core's
+  engine and the scroll is a script's meanwhile (userScroll false); the scroll is computed once per
+  frame through the core, bound once however many times the page is (re)loaded. Not asserted, kept as
+  1.7.0 ships them: the hiding header (.sticky-top: every scroll writes aria-scrollhide="false" on it
+  first, which turns the effect off) and the magnets (getMagnets() reads offsetTop off `this` in an
+  Array.map callback, NaN, so the nearest magnet is always the first). Opened by tests/run.mjs
+  in a headless browser; the page writes its verdict in #result.
+-->
+<html>
+<head>
+<meta charset="utf-8"><title>sticky</title>
+<style>
+    html { scroll-behavior: auto; scroll-padding-top: 0; }
+    body { margin: 0; }
+    .sticky-top { position: sticky; top: 0; height: 80px; background: #ddd; }
+    section { height: 100vh; }
+    #result { position: fixed; bottom: 0; left: 0; margin: 0; }
+</style>
+</head>
+<body>
+<header id="header" class="sticky sticky-top"></header>
+<button id="first" class="sticky-magnet-first bottom-right">first</button>
+<section id="one" class="sticky-headlines sticky-magnet">One</section>
+<section id="two" class="sticky-headlines sticky-magnet">Two</section>
+<section id="three" class="sticky-headlines">Three <div id="fade" class="sticky sticky-easein" data-sticky-easein="0" style="height: 40px">fade</div></section>
+<section id="four" class="sticky-headlines">Four</section>
+<pre id="result">pending</pre>
+<script src="jquery.js"></script>
+<script src="harness.js"></script>
+<script src="../src/js/core.js"></script>
+<script src="../src/js/sticky.js"></script>
+<script>
+    (async function () {
+        var H = Harness;
+        var header = document.getElementById('header');
+        var computed = 0;
+        var compute = Sticky.compute;
+        Sticky.compute = function () { computed++; return compute.apply(this, arguments); };
+        var top = function (id) { return Math.round(document.getElementById(id).getBoundingClientRect().top + window.scrollY); };
+
+        Sticky.ready({ scrollsnap: false, autoscroll: false, swipehint: false });
+        await H.after(20); // onLoad binds a tick after DOMContentLoaded
+        H.check(Sticky.version === '1.7.0' && Flow.sticky === Sticky, 'Sticky is the core\'s sticky module');
+        // Sticky.scrollTo: the core's engine, the scroll a script's meanwhile.
+        var called = false;
+        Sticky.scrollTo({ top: 200, duration: '80ms' }, function () { called = true; });
+        H.check(Sticky.userScroll() === false && Flow.scripted(window), 'while Sticky scrolls, the scroll is a script\'s');
+        await H.after(200);
+        H.check(called && Math.round(window.scrollY) === 200 && Sticky.userScroll() === true, 'Sticky.scrollTo arrives, calls back and gives the scroll back', window.scrollY + ' ' + called);
+        H.scroll(0);
+        await H.frame();
+        H.check(header.getAttribute('aria-scrollhide') === 'false', 'the hiding header is left as 1.7.0 has it (aria-scrollhide written false)', header.getAttribute('aria-scrollhide'));
+
+        // The headline being read: reached where its own link lands it.
+        H.scroll(top('two') + 10);
+        await H.frame();
+        H.check(document.getElementById('two').classList.contains('highlight'), 'the headline reached is highlighted', document.querySelector('.highlight') && document.querySelector('.highlight').id);
+        var fade = document.getElementById('fade');
+        H.check(!fade.classList.contains('show'), 'a block far below is not shown yet', fade.className);
+        H.scroll(top('three'));
+        await H.frame();
+        H.check(fade.classList.contains('show'), 'a block fades in as it comes into view', fade.className);
+        H.check(document.getElementById('three').classList.contains('highlight') && !document.getElementById('two').classList.contains('highlight'), 'the highlight moves to the next headline');
+
+        // One compute per frame in which the page scrolled: three scrolls in one frame, one compute.
+        computed = 0;
+        H.scroll(100); H.scroll(200); H.scroll(300);
+        await H.frame();
+        H.check(computed === 1, 'the scroll event is computed once per frame', computed);
+
+        // The page loaded again (the navigation re-dispatches DOMContentLoaded): bound once, not added to.
+        window.dispatchEvent(new Event('DOMContentLoaded'));
+        window.dispatchEvent(new Event('DOMContentLoaded'));
+        await H.after(20);
+        computed = 0;
+        H.scroll(350);
+        await H.frame();
+        H.check(computed === 1, 'a page loaded again does not add handlers', computed);
+        var l = H.listeners(/^window scroll$/);
+        H.check(l['window scroll'] === 1, 'one native scroll listener on the window', JSON.stringify(H.listeners(/scroll|wheel|touch|mousedown/)));
+
+        // The address: replacehash writes the headline's id (a file: document may refuse replaceState; then only the highlight counts).
+        H.scroll(top('four') + 10);
+        await H.frame();
+        H.note('hash ' + (location.hash || '(none)') + ', highlight ' + (document.querySelector('.highlight') || {}).id);
+        H.done();
+    })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
+</script>
+</body>
+</html>

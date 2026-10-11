@@ -121,19 +121,27 @@
 // event on the scroller (it bubbles to the window) carries the same numbers
 // for scripts, and a sticky:stop event announces each glide.
 //
-// Standalone: no jQuery and no sticky.js, and only the window's own scroll
-// listener until a stop exists. Attached to the window by itself when the
-// document has stops; StickyStops.attach(scroller) for a scrolling element,
-// or for stops added after the page loaded. Sticky.stops is the same object
-// when sticky.js is loaded.
+// Standalone: no jQuery and no sticky.js - the core (Flow) only, whose
+// scroll, resize and interruption listeners it shares with the other modules
+// (one native listener per scroller, the measurements in the one frame), and
+// which tells it when a script scrolls the page (the navigation restoring a
+// position, an anchor): such a scroll rests where the script put it. Attached
+// to the window by itself when the document has stops, and again on every
+// page the navigation swaps in; StickyStops.attach(scroller) for a scrolling
+// element, or for stops added after the page loaded. Sticky.stops is the same
+// object when sticky.js is loaded.
 (function (root, factory) {
 
-    var api = factory(root);
+    var core = root.Flow && root.Flow.core === true ? root.Flow : (typeof require === 'function' ? require('./core.js') : null);
+    if (!core) throw new Error('stops.js: load core.js first');
+
+    var api = factory(root, core);
     if (typeof module === 'object' && module.exports) module.exports = api;
     root.StickyStops = api;
+    core.stops = api;
     if (root.Sticky) root.Sticky.stops = api;
 
-})(typeof window !== 'undefined' ? window : this, function (window) {
+})(typeof window !== 'undefined' ? window : this, function (window, Flow) {
 
     var document = window.document;
 
@@ -153,9 +161,9 @@
         end: false       // the end of the scroll is a stop too: from the last section, on to the very bottom (the footer)
     };
 
-    // The reader taking over ends a glide; the browser has already stopped it.
-    // (keydown too, heard once for every scroller - see onKeydown.)
-    var INTERRUPT = ['wheel', 'touchstart', 'mousedown'];
+    // The reader taking over (a wheel, a finger, a press: the core's
+    // interruption channel) ends a glide; the browser has already stopped it.
+    // Keydown too, heard once for every scroller - see onKeydown.
 
     // px: about the browser's own step for an arrow key. Inside a tall stop an
     // arrow is left to the browser while two of them still fit before its end.
@@ -205,7 +213,7 @@
     // revealing the focused field, not the reader.
     var REVEAL = 250;
 
-    function now() { return window.performance ? performance.now() : Date.now(); }
+    var now = Flow.now;
 
     function extend(target) {
         for (var i = 1; i < arguments.length; i++) {
@@ -221,15 +229,7 @@
     function clamp(x, low, high) { return Math.min(high, Math.max(low, x)); }
 
     // "90", "90px", "2rem" or "1.5em" to px; anything else is the fallback.
-    function toPixels(value, el, fallback) {
-        if (value === undefined || value === null || value === '') return fallback;
-        var text = String(value).trim();
-        var number = parseFloat(text);
-        if (isNaN(number)) return fallback;
-        if (text.slice(-3) === 'rem') return number * parseFloat(getComputedStyle(document.documentElement).fontSize);
-        if (text.slice(-2) === 'em') return number * parseFloat(getComputedStyle(el).fontSize);
-        return number;
-    }
+    var toPixels = Flow.toPixels;
 
     // A cubic Bezier from (0, 0) to (1, 1), as CSS's: the way made (y) for the
     // time gone (x), x solved for its parameter by Newton's steps, then halving.
@@ -340,26 +340,25 @@
         // does not, so the page's are heard on the document.
         this.focusTarget = this.isWindow ? document : this.scroller;
 
-        this.scroller.addEventListener('scroll', this.onScroll, { passive: true });
-        for (var i = 0; i < INTERRUPT.length; i++) {
-            this.scroller.addEventListener(INTERRUPT[i], this.onInterrupt, { passive: true });
-        }
+        // The core's channels: one native listener per scroller and kind,
+        // shared with the other modules; scroll and resize in the frame.
+        Flow.onScroll(this.scroller, this.onScroll);
+        Flow.onInterrupt(this.scroller, this.onInterrupt);
         this.focusTarget.addEventListener('focusin', this.onFocus, true);
-        window.addEventListener('resize', this.onResize);
+        Flow.onResize(this.onResize);
 
         this.refresh();
     }
 
     Stops.prototype.detach = function () {
-        this.scroller.removeEventListener('scroll', this.onScroll);
-        for (var i = 0; i < INTERRUPT.length; i++) {
-            this.scroller.removeEventListener(INTERRUPT[i], this.onInterrupt);
-        }
+        Flow.offScroll(this.scroller, this.onScroll);
+        Flow.offInterrupt(this.scroller, this.onInterrupt);
         this.focusTarget.removeEventListener('focusin', this.onFocus, true);
-        window.removeEventListener('resize', this.onResize);
+        Flow.offResize(this.onResize);
         clearTimeout(this.timer);
         clearTimeout(this.glideTimer);
-        if (this.frame !== null) cancelAnimationFrame(this.frame);
+        if (this.frame !== null) Flow.cancelFrame(this.tick);
+        this.frame = null;
         this.cancel();
 
         var style = this.root.style;
@@ -399,9 +398,8 @@
 
     /** The scroller's scroll-padding-top (-left): where a stop should rest from its edge. */
     Stops.prototype.padding = function () {
-        var style = getComputedStyle(this.root);
-        var value = parseFloat(this.horizontal ? style.scrollPaddingLeft : style.scrollPaddingTop);
-        return isNaN(value) ? 0 : value;
+        var padding = Flow.scrollPadding(this.root);
+        return this.horizontal ? padding.left : padding.top;
     };
 
     /** An element's near edge (top, or left) on screen, and its size along the axis. */
@@ -702,7 +700,10 @@
             // neighbour more than a screen away): asked for, so it rests
             // where the key put it - a settle pulled an arrow's step back to
             // the stop it had just left, and the arrows could not leave it.
-            this.revealing = now() - this.focusedAt < REVEAL || now() - this.keyedAt < REVEAL;
+            // Or a script's scroll (the core knows: the navigation restoring
+            // a position or going to an anchor, an autoscroll): it rests
+            // where the script put it, wherever that falls between the stops.
+            this.revealing = now() - this.focusedAt < REVEAL || now() - this.keyedAt < REVEAL || Flow.scripted(this.scroller);
         }
         this.last = y;
 
@@ -873,7 +874,7 @@
 
     Stops.prototype.queue = function () {
         if (this.frame !== null) return;
-        this.frame = requestAnimationFrame(this.tick);
+        this.frame = Flow.frame(this.tick);
     };
 
     Stops.prototype.tick = function () {
@@ -977,10 +978,7 @@
         window.addEventListener('keydown', onKeydown);
     }
 
-    function normalize(scroller) {
-        if (!scroller || scroller === document || scroller === document.documentElement || scroller === document.body) return window;
-        return scroller;
-    }
+    var normalize = Flow.normalize;
 
     var api = {
         defaults: defaults,
@@ -1050,15 +1048,14 @@
     }
 
     // The page's own stops, and its marked rows, without being asked - and
-    // again on load, for a page swapped in place that re-dispatches it. A
-    // scroller gone from the page with it lets go.
+    // again at each page the core announces: the document loaded, a page the
+    // navigation swapped in place. A scroller gone from the page lets go; the
+    // window's stops are measured again, their options kept.
     function auto() {
         api.scan();
         if (document.querySelector(defaults.selector)) api.attach(window);
     }
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', auto);
-    else auto();
-    window.addEventListener('load', auto);
+    Flow.onPage(auto);
 
     return api;
 });

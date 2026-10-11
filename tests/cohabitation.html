@@ -1,0 +1,97 @@
+<!doctype html>
+<!--
+  The navigation and the stops together: a scroll made by the navigation (Transparent.scrollTo,
+  the position put back after a swap) rests where it was put - the stops do not glide after it -
+  while the reader's own scroll still does; after a page the navigation swaps in (it dispatches
+  transparent:load) the stops are measured again, with the new page's stops and without a row
+  that left, without anyone attaching them again; Sticky, when loaded too, runs on the same one
+  scroll listener. Opened by tests/run.mjs in a headless browser; the page writes its verdict in
+  #result.
+-->
+<html>
+<head>
+<meta charset="utf-8"><title>cohabitation</title>
+<style>
+    html { scroll-behavior: auto; }
+    body { margin: 0; }
+    section, header { height: 100vh; }
+    #result { position: fixed; top: 0; left: 0; margin: 0; }
+    .row { display: flex; overflow-x: auto; width: 300px; height: 100px; }
+    .row > div { flex: 0 0 300px; height: 100px; }
+</style>
+</head>
+<body>
+<div id="page">
+    <header id="head" class="sticky-stop"></header>
+    <section id="a" class="sticky-stop" data-sticky-band-up="100" data-sticky-band-down="100"></section>
+    <section id="b" class="sticky-stop" data-sticky-band-up="100" data-sticky-band-down="100">
+        <div id="row" class="row" data-sticky-axis="x" data-sticky-keys="false"><div class="sticky-stop"></div><div class="sticky-stop"></div></div>
+    </section>
+    <section id="c" class="sticky-stop"></section>
+</div>
+<pre id="result">pending</pre>
+<script src="jquery.js"></script>
+<script src="harness.js"></script>
+<script src="../src/js/core.js"></script>
+<script src="../src/js/transparent.js"></script>
+<script src="../src/js/sticky.js"></script>
+<script src="../src/js/stops.js"></script>
+<script>
+    (async function () {
+        var H = Harness;
+        var SETTLE = 40;
+        var top = function (id) { return Math.round(document.getElementById(id).getBoundingClientRect().top + window.scrollY); };
+        var y = function () { return Math.round(window.scrollY); };
+
+        H.check(Flow.navigation === Transparent && Flow.stops === StickyStops && Sticky.stops === StickyStops, 'the three modules know each other through the core');
+
+        StickyStops.attach(window, { smooth: false, settle: SETTLE });
+        Sticky.ready({ scrollsnap: false, autoscroll: false, swipehint: false });
+        await H.after(20);
+        H.check(StickyStops.get(document.getElementById('row')) !== null, 'the data-sticky-axis row attached itself');
+
+        // The reader's scroll between a and b glides on to b.
+        H.scroll(top('b') - 300);
+        await H.after(SETTLE * 3);
+        H.check(H.near(y(), top('b')), 'the reader\'s rest glides to the stop', y() + ' vs ' + top('b'));
+
+        // The navigation's scroll to the same kind of place stays there.
+        var target = top('a') + 300;
+        Transparent.scrollTo({ top: target, duration: 0 });
+        await H.after(SETTLE * 3);
+        H.check(H.near(y(), target), 'the navigation\'s scroll rests where it was put', y() + ' vs ' + target);
+        H.check(Transparent.userScroll() === true, 'the scroll is the reader\'s again afterwards');
+
+        // An animated one too (jQuery's animation through the core's engine).
+        Transparent.scrollTo({ top: top('a') + 350, duration: '100ms' });
+        await H.after(100 + SETTLE * 4);
+        H.check(H.near(y(), top('a') + 350, 6), 'an animated scroll of the navigation rests where it ends', y() + ' vs ' + (top('a') + 350));
+
+        // Then the reader again (a moment later: a scroll right after a script's is still taken for its): it glides.
+        await H.after(300);
+        H.scroll(top('b') - 200);
+        await H.after(SETTLE * 3);
+        H.check(H.near(y(), top('b')), 'the reader\'s next rest glides again', y() + ' vs ' + top('b'));
+
+        // A page swapped in: the row leaves, a stop arrives; transparent:load dispatched as the navigation does.
+        var row = document.getElementById('row');
+        row.remove();
+        var d = document.createElement('section'); d.id = 'd'; d.className = 'sticky-stop';
+        document.getElementById('page').appendChild(d);
+        var before = StickyStops.get(window).stops.length;
+        window.dispatchEvent(new Event('transparent:load'));
+        await H.frame();
+        H.check(StickyStops.get(window).stops.length === before + 1, 'after a swap the window\'s stops are measured again', StickyStops.get(window).stops.length + ' vs ' + (before + 1));
+        H.check(StickyStops.get(row) === null, 'a row that left the page let go of its stops');
+        H.check(StickyStops.get(window).options.settle === SETTLE, 'the window\'s options are kept across the swap', StickyStops.get(window).options.settle);
+
+        // The core's listeners: one scroll, one of each interruption, on the window, for the three modules.
+        var l = H.listeners(/^window (scroll|wheel|touchstart|mousedown|resize|keydown)$/);
+        H.check(l['window scroll'] === 1 && l['window wheel'] === 1 && l['window mousedown'] === 1 && l['window resize'] === 1, 'one native scroll/wheel/mousedown/resize listener on the window for all modules', JSON.stringify(l));
+        H.check(l['window touchstart'] === 2, 'touchstart: the core\'s, and the swipe\'s (a sticky feature of its own)', l['window touchstart']);
+        H.note('listeners ' + JSON.stringify(H.listeners(/^(window|document|html|body) /)));
+        H.done();
+    })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
+</script>
+</body>
+</html>

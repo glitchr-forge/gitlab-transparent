@@ -1,20 +1,22 @@
-// StickySortable - drag-and-drop reordering, built to stand alone (no
-// dependency on sticky.js's own scroll/hash machinery) so a consumer who
-// only wants sorting doesn't pay for sticky.js's DOMContentLoaded-triggered
-// global scroll/wheel/hashchange handlers. Pointer Events (not HTML5 drag-
-// and-drop) so a custom placeholder and touch both work with one code path -
-// requires touch-action: none on the handle in CSS.
+// StickySortable - drag-and-drop reordering, standing alone: it needs the
+// core (Flow) for the scroller to autoscroll, and jQuery for its $.fn plugin
+// only, so a consumer who only wants sorting pays for none of the scroll
+// effects. Pointer Events (not HTML5 drag-and-drop) so a custom placeholder
+// and touch both work with one code path - requires touch-action: none on
+// the handle in CSS.
 (function (root, factory) {
 
-    if (typeof define === 'function' && define.amd) {
-        define(['jquery'], factory);
-    } else if (typeof exports === 'object') {
-        module.exports = factory(require('jquery'));
-    } else {
-        root.StickySortable = factory(root.jQuery);
-    }
+    var core = root.Flow && root.Flow.core === true ? root.Flow : (typeof require === 'function' ? require('./core.js') : null);
+    if (!core) throw new Error('sortable.js: load core.js first');
 
-})(this, function ($) {
+    var api = factory(root, core, core.jquery());
+    if (typeof module === 'object' && module.exports) module.exports = api;
+    root.StickySortable = api;
+    core.sortable = api;
+
+})(typeof window !== 'undefined' ? window : this, function (window, Flow, $) {
+
+    var document = window.document;
 
     var defaults = {
         handle: null,          // selector, relative to the item, or null to drag the whole item
@@ -23,9 +25,17 @@
         dragThreshold: 4,      // px of pointer movement before a press counts as a drag, not a click
         autoscroll: true,
         autoscrollEdge: 40,    // px from the scroll container's edge that triggers scrolling
+        autoscrollInsetTop: null, // px of the top edge already covered by something pinned over it; null = measure it
         autoscrollSpeed: 12,   // px per animation frame at full deflection
         draggingClass: 'is-dragging',
         placeholderClass: 'is-sortable-placeholder',
+        // Orientation of the drop marker, set per move. A grid wraps items
+        // onto rows, so "insert here" is a vertical line BETWEEN two cards on
+        // one row but a horizontal line between rows - the same marker read
+        // one way in both places was telling you the welcome banner would slot
+        // in beside a card when it was actually about to take a row of its own.
+        placeholderVerticalClass: 'is-placeholder-vertical',
+        placeholderHorizontalClass: 'is-placeholder-horizontal',
         onChange: null,        // function(order, container) - fires once, on drop, if the order changed
         mergeable: false,      // opt-in: dropping in the INNER zone of another item fires onMerge instead of reordering
         mergeInset: 28,        // px inset from an item's edges that counts as its "merge zone" rather than its "reorder edge"
@@ -35,22 +45,17 @@
         onMerge: null,         // function(draggedEl, targetEl, container) - fires on drop instead of onChange, only when armed
     };
 
+    // The scroller the list autoscrolls while an item is dragged to its edge:
+    // the closest ancestor that scrolls (the core's), the page otherwise.
     function closestScrollable(el) {
-        var node = el.parentElement;
-        while (node && node !== document.body) {
-            var style = getComputedStyle(node);
-            var overflowY = style.overflowY;
-            if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight) {
-                return node;
-            }
-            node = node.parentElement;
-        }
-        return document.scrollingElement || document.documentElement;
+        var node = el.parentElement ? Flow.closestScrollable(el.parentElement) : undefined;
+        if (!node || node === document.documentElement) return document.scrollingElement || document.documentElement;
+        return node;
     }
 
     function StickySortable(container, options) {
         this.container = container;
-        this.options = $.extend({}, defaults, options);
+        this.options = Object.assign({}, defaults, options);
         this.scroller = closestScrollable(container);
         this.dragging = null;
         this.placeholder = null;
@@ -123,7 +128,13 @@
 
         this.placeholder = document.createElement(item.tagName);
         this.placeholder.className = this.options.placeholderClass;
-        this.placeholder.style.height = item.offsetHeight + 'px';
+        // Published as a custom property, not as height: the marker is a line
+        // whose thickness is the stylesheet's business, but it still needs the
+        // dragged item's measurements to know how LONG to be along the axis it
+        // ends up on. Setting height here instead would be an inline style the
+        // orientation rules could only beat with !important.
+        this.placeholder.style.setProperty('--sortable-item-height', item.offsetHeight + 'px');
+        this.placeholder.style.setProperty('--sortable-item-width', item.offsetWidth + 'px');
         item.parentElement.insertBefore(this.placeholder, item.nextSibling);
 
         var rect = item.getBoundingClientRect();
@@ -156,6 +167,82 @@
     // wins" alone doesn't say which SIDE to drop on (a grid has more than
     // one neighbor at similar distance), so whichever axis has the larger
     // offset from that sibling's center decides before-vs-after.
+
+    /**
+     * Do these two boxes sit on the same visual row?
+     *
+     * Overlap of more than half the shorter box, not "same top": widgets on a
+     * row are stretched to the tallest of them but a shorter neighbour that
+     * has not stretched still shares the row, and an exact-top test would
+     * call that a different one.
+     */
+    StickySortable.prototype.sharesRow = function (a, b) {
+        if (!a || !b) {
+            return false;
+        }
+        var ra = a.getBoundingClientRect();
+        var rb = b.getBoundingClientRect();
+        if (!ra.height || !rb.height) {
+            return false;
+        }
+
+        return Math.min(ra.bottom, rb.bottom) - Math.max(ra.top, rb.top) > Math.min(ra.height, rb.height) / 2;
+    };
+
+    /**
+     * Which way the drop marker should read, from where it has just landed.
+     *
+     * Decided from the NEIGHBOURS rather than the placeholder itself: the
+     * placeholder is styled as a thin line, so it has no footprint of its own
+     * left to compare against anything.
+     *
+     *   between two cards sharing a row  -> vertical, it goes between them
+     *   nothing before it                -> horizontal, it starts a new row
+     *   neighbours on different rows     -> horizontal, it goes between rows
+     *   last position, room left on the row -> vertical
+     *
+     * A plain vertical list (the sidebar menu uses this same sortable) never
+     * has two neighbours sharing a row, so it always reads horizontal, which
+     * is the right answer there without a special case.
+     */
+    StickySortable.prototype.orientPlaceholder = function () {
+        if (!this.placeholder) {
+            return;
+        }
+
+        var isItem = function (el) {
+            return el && el !== this.dragging && el.matches(this.options.items);
+        }.bind(this);
+
+        var prev = this.placeholder.previousElementSibling;
+        while (prev && !isItem(prev)) {
+            prev = prev.previousElementSibling;
+        }
+        var next = this.placeholder.nextElementSibling;
+        while (next && !isItem(next)) {
+            next = next.nextElementSibling;
+        }
+
+        var vertical;
+        if (!prev) {
+            vertical = false;
+        } else if (next) {
+            vertical = this.sharesRow(prev, next);
+        } else {
+            // Nothing after it, so there is no pair to read a row from. The
+            // question becomes whether the dragged item still fits beside the
+            // last one, which is what decides if it joins that row or starts
+            // the next.
+            var prevRect = prev.getBoundingClientRect();
+            var containerRect = this.container.getBoundingClientRect();
+            var draggedWidth = this.dragging ? this.dragging.getBoundingClientRect().width : 0;
+            vertical = (prevRect.right + draggedWidth) <= containerRect.right;
+        }
+
+        this.placeholder.classList.toggle(this.options.placeholderVerticalClass, vertical);
+        this.placeholder.classList.toggle(this.options.placeholderHorizontalClass, !vertical);
+    };
+
     StickySortable.prototype.findDropTarget = function (siblings, x, y) {
         if ('y' === this.options.axis) {
             for (var i = 0; i < siblings.length; i++) {
@@ -268,9 +355,42 @@
             this.container.insertBefore(this.placeholder, null);
         }
 
+        this.orientPlaceholder();
+
         if (this.options.autoscroll) {
             this.updateAutoscroll(e.clientY);
         }
+    };
+
+    // How much of the scroller's top edge is hidden under something pinned
+    // across it. A sticky header covers exactly the band that triggers upward
+    // scrolling, so the pointer can never reach it and dragging a card upwards
+    // simply refuses to scroll - reported on the dashboard, whose topbar is
+    // sticky and ~53px tall against a 40px band. Measured once per drag.
+    StickySortable.prototype.topInset = function (rect) {
+
+        if (this._topInset !== undefined && this._topInset !== null) return this._topInset;
+        if (this.options.autoscrollInsetTop !== null && this.options.autoscrollInsetTop !== undefined) {
+            this._topInset = this.options.autoscrollInsetTop;
+            return this._topInset;
+        }
+
+        var inset = 0;
+        try {
+            var probe = document.elementFromPoint(Math.max(1, Math.round(window.innerWidth / 2)), Math.round(rect.top) + 1);
+            while (probe && probe !== document.body) {
+                var position = getComputedStyle(probe).position;
+                if (position === 'sticky' || position === 'fixed') {
+                    var bottom = probe.getBoundingClientRect().bottom;
+                    if (bottom > rect.top) inset = Math.max(inset, bottom - rect.top);
+                    break;
+                }
+                probe = probe.parentElement;
+            }
+        } catch (e) {}
+
+        this._topInset = inset;
+        return inset;
     };
 
     StickySortable.prototype.updateAutoscroll = function (clientY) {
@@ -279,7 +399,13 @@
             : this.scroller.getBoundingClientRect();
 
         var edge = this.options.autoscrollEdge;
-        if (clientY < rect.top + edge) {
+        // A finger needs a wider target than a pointer, and on a phone the
+        // outermost pixels belong to the browser's own edge gestures.
+        if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
+            edge = Math.max(edge, 90);
+        }
+
+        if (clientY < rect.top + this.topInset(rect) + edge) {
             this.autoscrollDirection = -1;
         } else if (clientY > rect.bottom - edge) {
             this.autoscrollDirection = 1;
@@ -302,6 +428,9 @@
     };
 
     StickySortable.prototype.onPointerUp = function (e) {
+
+        // Measured per drag: a swap or a resize can move the sticky header.
+        this._topInset = undefined;
         if (!this.dragging || e.pointerId !== this.pointerId) {
             return;
         }
@@ -387,13 +516,17 @@
         }
     };
 
-    $.fn.stickySortable = function (options) {
-        return this.each(function () {
-            if (!this._stickySortable) {
-                this._stickySortable = new StickySortable(this, options);
-            }
-        });
-    };
+    if ($) {
+        $.fn.stickySortable = function (options) {
+            return this.each(function () {
+                if (!this._stickySortable) {
+                    this._stickySortable = new StickySortable(this, options);
+                }
+            });
+        };
+    }
+
+    StickySortable.defaults = defaults;
 
     return StickySortable;
 });
