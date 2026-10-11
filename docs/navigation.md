@@ -6,7 +6,7 @@ with the history, the scroll positions, the head and the scripts kept in step.
 Needs jQuery and the core.
 
 ```js
-import '@glitchr/transparentjs/navigation';
+import '@glitchr/flowjs/navigation';
 
 Transparent.ready({ identifier: '#page', prefetch: true, nest: ['/admin/*'] });
 ```

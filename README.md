@@ -23,17 +23,17 @@ Everything, with the stylesheets (bundler with Sass and jQuery provided, e.g.
 webpack's `ProvidePlugin`):
 
 ```js
-import '@glitchr/transparentjs';
+import '@glitchr/flowjs';
 ```
 
 One module (its stylesheet when it has one, and the core):
 
 ```js
-import '@glitchr/transparentjs/navigation';   // Transparent
-import '@glitchr/transparentjs/sticky';       // Sticky
-import '@glitchr/transparentjs/stops';        // StickyStops
-import '@glitchr/transparentjs/sortable';     // StickySortable
-import '@glitchr/transparentjs/ajaxer';       // Ajaxer
+import '@glitchr/flowjs/navigation';   // Transparent
+import '@glitchr/flowjs/sticky';       // Sticky
+import '@glitchr/flowjs/stops';        // StickyStops
+import '@glitchr/flowjs/sortable';     // StickySortable
+import '@glitchr/flowjs/ajaxer';       // Ajaxer
 ```
 
 Without a bundler, the files of `src/js/` in a page, `core.js` first:
@@ -107,6 +107,32 @@ drives the browser over the DevTools protocol, in real time, and opens each
 navigation's canvases, the scroll stops, the sticky effects, the sortable, the
 Ajaxer, and the modules living together (one native listener of each kind on the
 window).
+
+## Coming from the earlier packages
+
+`@glitchr/flowjs` 1.0.0 succeeds `@glitchr/transparentjs` 3.0.31,
+`@glitchr/stickyjs` 1.7.0 and `@glitchr/ajaxer` 1.0.56. The globals (`Transparent`,
+`Sticky`, `StickyStops`, `StickySortable`, `Ajaxer`), their options, the CSS
+classes and the `data-*` attributes keep their names and meaning. Until the
+package is on npm, a site installs it from the repository, pinned to a commit:
+
+```json
+"@glitchr/flowjs": "git+https://github.com/glitchr-studio/flowjs.git#<commit>"
+```
+
+and drops the line of the package it replaces. The imports to change:
+
+| From | To |
+| --- | --- |
+| `import '@glitchr/transparentjs'` | `import '@glitchr/flowjs/navigation'` (or `'@glitchr/flowjs'` for everything) |
+| `import '@glitchr/stickyjs'` | `import '@glitchr/flowjs/sticky'`, `'@glitchr/flowjs/stops'` and `'@glitchr/flowjs/sortable'` (the old entry brought the three in) |
+| `import '@glitchr/ajaxer'` | `import '@glitchr/flowjs/ajaxer'` |
+
+A site using all of them can import `'@glitchr/flowjs'` once. `@glitchr/stickyjs/src/js/stops.js` and the like
+become `@glitchr/flowjs/stops` (`@glitchr/flowjs/src/*` stays importable). What
+changed inside: the modules share one core, so the scroll is listened to once
+for all of them, and Ajaxer no longer defines its own durations and
+`$.fn.serializeObject`.
 
 ## License
 

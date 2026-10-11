@@ -6,7 +6,7 @@ Needs jQuery and the core (`src/js/core.js`, loaded first), which provides the
 durations (`"250ms"`, `"1s"`) and `$.fn.serializeObject`.
 
 ```js
-import '@glitchr/transparentjs/ajaxer';   // the module, with its stylesheet
+import '@glitchr/flowjs/ajaxer';   // the module, with its stylesheet
 
 Ajaxer.setUrl('search', '/search');
 Ajaxer.setMethod('search', 'GET');

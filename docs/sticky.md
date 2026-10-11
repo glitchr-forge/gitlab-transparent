@@ -20,7 +20,7 @@ it adds nothing to the history.
 ## Scroll stops
 
 `src/js/stops.js` - places on the page a scroll settles on, once it has come
-to rest. Standalone: no jQuery, and `import '@glitchr/transparentjs/stops'`
+to rest. Standalone: no jQuery, and `import '@glitchr/flowjs/stops'`
 brings in nothing else.
 
 ```html
