@@ -21,7 +21,10 @@
         var H = Harness;
         var target = document.getElementById('target');
         H.check(Ajaxer.version === '1.0.56' && Flow.ajaxer === Ajaxer, 'Ajaxer is the core\'s ajaxer module');
-        H.check(Ajaxer.parseTime('250ms') === 0.25 && Ajaxer.parseTime('1s, 250ms') === 1, 'the durations are the core\'s', Ajaxer.parseTime('250ms'));
+        H.check(Ajaxer.parseTime(400) === 400 && Ajaxer.parseTime('250ms') === 250 && Ajaxer.parseTime('1s') === 1000
+            && Ajaxer.parseTime('1s, 250ms') === 1000 && Ajaxer.parseTime('250') === 250 && Ajaxer.parseTime(0) === 0
+            && Ajaxer.parseTime(undefined) === 0 && Ajaxer.parseTime('abc') === 0, 'a duration is milliseconds, or what its unit says',
+            [Ajaxer.parseTime('250ms'), Ajaxer.parseTime('1s')].join());
         H.check(typeof $.fn.serializeObject === 'function', 'serializeObject is installed by the core');
 
         Ajaxer.ready();
@@ -56,6 +59,26 @@
         Ajaxer.send('ping', {}, function (data) { answers.push(data); });
         await H.after(300);
         H.check(answers.length === 2, 'with the throttle off both go', answers.length);
+
+        // Durations with a unit: "250ms" is a window of 250 ms (not off), "1s" is one second (not 1 ms).
+        Ajaxer.setThrottle('ping', '250ms');
+        answers = [];
+        Ajaxer.send('ping', {}, function (data) { answers.push(data); });
+        Ajaxer.send('ping', {}, function (data) { answers.push(data); });
+        await H.after(150);
+        H.check(answers.length === 1, '"250ms" throttles two quick sends to one', answers.length);
+        await H.after(300);
+        Ajaxer.send('ping', {}, function (data) { answers.push(data); });
+        await H.after(150);
+        H.check(answers.length === 2, 'and the window closes after 250 ms', answers.length);
+        Ajaxer.setThrottle('ping', '1s');
+        await H.after(250);
+        Ajaxer.send('ping', {}, function (data) { answers.push(data); });
+        await H.after(150);
+        Ajaxer.send('ping', {}, function (data) { answers.push(data); });
+        await H.after(300);
+        H.check(answers.length === 3, '"1s" holds the window for a second (not 1 ms)', answers.length);
+        Ajaxer.setThrottle('ping', 0);
 
         // A url that answers nothing: the error path, the status shown.
         Ajaxer.setUrl('missing', 'ajaxer-missing.json');

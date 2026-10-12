@@ -45,8 +45,22 @@
         Ajaxer.abortAll();
     }
 
-    // "250ms", "1s", or several: the longest, in seconds (the core's parseDuration).
-    Ajaxer.parseTime = Flow.parseDuration;
+    // A duration in milliseconds. A number is milliseconds as it stands; a string with a
+    // unit is what it says ("250ms", "1s", or several, "1s, 250ms": the longest); a string
+    // without one ("250") is milliseconds too. Anything unreadable is 0 (off).
+    Ajaxer.parseTime = function (value) {
+
+        if (typeof value === "number") return isFinite(value) ? value : 0;
+        if (value === undefined || value === null) return 0;
+
+        const list = String(value).trim().split(/\s*,\s*/).map(function (t) {
+            if (/ms$/.test(t)) return parseFloat(t);
+            if (/s$/.test(t)) return 1000 * parseFloat(t);
+            return parseFloat(t);
+        });
+        const longest = Math.max.apply(Math, list);
+        return isFinite(longest) ? longest : 0;
+    };
 
     Ajaxer.ready = function (list = {}, options = {}) {
 
@@ -193,12 +207,12 @@
 
         return (...args) => {
 
-            timeout = Ajaxer.parseTime(timeout ?? Ajaxer.get("debounce["+name+"]") ?? Ajaxer.get("debounce"));
-            if(timeout < 1) func.apply(this, args)
+            const wait = Ajaxer.parseTime(timeout ?? Ajaxer.get("debounce["+name+"]") ?? Ajaxer.get("debounce"));
+            if(wait < 1) func.apply(this, args)
             else {
 
                 if(typeof debounceTimer[name] !== "undefined") clearTimeout(debounceTimer[name]);
-                debounceTimer[name] = setTimeout(() => { func.apply(this, args); }, timeout);
+                debounceTimer[name] = setTimeout(() => { func.apply(this, args); }, wait);
             }
         };
     }

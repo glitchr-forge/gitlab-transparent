@@ -36,23 +36,25 @@ is the default for every channel.
 | `setOutput(name, dataType)` | `output` | `"json"` | jQuery's `dataType` |
 | `setTarget(name, el)` | `target` | the caller (`this`) | the element marked while the call is out |
 | `setLoaderContainer(name, el)` | `loader_container` | the target | where the `.ajaxer-loader` is put |
-| `setThrottle(name, d)` | `throttle` | `1000` | a send within this many ms of the last is dropped; `0` for none |
-| `setDebounce(name, d)` | `debounce` | `0` | wait this many ms after the last call |
-| `setLoaderDebounce(name, d)` | `loader_debounce` | `1500` | the loader appears only after this many ms |
+| `setThrottle(name, d)` | `throttle` | `1000` | a send within this duration of the last is dropped; `0` for none |
+| `setDebounce(name, d)` | `debounce` | `0` | wait this long after the last call |
+| `setLoaderDebounce(name, d)` | `loader_debounce` | `1500` | the loader appears only after this long |
 | `setRetryLimit(name, n)` | `retry_limit` | `1` | tries after a failure |
 | `setQueryLimit(name, n)` | `query_limit` | none | requests in flight at most |
 | `cancelable(name, bool)` | `cancelable` | `false` | at the limit, abort the oldest (true) or refuse the new one |
-| `setLoaderThrottle(name, d)` | `loader_throttle` | none | stored; the code reads no `loader_throttle` (kept as it was) |
+| `setLoaderThrottle(name, d)` | `loader_throttle` | none | stored; nothing reads it |
 
-Throttle and debounce are read as 1.0.56 reads them, and the unit is a quirk
-worth knowing: the value goes through `Ajaxer.parseTime` (the core's
-`Flow.parseDuration`, which turns `"250ms"` into 0.25 and `"1s"` or `1000` into
-1 and 1000), a result under 1 means "off", and anything else is then used as a
-number of milliseconds. So `1000` (the default) and `400` are milliseconds,
-`0` is off, and `"250ms"` or `"1s"` do not mean what they say (off, and 1 ms).
-Write plain millisecond numbers for `throttle` and `debounce`. `loader_debounce`
-goes through the same function and then to `setTimeout` too: `1500` is 1.5 s.
-Kept as it was, not corrected.
+A duration (`throttle`, `debounce`, `loader_debounce`) is a number of
+milliseconds, or a string with its unit, and is worth what it says: `400` and
+`"400"` are 400 ms, `"250ms"` is 250 ms, `"1s"` is one second, `"1s, 250ms"` the
+longest of the two. `0` (or anything unreadable) is off. `Ajaxer.parseTime(v)`
+returns the value in milliseconds. (Up to 1.0.0 the value went through the
+core's `Flow.parseDuration`, in seconds, and was then taken for milliseconds:
+`"250ms"` switched the throttle off and `"1s"` made it 1 ms. Plain numbers, the
+only form that worked, mean what they did.)
+
+`loader_throttle` is stored and not read: nothing in the code waits on it
+(the loader's delay is `loader_debounce`), so it is left as it was.
 
 ## States
 
