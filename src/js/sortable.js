@@ -1,6 +1,6 @@
-// StickySortable - drag-and-drop reordering, standing alone: it needs the
-// core (Flow) for the scroller to autoscroll, and jQuery for its $.fn plugin
-// only, so a consumer who only wants sorting pays for none of the scroll
+// StickySortable - drag-and-drop reordering, standing alone: it is loaded
+// after the core (Flow) like every module, and takes jQuery for its $.fn
+// plugin only, so a consumer who only wants sorting pays for none of the scroll
 // effects. Pointer Events (not HTML5 drag-and-drop) so a custom placeholder
 // and touch both work with one code path - requires touch-action: none on
 // the handle in CSS.
@@ -46,11 +46,18 @@
     };
 
     // The scroller the list autoscrolls while an item is dragged to its edge:
-    // the closest ancestor that scrolls (the core's), the page otherwise.
+    // the closest ancestor that scrolls DOWN (overflow-y auto or scroll, and
+    // taller inside than out), the page otherwise. Not the core's closest
+    // scroller, which a wrapper scrolling sideways is too (a table in an
+    // overflow-x box): its scrollTop goes nowhere, and the page stood still
+    // under the dragged row.
     function closestScrollable(el) {
-        var node = el.parentElement ? Flow.closestScrollable(el.parentElement) : undefined;
-        if (!node || node === document.documentElement) return document.scrollingElement || document.documentElement;
-        return node;
+        for (var node = el.parentElement; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
+            if (node.scrollHeight <= node.clientHeight) continue;
+            var overflowY = getComputedStyle(node).overflowY;
+            if (overflowY === 'auto' || overflowY === 'scroll') return node;
+        }
+        return document.scrollingElement || document.documentElement;
     }
 
     function StickySortable(container, options) {

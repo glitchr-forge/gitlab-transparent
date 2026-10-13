@@ -15,6 +15,14 @@
     li { list-style: none; height: 40px; margin: 0; padding: 0; border: 1px solid #999; }
     .handle { display: inline-block; width: 20px; height: 20px; touch-action: none; }
     .is-sortable-placeholder { height: var(--sortable-item-height); border: 1px dashed #333; }
+    #wide { overflow-x: auto; width: 200px; }
+    #wide ul { width: 600px; margin: 0; padding: 0; }
+    #tall { overflow-y: auto; height: 120px; width: 300px; position: relative; }
+    #tall ul { margin: 0; padding: 0; }
+    #grid { display: flex; flex-wrap: wrap; width: 420px; margin: 0; padding: 0; }
+    #grid li { flex: 0 0 100px; height: 80px; box-sizing: border-box; }
+    #grid .is-sortable-placeholder { flex: 0 0 4px; height: 80px; border: 0; background: #333; }
+    #result { position: fixed; top: 0; right: 0; margin: 0; }
 </style>
 </head>
 <body>
@@ -23,6 +31,10 @@
     <li data-sortable-item id="i2"><button class="handle">::</button> two</li>
     <li data-sortable-item id="i3"><button class="handle">::</button> three</li>
 </ul>
+<div id="wide"><ul id="in-wide"><li data-sortable-item>a</li><li data-sortable-item>b</li></ul></div>
+<div id="tall"><ul id="in-tall"><li data-sortable-item>a</li><li data-sortable-item>b</li><li data-sortable-item>c</li><li data-sortable-item>d</li><li data-sortable-item>e</li><li data-sortable-item>f</li><li data-sortable-item>g</li><li data-sortable-item>h</li></ul></div>
+<ul id="grid"><li data-sortable-item id="g1">1</li><li data-sortable-item id="g2">2</li><li data-sortable-item id="g3">3</li><li data-sortable-item id="g4">4</li></ul>
+<div style="height: 1500px"></div>
 <pre id="result">pending</pre>
 <script src="jquery.js"></script>
 <script src="harness.js"></script>
@@ -74,6 +86,52 @@
         H.check(order() === 'i2,i3,i1', 'ArrowDown moves it down again', order());
 
         H.check(StickySortable.defaults.items === '[data-sortable-item]', 'the defaults are exposed');
+
+        // The scroller a drag autoscrolls: the closest ancestor that scrolls down. A wrapper that only scrolls sideways
+        // (a table in an overflow-x box) is not it - 1.0.0 to 1.0.2 took it, and the page stood still under the row.
+        var page = document.scrollingElement || document.documentElement;
+        H.check(new StickySortable(document.getElementById('in-wide')).scroller === page, 'inside a box that scrolls sideways only, the page is autoscrolled', (new StickySortable(document.getElementById('in-wide')).scroller || {}).id);
+        var tall = new StickySortable(document.getElementById('in-tall'), { autoscrollInsetTop: 0, autoscrollSpeed: 10 });
+        H.check(tall.scroller === document.getElementById('tall'), 'inside a box that scrolls down, the box is', (tall.scroller || {}).id);
+        H.check(list._stickySortable.scroller === page, 'and the page for a list in the page');
+
+        // A drag held at the bottom edge of its scroller scrolls it; let go, it stops.
+        var first = document.querySelector('#in-tall [data-sortable-item]');
+        var fr = first.getBoundingClientRect();
+        var box = document.getElementById('tall').getBoundingClientRect();
+        pointer('pointerdown', first, fr.left + 5, fr.top + 5);
+        pointer('pointermove', first, fr.left + 5, fr.top + 15);
+        var holder = document.querySelector('#in-tall .is-sortable-placeholder');
+        H.check(holder && holder.style.getPropertyValue('--sortable-item-height') === first.offsetHeight + 'px' && holder.style.height === '', 'the placeholder carries the item\'s size as custom properties, no inline height', holder && holder.getAttribute('style'));
+        H.check(holder && holder.classList.contains('is-placeholder-horizontal'), 'in a column the drop marker reads horizontal', holder && holder.className);
+        pointer('pointermove', document, fr.left + 5, box.bottom - 5);
+        await H.until(function () { return document.getElementById('tall').scrollTop > 0; });
+        var scrolled = document.getElementById('tall').scrollTop;
+        H.check(scrolled > 0, 'held at the bottom edge, the scroller scrolls', scrolled);
+        pointer('pointerup', document, fr.left + 5, box.bottom - 5);
+        await H.after(60);
+        var rest = document.getElementById('tall').scrollTop;
+        await H.after(60);
+        H.check(document.getElementById('tall').scrollTop === rest, 'and stops when the item is dropped', rest + ' then ' + document.getElementById('tall').scrollTop);
+
+        // A grid: between two cards of one row the marker reads vertical; dropped on a card's middle with mergeable, onMerge.
+        var grid = document.getElementById('grid');
+        var merged = [], reordered = 0;
+        new StickySortable(grid, { axis: 'xy', mergeable: true, mergeInset: 10, isMergeTarget: function (el) { return el.id !== 'g3'; }, onMerge: function (a, b) { merged.push(a.id + '>' + b.id); }, onChange: function () { reordered++; } });
+        var g1 = document.getElementById('g1'), g2 = document.getElementById('g2'), g3 = document.getElementById('g3'), g4 = document.getElementById('g4');
+        var c = function (el) { var b = el.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2, left: b.left, right: b.right, top: b.top }; };
+        var p1 = c(g1), p2 = c(g2), p3 = c(g3);
+        pointer('pointerdown', g1, p1.x, p1.y);
+        pointer('pointermove', g1, p1.x + 10, p1.y);
+        pointer('pointermove', document, c(g3).left + 3, c(g3).y);  // g3 refuses a merge: at its left edge, a place before it
+        var marker = grid.querySelector('.is-sortable-placeholder');
+        H.check(marker && marker.nextElementSibling === g3 && marker.classList.contains('is-placeholder-vertical'), 'between two cards of a row the drop marker reads vertical', marker && marker.className);
+        pointer('pointermove', document, c(g3).x, c(g3).y);
+        H.check(!g3.classList.contains('is-merge-target'), 'an item isMergeTarget refuses is never armed');
+        pointer('pointermove', document, c(g4).x, c(g4).y);
+        H.check(g4.classList.contains('is-merge-target'), 'over the middle of another item, it is the merge target', g4.className);
+        pointer('pointerup', document, c(g4).x, c(g4).y);
+        H.check(merged.join() === 'g1>g4' && reordered === 0 && !g4.classList.contains('is-merge-target'), 'dropped there: onMerge, not onChange', merged.join() + ' ' + reordered);
         H.done();
     })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
 </script>
