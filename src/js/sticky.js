@@ -480,13 +480,21 @@
         return Flow.userScroll(el);
     };
 
-    /** Scroll an element (the window by default) through the core's engine - unless a script has the scroll already. */
+    /**
+     * Scroll an element (the window by default) through the core's engine -
+     * unless a script has the scroll already. The callback is called once in
+     * every case with {completed, reason} (see Flow.scrollTo); reason
+     * "refused" when a script had the scroll and nothing was started.
+     */
     Sticky.scrollTo = function(dict, callback = function() {}, el = window)
     {
         el = $(el).length ? $(el)[0] : window;
         el = Flow.element(el);
 
-        if(Sticky.userScroll(el) == false) return;
+        if(Sticky.userScroll(el) == false) {
+            callback({completed: false, reason: "refused", top: el.scrollTop, left: el.scrollLeft});
+            return this;
+        }
         Flow.scrollTo(el, dict, callback);
 
         return this;
@@ -797,6 +805,11 @@
             if (Sticky.get("scrolllock"))
                 Sticky.disableScroll();
 
+            // The way to the magnet holds the scroll, as the page's
+            // overflow says (.sticky-prevent-scroll): a wheel on the way is
+            // not the reader taking over, the page lands on the magnet. And
+            // however the movement ends - arrived, refused, replaced - the
+            // page is given back: left set, it answered nothing any more.
             scrollSnapDebounce = true;
             Sticky.scrollTo({
 
@@ -804,7 +817,8 @@
                 left:magnet.offsetLeft - Sticky.getScrollPadding(scroller).left,
                 easing:Settings["smoothscroll_easing"],
                 duration: Settings["smoothscroll_duration"],
-                speed: Settings["smoothscroll_speed"]
+                speed: Settings["smoothscroll_speed"],
+                hold: true
 
             }, Sticky.debounce(function() {
 
@@ -1387,13 +1401,16 @@
                 scrollBackOptions.left = noScrollX ? 0 : (reverse ? scrollWidth  : 0);
             }
 
-            Sticky.scrollTo(scrollOptions, function() {
+            Sticky.scrollTo(scrollOptions, function(outcome) {
 
+                // The reader took the scroll on the way: no way back against them.
+                if (outcome && outcome.completed === false) return;
                 if( !bouncing || $(container).data("autoscroll-prevent") ) return;
 
                 $(scroller).prop("user-scroll", true);
-                Sticky.scrollTo(scrollBackOptions, function() {
+                Sticky.scrollTo(scrollBackOptions, function(outcome) {
 
+                    if (outcome && outcome.completed === false) return;
                     Sticky.onAutoscroll.call(container);
                     if(reverse) $(container).removeData("autoscroll-reverse");
                     else $(container).data("autoscroll-reverse", true);
@@ -1598,7 +1615,7 @@
                                 top:scrollHeight,
                                 duration:reverseDuration,
                                 speed:reverseSpeed
-                            }, payloadAutoscroll, scroller), 1000*Sticky.parseDuration(reverseDelay) + 1);
+                            }, function(outcome) { if (!outcome || outcome.completed !== false) payloadAutoscroll(); }, scroller), 1000*Sticky.parseDuration(reverseDelay) + 1);
 
                         } else payloadAutoscroll();
                     }

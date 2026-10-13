@@ -1,0 +1,87 @@
+<!doctype html>
+<!--
+  A scroll of the core's (Flow.scrollTo, and Sticky.scrollTo over it) always ends and calls back
+  once, saying how: arrived, interrupted by the reader, replaced by another, or refused. Up to 1.0.3
+  a movement the reader stopped never called back, and whatever its caller had set for the time of
+  the movement stayed set (tests/sticky-magnets.html: a page that answered nothing any more).
+  Opened by tests/run.mjs in a headless browser; the page writes its verdict in #result.
+-->
+<html>
+<head>
+<meta charset="utf-8"><title>scroll callback</title>
+<style>
+    body { margin: 0; }
+    #box { height: 100px; width: 100px; overflow: auto; }
+    #box > div { height: 2000px; }
+</style>
+</head>
+<body>
+<div id="box"><div></div></div>
+<pre id="result">pending</pre>
+<script src="jquery.js"></script>
+<script src="harness.js"></script>
+<script src="../src/js/core.js"></script>
+<script src="../src/js/sticky.js"></script>
+<script>
+    (async function () {
+        var H = Harness;
+        function wait(ms) { return new Promise(function (f) { setTimeout(f, ms); }); }
+
+        var box = document.getElementById('box');
+        Flow.onInterrupt(box, Flow.release);
+        var calls = [];
+        function told(name) { return function (outcome) { calls.push(name + ':' + (outcome && outcome.reason) + ':' + (outcome && outcome.completed)); }; }
+
+        Flow.scrollTo(box, { top: 500, duration: '150ms' }, told('a'));
+        await H.after(400);
+        H.check(calls.join() === 'a:arrived:true' && box.scrollTop === 500, 'a scroll that arrives calls back once, completed', calls.join());
+
+        calls = [];
+        Flow.scrollTo(box, { top: 500, duration: '150ms' }, told('b'));
+        await H.after(50);
+        H.check(calls.join() === 'b:arrived:true', 'a scroll with no way to go calls back, completed', calls.join());
+
+        calls = [];
+        Flow.scrollTo(box, { top: 1500, duration: '600ms' }, told('c'));
+        await wait(100);
+        box.dispatchEvent(new WheelEvent('wheel', { deltaY: 10, bubbles: true }));
+        var at = box.scrollTop;
+        await H.after(300);
+        H.check(calls.join() === 'c:interrupted:false', 'a scroll the reader interrupts calls back once, not completed', calls.join());
+        H.check(box.scrollTop === at && at < 1500 && Flow.userScroll(box) === true, 'and stays where the reader took it, the scroll theirs', at + ' -> ' + box.scrollTop);
+
+        calls = [];
+        Flow.scrollTo(box, { top: 0, duration: '600ms' }, told('d'));
+        await wait(100);
+        Flow.scrollTo(box, { top: 800, duration: '150ms' }, told('e'));
+        await H.after(500);
+        H.check(calls.join() === 'd:replaced:false,e:arrived:true' && box.scrollTop === 800, 'a scroll replaced by another calls back once, the other goes its way', calls.join() + ' at ' + box.scrollTop);
+
+        calls = [];
+        Flow.scrollTo(box, { top: 0, duration: '300ms', hold: true }, told('f'));
+        await wait(100);
+        box.dispatchEvent(new WheelEvent('wheel', { deltaY: 10, bubbles: true }));
+        await H.after(500);
+        H.check(calls.join() === 'f:arrived:true' && box.scrollTop === 0, 'a scroll that holds ({hold: true}) is not stopped by a wheel', calls.join() + ' at ' + box.scrollTop);
+
+        // An animation stopped behind the core's back (a site's own .stop()) still ends: past its time the
+        // scroller is where it was going.
+        calls = [];
+        Flow.scrollTo(box, { top: 900, duration: '200ms' }, told('g'));
+        await wait(60);
+        $(box).stop(true);
+        await H.until(function () { return calls.length; }, 3000);
+        H.check(calls.join() === 'g:arrived:true' && box.scrollTop === 900, 'a scroll whose animation was stopped from outside still ends, where it was going', calls.join() + ' at ' + box.scrollTop);
+
+        // Sticky.scrollTo refuses a scroller a script has - and says so.
+        calls = [];
+        Flow.scrollTo(box, { top: 0, duration: '300ms' }, told('h'));
+        Sticky.scrollTo({ top: 400, duration: '100ms' }, told('i'), box);
+        await H.after(500);
+        H.check(calls.join() === 'i:refused:false,h:arrived:true', 'Sticky.scrollTo on a scroller a script has calls back, refused', calls.join());
+
+        H.done();
+    })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
+</script>
+</body>
+</html>

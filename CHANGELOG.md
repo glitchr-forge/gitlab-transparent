@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.0.4 - 2026-10-14
+
+### A page that stopped answering, fixed
+
+- **core, sticky** - with `scrollsnap` and `.sticky-magnet` sections, a wheel
+  froze the page: the way to a magnet sets `.sticky-prevent-scroll`
+  (`overflow: hidden`) on `<html>` and lifted it in the callback of its
+  scroll, and a wheel on the way stopped the animation without calling back.
+  (1.0.2 did not show it: its magnets went nowhere. 1.0.3 listed it as a
+  callback lost on interruption, left as it was.) Two things now:
+  - `Flow.scrollTo` always ends and calls back once, with
+    `{completed, reason, top, left}` - `"arrived"` (also with no way to go),
+    `"interrupted"` (the reader took over), `"replaced"` (another scroll of
+    the same scroller began); an animation stopped from outside (a site's own
+    `.stop()`) is put where it was going a second past its time.
+    `Sticky.scrollTo` calls back with `"refused"` when a script has the scroll
+    already, where it returned without a word.
+  - the way to a magnet holds the scroll (`{hold: true}`, new), as in stickyjs
+    where the hidden overflow swallowed the wheel: the page lands on the
+    magnet, a quick gesture leads one magnet further and not two, and the
+    class is lifted however the movement ended.
+- **changes** for a callback of `Flow.scrollTo` / `Sticky.scrollTo` /
+  `Transparent.scrollTo`: it is now called when the movement was interrupted
+  or replaced too - check `outcome.completed` before doing what belongs to an
+  arrival. The library's own callers read again: the autoscroll does not
+  bounce back or start over against a reader who took the scroll; a link to
+  an anchor of the page writes the hash on arrival only (written after an
+  interruption, it would jump the page there); the first page's scroll to its
+  hash takes `transparent-first` off even when the reader interrupts it (it
+  stayed for ever).
+- **core** - `user-scroll` stays `false` while a movement started from a
+  callback runs (the autoscroll's way back): it was given back to the reader
+  as that movement began.
+
+`tests/sticky-magnets.html`: a trackpad gesture (40 x 25px), three quick
+notches down and up, a wheel during a magnet button's scroll - no
+`.sticky-prevent-scroll` left and the page answers afterwards - and the
+callback's four endings.
+
 ## 1.0.3 - 2026-10-13
 
 The merge read again, module by module, against stickyjs 1.7.0, transparentjs

@@ -32,6 +32,23 @@ bottom, as `{element, offsetTop, offsetLeft, visible}` (`visible`: the share
 of its scroller's box the magnet fills, 0 to 1); `.sticky-magnet-first`,
 `-prev`, `-next` and `-last` scroll to them (`Sticky.scrollToNextSnap()`...).
 
+With `scrollsnap` (and `passive: false`), a scroll of the reader's that leaves
+a magnet takes the page to the next one in its direction. On the way `<html>`
+carries `.sticky-prevent-scroll` (`overflow: hidden`) and the movement holds
+the scroll: a wheel on the way neither stops it nor adds to it, so a quick
+gesture leads one magnet further, not two. The class is taken off `debounce`
+after the movement ended, however it ended.
+
+`Sticky.scrollTo(dict, callback, el)` and `Flow.scrollTo(el, dict, callback)`
+call back once, whatever becomes of the movement, with
+`{completed, reason, top, left}`: `"arrived"` (also when there was no way to
+go), `"interrupted"` (the reader took over: a wheel, a finger, a press),
+`"replaced"` (another scroll of the same scroller began) or, from
+`Sticky.scrollTo` only, `"refused"` (a script had the scroll already). What a
+caller sets for the time of a movement, it lifts in the callback; what it does
+on arrival only, it does when `completed`. `{hold: true}` in `dict` makes a
+movement the reader's gesture does not stop.
+
 The effects run once per frame in which the scroller scrolled, through the
 core, and once when the page is loaded. `Sticky.trigger(el)` runs them now,
 as `$(window).trigger('scrolldelta.sticky')` did in stickyjs; a page's own

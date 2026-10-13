@@ -24,7 +24,7 @@
 
     var document = window.document;
 
-    var Flow = { core: true, version: '1.0.3' };
+    var Flow = { core: true, version: '1.0.4' };
 
     // ── jQuery ───────────────────────────────────────────────────────────
     // A bundler's ProvidePlugin gives the bare `jQuery` identifier; a page
@@ -427,12 +427,30 @@
         mark(el, false);
     };
 
+    // A scroll of the core's always ends, and tells who asked for it - once:
+    // arrived, taken over by the reader ("interrupted"), or given up for the
+    // next one on the same scroller ("replaced"). A caller that set something
+    // for the time of the movement lifts it there, whatever the ending.
+    function settle(el, move, reason) {
+        var entry = record(el);
+        if (entry.move !== move) return;
+        entry.move = null;
+        clearTimeout(move.watch);
+        move.end(reason);
+    }
+
     /**
      * Scroll an element (the window by default) to {top, left}, at once or
      * over a duration ("250ms"; or "duration-x", "duration-y"), or at a speed
      * (px/s), along a jQuery easing ("swing"), then call back. The scroller's
      * "user-scroll" is false meanwhile, and a wheel, a finger or a press stops
-     * the movement where it is and gives the scroll back to the reader.
+     * the movement where it is and gives the scroll back to the reader -
+     * unless {hold: true}, a movement the reader's gesture does not take.
+     *
+     * The callback is called once, however the movement ends, with
+     * {completed, reason, top, left}: reason "arrived" (completed: true, also
+     * when there was no way to go), "interrupted" (the reader took over) or
+     * "replaced" (another scroll of the same scroller began).
      */
     Flow.scrollTo = function (scroller, dict, callback) {
         var jq = Flow.jquery();
@@ -464,15 +482,35 @@
             duration = durationX + durationY;
         }
 
+        // The movement this scroller was in gives place, its caller told.
+        var entry = record(el);
+        if (entry.move) {
+            if (jq) jq(el).stop(true);
+            settle(el, entry.move, 'replaced');
+        }
+
+        var move = entry.move = {
+            hold: !!dict.hold,
+            end: function (reason) {
+                var arrived = reason === 'arrived';
+                if (arrived) {
+                    mark(el, false);
+                    el.dispatchEvent(new Event('scroll'));
+                }
+                try {
+                    callback({ completed: arrived, reason: reason, top: el.scrollTop, left: el.scrollLeft });
+                } finally {
+                    // The scroll is the reader's again - unless the callback
+                    // began another movement, or this one made way for one.
+                    if (reason !== 'replaced' && !record(el).move) prop(el, 'user-scroll', true);
+                }
+            }
+        };
+
         prop(el, 'user-scroll', false);
         mark(el, true);
 
-        var done = function () {
-            mark(el, false);
-            el.dispatchEvent(new Event('scroll'));
-            callback();
-            prop(el, 'user-scroll', true);
-        };
+        var done = function () { settle(el, move, 'arrived'); };
 
         if (!duration || !jq) {
             el.scrollTo(scrollLeft, scrollTop);
@@ -485,25 +523,42 @@
         // duration out, at rest, before calling back.
         var end = debounce ? Flow.debounce(done, debounce) : done;
         var across = function () {
+            if (entry.move !== move) return;
             if (Math.abs(el.scrollLeft - scrollLeft) < 1) return end();
             jq(el).stop(true).animate({ scrollLeft: scrollLeft }, durationX, easing, end);
         };
+        // An animation something else stopped (a site's own .stop(), frames
+        // that never came) would never call back: past its time, the scroller
+        // is put where it was going.
+        var way = (Math.abs(el.scrollTop - scrollTop) < 1 ? 0 : durationY) + (Math.abs(el.scrollLeft - scrollLeft) < 1 ? 0 : durationX);
+        move.watch = setTimeout(function () {
+            if (entry.move !== move) return;
+            jq(el).stop(true);
+            el.scrollTo(scrollLeft, scrollTop);
+            done();
+        }, way + debounce + 1000);
+
         if (Math.abs(el.scrollTop - scrollTop) < 1) return across();
         jq(el).stop(true).animate({ scrollTop: scrollTop }, durationY, easing, across);
     };
 
     // The reader taking over gives the scroll back, on the page and on every
-    // scroller a script animated: the flag, and jQuery's animation stopped.
+    // scroller a script animated: the flag, jQuery's animation stopped, and
+    // the movement's caller told it was interrupted. A movement that holds
+    // the scroll ({hold: true}) goes on.
     function release(event, scroller) {
         var el = Flow.element(scroller);
         var jq = Flow.jquery();
+        var entry = record(el);
+        var move = entry.move;
+        if (move && move.hold) return;
         if (jq) jq(el).stop(true);
         // The movement stopped where the reader took it: no longer a script's
         // (left "running", every later scroll of the reader's was taken for
         // the script's and the stops never settled again).
-        var entry = record(el);
         if (entry.running) { entry.running = false; entry.until = 0; entry.at = null; }
         prop(el, 'user-scroll', true);
+        if (move) settle(el, move, 'interrupted');
     }
     Flow.release = release;
     Flow.onInterrupt(window, release);

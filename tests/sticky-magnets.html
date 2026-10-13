@@ -1,0 +1,116 @@
+<!doctype html>
+<!--
+  The magnets under a wheel (scrollsnap: true, .sticky-magnet sections of a screen each). The
+  promise they lean on - a scroll of the core's always ends and tells its caller, once - is in
+  tests/scroll-callback.html.
+
+  While the page travels to a magnet, <html> carries .sticky-prevent-scroll (overflow: hidden). In
+  1.0.3 a wheel on the way stopped the animation without calling back: the class stayed, the page
+  answered nothing any more. The wheel here is the reader's as a browser gives it: a wheel event,
+  and the page moved by its delta - unless its overflow is hidden, as the browser would not either.
+  Opened by tests/run.mjs in a headless browser; the page writes its verdict in #result.
+-->
+<html>
+<head>
+<meta charset="utf-8"><title>sticky magnets</title>
+<style>
+    html { scroll-behavior: auto; scroll-padding-top: 0; }
+    body { margin: 0; }
+    section { height: 100vh; }
+    /* src/css/sticky.scss */
+    .sticky-prevent-scroll { overflow: hidden; block-size: 100%; }
+    #controls, #result { position: fixed; left: 0; margin: 0; }
+    #controls { top: 0; }
+    #result { bottom: 0; }
+</style>
+</head>
+<body>
+<div id="controls">
+    <button id="mnext" class="sticky-magnet-next">next</button>
+</div>
+<section id="one" class="sticky-magnet">One</section>
+<section id="two" class="sticky-magnet">Two</section>
+<section id="three" class="sticky-magnet">Three</section>
+<section id="four" class="sticky-magnet">Four</section>
+<pre id="result">pending</pre>
+<script src="jquery.js"></script>
+<script src="harness.js"></script>
+<script src="../src/js/core.js"></script>
+<script src="../src/js/sticky.js"></script>
+<script>
+    (async function () {
+        var H = Harness;
+        var html = document.documentElement;
+        function top(id) { return document.getElementById(id).offsetTop; }
+        function held() { return html.classList.contains('sticky-prevent-scroll'); }
+        function wait(ms) { return new Promise(function (f) { setTimeout(f, ms); }); }
+        /** One notch of the wheel: heard by the page, and scrolling it when its overflow lets it. */
+        function notch(delta) {
+            document.body.dispatchEvent(new WheelEvent('wheel', { deltaY: delta, bubbles: true }));
+            if (getComputedStyle(html).overflowY !== 'hidden') window.scrollBy({ top: delta, behavior: 'instant' });
+            requestAnimationFrame(function () {});
+        }
+        async function wheel(count, delta, every) {
+            for (var i = 0; i < count; i++) { notch(delta); await wait(every); }
+        }
+        /** The page is the reader's: nothing holds it, and a notch moves it. */
+        async function answers(what) {
+            await H.until(function () { return !held(); }, 3000);
+            H.check(!held(), what + ': no .sticky-prevent-scroll left on <html>', html.className);
+            var from = window.scrollY;
+            notch(from > 100 ? -40 : 40);
+            await H.frame();
+            H.check(Math.abs(window.scrollY - from) > 1, what + ': the page still answers the wheel', from + ' -> ' + window.scrollY);
+        }
+        /** The gesture over: the page has landed and been given back (or 2.5s have passed). */
+        async function landed() {
+            await H.after(300);
+            await H.until(function () { return !held(); }, 2500);
+        }
+        async function rest(id) {
+            Flow.release(null, window);
+            await H.until(function () { return !held(); }, 3000);
+            window.scrollTo({ top: top(id), behavior: 'instant' });
+            await H.after(150);
+            await H.until(function () { return !held(); }, 3000);
+        }
+
+        Sticky.ready({ scrollsnap: true, passive: false });
+        await H.after(60);
+
+        // A trackpad: 40 notches of 25px, one a frame. The first leaves the magnet, the page travels to the
+        // next and the notches that follow do not take it off its way.
+        await rest('one');
+        await wheel(40, 25, 16);
+        await landed();
+        H.check(H.near(window.scrollY, top('two'), 2) || H.near(window.scrollY, top('three'), 2), 'a trackpad gesture from the first magnet rests on a magnet', Math.round(window.scrollY) + ' vs ' + top('two'));
+        await answers('after a trackpad gesture (40 x 25px)');
+
+        // A wheel: three notches of 110px, quick. One magnet further, not two.
+        await rest('one');
+        await wheel(3, 110, 60);
+        await landed();
+        H.check(H.near(window.scrollY, top('two'), 2), 'three quick notches from the first magnet lead to the second, not past it', Math.round(window.scrollY) + ' vs ' + top('two'));
+        await answers('after three notches (3 x 110px)');
+
+        // Back up the same way.
+        await rest('three');
+        await wheel(3, -110, 60);
+        await landed();
+        H.check(H.near(window.scrollY, top('two'), 2), 'three quick notches up from the third magnet lead to the second', Math.round(window.scrollY) + ' vs ' + top('two'));
+        await answers('after three notches up');
+
+        // A magnet button, and a wheel while the page is on its way: the reader takes over, nothing stays held.
+        await rest('one');
+        document.getElementById('mnext').click();
+        await wait(60);
+        await wheel(3, 110, 60);
+        await landed();
+        H.check(['one', 'two', 'three', 'four'].some(function (id) { return H.near(window.scrollY, top(id), 2); }), 'a wheel during a magnet button\'s scroll: the page rests on a magnet', Math.round(window.scrollY));
+        await answers('after a wheel during a magnet button\'s scroll');
+
+        H.done();
+    })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
+</script>
+</body>
+</html>

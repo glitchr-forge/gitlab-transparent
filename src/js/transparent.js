@@ -3157,8 +3157,11 @@
         if((e.type == Transparent.state.CLICK || e.type == Transparent.state.HASHCHANGE) && url.pathname == currentPathname() && url.search == currentSearch() && type != "POST") {
 
             if(!url.hash) return;
-            Transparent.scrollToHash(url.hash ?? "", {easing:Settings["smoothscroll_easing"], duration:Settings["smoothscroll_duration"], speed:Settings["smoothscroll_speed"]}, function() {
+            Transparent.scrollToHash(url.hash ?? "", {easing:Settings["smoothscroll_easing"], duration:Settings["smoothscroll_duration"], speed:Settings["smoothscroll_speed"]}, function(outcome) {
 
+                // The reader took the scroll on the way to the anchor: the
+                // hash, set, would jump the page there against them.
+                if (outcome && outcome.completed === false) return;
                 if (e.target != undefined && $(e.target).data("skip-hash") != true)
                     window.location.hash = url.hash;
 
