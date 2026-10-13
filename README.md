@@ -2,7 +2,7 @@
 
 Scroll and navigation for pages that are server-rendered: links and forms that
 load the next page in the background, scroll effects, scroll stops, sortable
-lists and named AJAX channels. One library, one module per feature, one shared
+lists, named AJAX channels, and the cookies with the visitor's consent. One library, one module per feature, one shared
 core. The modules are independent of each other: import what a page needs.
 
 | Module | Global | Entry | What it does | Needs |
@@ -13,9 +13,10 @@ core. The modules are independent of each other: import what a page needs.
 | stops | `StickyStops` | `stops` | places on the page that a scroll settles on once it comes to rest, with keys and sideways rows | nothing |
 | sortable | `StickySortable` | `sortable` | drag-and-drop reordering with pointer events | nothing (jQuery only for the `$.fn.stickySortable` plugin) |
 | ajaxer | `Ajaxer` | `ajaxer` | named AJAX channels over `$.ajax`: throttle, debounce, loader, retry, request limit | jQuery |
+| cookie | `Cookie` | `cookie` | what a site stores in the browser and the visitor's consent to it: categories the site declares, the cookies and storage entries under each, features started at a grant and stopped at a withdrawal, a banner and a detailed section in the site's words | nothing |
 
 Per module: [navigation](docs/navigation.md), [sticky and stops](docs/sticky.md),
-[sortable](docs/sortable.md), [ajaxer](docs/ajaxer.md).
+[sortable](docs/sortable.md), [ajaxer](docs/ajaxer.md), [cookie](docs/cookie.md).
 
 ## Use
 
@@ -34,6 +35,7 @@ import '@glitchr/flowjs/sticky';       // Sticky
 import '@glitchr/flowjs/stops';        // StickyStops
 import '@glitchr/flowjs/sortable';     // StickySortable
 import '@glitchr/flowjs/ajaxer';       // Ajaxer
+import '@glitchr/flowjs/cookie';       // Cookie
 ```
 
 Without a bundler, the files of `src/js/` in a page, `core.js` first:
@@ -46,8 +48,10 @@ Without a bundler, the files of `src/js/` in a page, `core.js` first:
 
 Each module sets its global (`window.Transparent`, ...) and registers itself on
 the core (`Flow.navigation`, `Flow.sticky`, `Flow.stops`, `Flow.sortable`,
-`Flow.ajaxer`). The stylesheets are `src/css/navigation.scss`, `sticky.scss`,
-`ajaxer.scss`, and `index.scss` for all of them.
+`Flow.ajaxer`, `Flow.cookie`). The stylesheets are `src/css/navigation.scss`,
+`sticky.scss`, `ajaxer.scss`, and `index.scss` for all of them; `cookie.scss`,
+a minimal look for the cookie banner, is imported by no entry - a site asks for
+it (`@glitchr/flowjs/src/css/cookie.scss`) or styles its banner itself.
 
 ## Options
 
@@ -92,6 +96,20 @@ dock, swipe, keepalive, remember) are all on by default. Details in
 **Ajaxer** - per-channel setters (`Ajaxer.setUrl(name, url)`, ...); defaults
 `method` `"POST"`, `output` `"json"`, `throttle` 1000, `retry_limit` 1,
 `loader_debounce` 1500. See [docs/ajaxer.md](docs/ajaxer.md).
+
+**Cookie** - `Cookie.ready({...})`, or a `<script type="application/json"
+data-cookie-config>` in the page; defaults in `Cookie.defaults`: `version`
+(`null`; changed, the visitor is asked again), `categories` (`{}`: `label`,
+`description`, `default`, `required`, `storage`, `features`, `onDemand`),
+`storage` (`[]`), `undeclared` (`"deny"`), `record` (`{store: "cookie", name:
+"cookie-consent", lifetime: "180d"}`), `cookie` (`{path: "/", domain: null,
+sameSite: "Lax", secure: "auto"}`), `countdown` (`false`; `{duration, action}`
+with `action` `"default"`, `"accept"`, `"refuse"` or `"none"`), `dismiss`
+(`"none"`), `signals` (`{gpc: false, dnt: false}`), `autoOpen` (`true`),
+`reopen` (`"details"`), `position`, `container`, `template`, `prefix`
+(`"data-cookie"`), `hooks`, `classes`, `variables`, `texts` (`{}`: every word
+the visitor reads), `observe` (`false`), `legacy` (`true`), `debug`. The
+methods of `@glitchr/cookie` are kept. See [docs/cookie.md](docs/cookie.md).
 
 ## Tests
 

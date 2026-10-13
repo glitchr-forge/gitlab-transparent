@@ -139,7 +139,7 @@ in), as `Cookie.ready()` would be called with it.
 | `default` | `false` | its state before any answer: `true` is on until refused, `false` waits for a yes |
 | `required` | `false` | cannot be refused: always granted, its switch locked on |
 | `storage` | `[]` | what it stores, see below |
-| `features` | `[]` | names (or `{name, label}`) of what it governs besides storage, for the detailed section; `Cookie.use()` with a `name` adds to it |
+| `features` | `[]` | names (or `{name, label}`) of what it governs besides storage, for the detailed section; `Cookie.use()` with a `feature` adds to it |
 | `onDemand` | `false` | known (its words are ready) but listed only once something uses it - `Cookie.use()`, an inert element - and never a reason by itself to ask the visitor again |
 
 ```js
@@ -199,7 +199,8 @@ category that is not known yet is declared from `options` (`label`,
 `description`, `default`, `required`, `storage`) as an on-demand one - the
 shape of omnibase/consent's `Consent.use(name, options, onEnable, onDisable)`,
 whose `implicit` (for `default`) and `erase` (name prefixes of cookies) are
-understood too. `options.name` names the feature in the category's list.
+understood too. `options.feature` (a name, or `{name, label}`) adds the
+feature to the category's list, in the detailed section.
 `Cookie.unuse(category, onGrant)` takes it back.
 
 Elements of the page wait for a category too, inert until it is granted:
@@ -242,8 +243,12 @@ The HTML is the site's, or the library's minimal one:
 - an element with `data-cookie-banner` in the page is used as it is (a
   `<template data-cookie-banner>` is cloned into the page);
 - or `template`: a selector, an element, HTML, or a function returning one;
-- else a bare default is built - a `<div>` with the parts below, the texts of
-  `texts`, the classes of `classes`, and no style.
+- else a bare default is built - a `<div>` with the parts below whose words
+  `texts` has (a button without its word is not made), the classes of
+  `classes`, and no style. Its texts: `label` (the dialog's name), `title`,
+  `text`, `countdown` (with `{count}` where the seconds go), `accept`,
+  `refuse`, `customize`, `detailsTitle`, `detailsText`, `acceptAll`,
+  `refuseAll` (else `accept` and `refuse`), `save`, `close`, `required`.
 
 The parts are found by attribute, wherever they are in the banner:
 
@@ -257,7 +262,7 @@ The parts are found by attribute, wherever they are in the banner:
 | `data-cookie-details` | the detailed section (a modal dialog) |
 | `data-cookie-categories` | where the rows go |
 | `<template data-cookie-row>` | the site's row, cloned per category; else a default row |
-| `data-cookie-toggle`, `data-cookie-label`, `data-cookie-description`, `data-cookie-required`, `data-cookie-entries`, `data-cookie-features` | in a row: the checkbox (`role="switch"`), the words, the mark of a required category (`texts.required`), the lists of what it stores and governs |
+| `data-cookie-toggle`, `data-cookie-label`, `data-cookie-description`, `data-cookie-required`, `data-cookie-entries`, `data-cookie-features` | in a row: the checkbox (`role="switch"`), the words, the mark of a required category (`texts.required`), the lists of what it stores (an item per entry, `data-cookie-entry="cookie"` with its `-name`, `-duration` and `-purpose`) and governs |
 | `data-cookie-save` | keeps the switches as set |
 | `data-cookie-close` | closes without answering |
 | `data-cookie-countdown`, `data-cookie-count` | the countdown's sentence (shown only while it counts) and the seconds left |
@@ -275,7 +280,7 @@ None by default: under the GDPR a silence is not a consent. A site that wants
 one says so:
 
 ```js
-countdown: { duration: '10s', action: 'default' }
+countdown: { duration: '10s', action: 'default' }     // or countdown: '10s' - the action is then "default"
 ```
 
 | `action` | When the time is up |
@@ -285,8 +290,9 @@ countdown: { duration: '10s', action: 'default' }
 | `refuse` | every category off, but the required ones |
 | `none` | nothing: the countdown ends, the banner stays and waits |
 
-It waits while the page is hidden (another tab) and stops for good once the
-visitor opens the detailed section or answers. `countdown: false`, `0` or
+It waits while the page is hidden (another tab), goes on across the pages the
+navigation swaps in, and stops for good once the visitor opens the detailed
+section or answers. `countdown: false`, `0` or
 nothing: no countdown. `dismiss` gives a click outside the banner the same
 choice of four (`none` by default).
 
@@ -299,7 +305,10 @@ The visitor is asked again when `version` is not the one they answered, when
 a category that is not on demand has no answer (a new one), or when the answer
 is older than `record.lifetime`. With a new version or an expired answer, the
 old answers no longer count: the categories are back to their `default`.
-`Cookie.forget()` erases the answer.
+`Cookie.forget()` erases the answer. A banner the visitor closed without
+answering (`data-cookie-close`, `Cookie.close()`) is not put again at each page
+the navigation swaps in: it comes back at the next page loaded, or when there
+is something new to ask.
 
 ### Privacy signals
 
@@ -362,7 +371,8 @@ Cookie.grant(key | keys)         Cookie.revoke(key | keys)                      
 Cookie.use(category, [options], onGrant, onRevoke)        Cookie.unuse(category, onGrant)
 Cookie.cookies / Cookie.local / Cookie.session            // .get(name) .set(name, value[, options]) .remove(name)
 Cookie.open([view])              Cookie.close()           Cookie.banner()       Cookie.scan([root])
-Cookie.onConsent(fn)             Cookie.signals()         Cookie.destroy()
+Cookie.onConsent(fn)             Cookie.signals()         Cookie.reduced()
+Cookie.destroy()                 // as loaded: no category, no declaration, no banner (the answer kept stays)
 ```
 
 ## From @glitchr/cookie
