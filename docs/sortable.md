@@ -31,7 +31,7 @@ and call `onChange`.
 | `items` | `'[data-sortable-item]'` | the items |
 | `axis` | `'y'` | |
 | `dragThreshold` | `4` | px of pointer movement before a press is a drag, not a click |
-| `autoscroll` | `true` | scroll the closest scroller when an item is dragged to its edge |
+| `autoscroll` | `true` | scroll the closest ancestor that scrolls down (`overflow-y: auto` or `scroll`), the page otherwise, when an item is dragged to its edge |
 | `autoscrollEdge` | `40` | px from the edge that triggers it |
 | `autoscrollInsetTop` | `null` | px of the top edge covered by something pinned; `null` measures it |
 | `autoscrollSpeed` | `12` | px per frame at full deflection |

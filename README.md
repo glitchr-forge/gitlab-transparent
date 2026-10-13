@@ -96,43 +96,21 @@ dock, swipe, keepalive, remember) are all on by default. Details in
 ## Tests
 
 ```sh
-JQUERY=path/to/jquery.js npm test              # tests/*.html in a headless Chrome
-JQUERY=path/to/jquery.js npm test ajaxer.html  # one page
+JQUERY=path/to/jquery.js npm test                      # tests/*.html in a headless Chrome
+JQUERY=path/to/jquery.js npm test ajaxer.html          # one page
+JQUERY=path/to/jquery.js CPU=4 node tests/run.mjs perf/scroll.html   # the measurements
 ```
 
 `tests/run.mjs` needs Node 22 or later (its own WebSocket) and Chrome
 (`CHROME=...` to name another; `TIMEOUT` in ms per page, 15000 by default). It
+serves the repository over HTTP on a free port of 127.0.0.1 - `tests/site.mjs`
+answers under `/site/` as a small site would, for the navigation to browse -
 drives the browser over the DevTools protocol, in real time, and opens each
-`tests/*.html`, which writes its verdict in `#result`. The pages cover the
-navigation's canvases, the scroll stops, the sticky effects, the sortable, the
-Ajaxer, and the modules living together (one native listener of each kind on the
-window).
-
-## Coming from the earlier packages
-
-`@glitchr/flowjs` 1.0.0 succeeds `@glitchr/transparentjs` 3.0.31,
-`@glitchr/stickyjs` 1.7.0 and `@glitchr/ajaxer` 1.0.56. The globals (`Transparent`,
-`Sticky`, `StickyStops`, `StickySortable`, `Ajaxer`), their options, the CSS
-classes and the `data-*` attributes keep their names and meaning. Until the
-package is on npm, a site installs it from the repository, pinned to a commit:
-
-```json
-"@glitchr/flowjs": "git+https://github.com/glitchr-studio/flowjs.git#<commit>"
-```
-
-and drops the line of the package it replaces. The imports to change:
-
-| From | To |
-| --- | --- |
-| `import '@glitchr/transparentjs'` | `import '@glitchr/flowjs/navigation'` (or `'@glitchr/flowjs'` for everything) |
-| `import '@glitchr/stickyjs'` | `import '@glitchr/flowjs/sticky'`, `'@glitchr/flowjs/stops'` and `'@glitchr/flowjs/sortable'` (the old entry brought the three in) |
-| `import '@glitchr/ajaxer'` | `import '@glitchr/flowjs/ajaxer'` |
-
-A site using all of them can import `'@glitchr/flowjs'` once. `@glitchr/stickyjs/src/js/stops.js` and the like
-become `@glitchr/flowjs/stops` (`@glitchr/flowjs/src/*` stays importable). What
-changed inside: the modules share one core, so the scroll is listened to once
-for all of them, and Ajaxer no longer defines its own durations and
-`$.fn.serializeObject`.
+page, which writes its verdict in `#result`. Any console error or uncaught
+exception a page did not say it expects (`Harness.expect`) fails it.
+`tests/perf/scroll.html` measures what a scroll costs (script time, style and
+box reads per frame, listeners) and is run by name only. See
+[CHANGELOG.md](CHANGELOG.md) for what each version changed.
 
 ## License
 

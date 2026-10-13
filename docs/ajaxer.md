@@ -42,7 +42,7 @@ is the default for every channel.
 | `setRetryLimit(name, n)` | `retry_limit` | `1` | tries after a failure |
 | `setQueryLimit(name, n)` | `query_limit` | none | requests in flight at most |
 | `cancelable(name, bool)` | `cancelable` | `false` | at the limit, abort the oldest (true) or refuse the new one |
-| `setLoaderThrottle(name, d)` | `loader_throttle` | none | stored; nothing reads it |
+| `setLoaderThrottle(name, d)` | `loader_throttle` | none | once shown, the loader stays at least that long |
 
 A duration (`throttle`, `debounce`, `loader_debounce`) is a number of
 milliseconds, or a string with its unit, and is worth what it says: `400` and
@@ -53,8 +53,11 @@ core's `Flow.parseDuration`, in seconds, and was then taken for milliseconds:
 `"250ms"` switched the throttle off and `"1s"` made it 1 ms. Plain numbers, the
 only form that worked, mean what they did.)
 
-`loader_throttle` is stored and not read: nothing in the code waits on it
-(the loader's delay is `loader_debounce`), so it is left as it was.
+`loader_debounce` is how long a call must be out before the loader shows;
+`loader_throttle` (a duration as the others; none by default) is how long the
+loader stays once it is shown, so that an answer arriving right after it
+appeared does not make it blink. Without it the loader goes the moment the
+answer is in. (Up to 1.0.2 the value was stored and nothing read it.)
 
 ## States
 

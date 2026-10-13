@@ -17,6 +17,26 @@ it adds nothing to the history.
 <section id="menus" class="sticky-headlines" style="scroll-margin-top: 4rem">…</section>
 ```
 
+## The header that hides, the magnets
+
+A `.sticky-top` element hides as the page scrolls down past it and shows again
+on the way up (the classes `show` and `skip-transition`, an inline `top`),
+unless `scrollhide` is `false` or the element carries
+`aria-scrollhide="false"`. Up to 1.0.2 (and since stickyjs' 2022 versions) the
+library itself wrote that attribute on every scroll, and no header ever hid: a
+site that had come to count on its header staying sets `scrollhide: false` in
+`Sticky.ready()`, or the attribute in its template.
+
+`Sticky.getMagnets(el)` gives the `.sticky-magnet` elements of `el`, top to
+bottom, as `{element, offsetTop, offsetLeft, visible}` (`visible`: the share
+of its scroller's box the magnet fills, 0 to 1); `.sticky-magnet-first`,
+`-prev`, `-next` and `-last` scroll to them (`Sticky.scrollToNextSnap()`...).
+
+The effects run once per frame in which the scroller scrolled, through the
+core, and once when the page is loaded. `Sticky.trigger(el)` runs them now,
+as `$(window).trigger('scrolldelta.sticky')` did in stickyjs; a page's own
+`scrolldelta` handlers (jQuery) still receive the computed event.
+
 ## Scroll stops
 
 `src/js/stops.js` - places on the page a scroll settles on, once it has come
@@ -151,6 +171,23 @@ StickyStops.get(scroller).state;      // the last progress, or null
 StickyStops.get(scroller).refresh();  // after content moved
 StickyStops.pause(); StickyStops.resume();  // while a script scrolls the page itself; nests
 ```
+
+The window's stops are measured once and kept while the page keeps its shape
+(its size, its nodes); a resize, `refresh()`, a rest and a key measure again,
+and at each frame of a scroll the two stops the scroll is between are checked.
+`stops.measure()` always measures; `stops.measure(true)` may give the kept
+measure back.
+
+Two stops at the same place (within `tolerance`) are one stop - the first in
+the document. A script that makes stops of its own (markers along a track)
+should clear the ones it finds before making them: a page the navigation gives
+back from its cache comes as it was left, the script's markers included, and
+the script runs again on it. `transparent:beforeunload` is dispatched before a
+page is kept, for a script that would rather take its nodes away then.
+
+A scroll a script makes through the library (the navigation giving a position
+back or going to an anchor, `Sticky.scrollTo`, `Flow.scrollTo`, `Flow.jump`)
+rests where it was put: the stops only complete the reader's own scrolls.
 
 `Sticky.stops` is the same object when `sticky.js` is loaded.
 

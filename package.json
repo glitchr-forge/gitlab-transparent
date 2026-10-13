@@ -1,6 +1,6 @@
 {
   "name": "@glitchr/flowjs",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Navigation without page loads, sticky scroll effects, scroll stops, sortable lists and AJAX channels - one library, one module per feature",
   "main": "src/index.js",
   "exports": {
@@ -17,6 +17,7 @@
     "src",
     "docs",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "access": "public",

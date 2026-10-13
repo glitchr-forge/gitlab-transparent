@@ -49,3 +49,28 @@ Set with `Transparent.ready({...})` or `Transparent.configure({...})`.
 | `disable`, `debug` | `false` | |
 
 The comments above each option in `src/js/transparent.js` give the reasoning.
+
+## Back, Forward, and a page that is not whole yet
+
+A page left by a link, by Back or by Forward is kept as it is (its DOM in
+memory for five minutes, its HTML in `sessionStorage`), with the scroll
+position of the window and of every element that scrolls. Coming back, it is
+given its place again - and that place is held while the page finishes
+growing (sections a controller sizes, pictures without dimensions): put back
+at each change of size, the browser's scroll anchoring off meanwhile, until
+the page has been quiet for 1.5 s (6 s at most). The reader taking the scroll
+(a wheel, a finger, a press, a key), a script of the page scrolling it, or the
+next navigation ends the hold at once.
+
+The kept page includes what scripts added to it. `transparent:beforeunload`
+is dispatched before a page is kept: the moment to take away what should not
+come back with it.
+
+## A request that gets no answer
+
+When the connection drops or the server cannot be reached (status 0, nothing
+received), the page stays as it is, at its address, and is announced again as
+a swap announces one (`DOMContentLoaded`, `transparent:load`, `load`): what a
+site put on for the wait - a curtain, a progress bar - comes off through the
+handlers it already has. jQuery's `ajaxError` tells the failure. A page the
+server answers with an error (4xx, 5xx) is shown as it came.
