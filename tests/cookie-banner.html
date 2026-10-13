@@ -1,0 +1,257 @@
+<!doctype html>
+<!--
+  The cookie banner: on a first visit it shows by itself, labelled, without taking the focus and
+  without a countdown; accept and refuse answer and close it; the footer's link opens the
+  detailed section at any time - a row per category with its switch, the required one locked,
+  the focus inside, Tab kept there, Escape giving it back to the link; the switches saved;
+  "customize" from the banner and back; asking again when the version changes, when a category
+  is new, when the answer is too old; a privacy signal the site honours; the site's own HTML and
+  attributes instead of the default; the position, the variables, less motion; and not one word
+  of the library's own: the texts are the configuration's or the page's. Opened by tests/run.mjs
+  in a headless browser; the page writes its verdict in #result.
+-->
+<html>
+<head><meta charset="utf-8"><title>cookie banner</title></head>
+<body>
+<a href="#" id="footer-link" data-cookie-open>Cookies</a>
+<a href="#" id="banner-link" data-cookie-open="banner">The question</a>
+<button type="button" id="elsewhere">elsewhere</button>
+<div id="site"></div>
+<pre id="result">pending</pre>
+<script src="harness.js"></script>
+<script src="../src/js/core.js"></script>
+<script src="../src/js/cookie.js"></script>
+<script>
+    (async function () {
+        var H = Harness;
+        var $id = function (id) { return document.getElementById(id); };
+        var has = function (name) { return document.cookie.split('; ').some(function (pair) { return pair.split('=')[0] === name; }); };
+        function wipe() {
+            Cookie.destroy();
+            document.cookie.split(';').forEach(function (pair) { var name = pair.trim().split('=')[0]; if (name) document.cookie = name + '=; max-age=0; path=/'; });
+            localStorage.clear();
+            sessionStorage.clear();
+        }
+        var click = function (el) { el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); };
+        var categories = function () {
+            return {
+                necessary: { label: 'Needed', description: 'What makes the site work.', required: true, storage: [{ name: 'SID', duration: 'session', purpose: 'the session' }] },
+                preferences: { label: 'Preferences', description: 'Language and theme.', default: true, features: [{ name: 'timezone', label: 'Your time zone' }] },
+                analytics: { label: 'Audience', description: 'An anonymous count.', storage: [{ name: '_pk_*', duration: '13mo', purpose: 'Matomo' }] }
+            };
+        };
+        var texts = function () {
+            return {
+                label: 'Cookies', title: 'A question', text: { html: 'We keep little. <a id="privacy" href="#privacy">Privacy</a>' },
+                accept: 'Agree', refuse: 'Decline', customize: 'Choose', detailsTitle: 'Your choices',
+                acceptAll: 'All on', refuseAll: 'All off', save: 'Keep my choices', close: 'Close', required: 'Always on',
+                countdown: 'Kept in {count} s.'
+            };
+        };
+        var q = function (name, value) { return Cookie.banner().querySelector('[data-cookie-' + name + (value ? '="' + value + '"' : '') + ']'); };
+        var all = function (name) { return Array.prototype.slice.call(Cookie.banner().querySelectorAll('[data-cookie-' + name + ']')); };
+        var heard = [];
+        ['cookie:consent', 'cookie:open', 'cookie:close'].forEach(function (type) {
+            window.addEventListener(type, function (e) { heard.push(type + (e.detail.view ? ' ' + e.detail.view : '') + (e.detail.source ? ' ' + e.detail.source : '')); });
+        });
+        wipe();
+
+        // ── A first visit ───────────────────────────────────────────────────
+        var started = 0, stopped = 0;
+        Cookie.ready({ version: '1', position: 'bottom-left', variables: { '--cookie-accent': 'rgb(1, 2, 3)' }, categories: categories(), texts: texts() });
+        Cookie.use('analytics', function () { started++; }, function () { stopped++; });
+        var banner = Cookie.banner();
+        H.check(banner !== null && banner.isConnected && banner.hidden === false && banner.classList.contains('cookie-banner') && banner.classList.contains('is-open') && banner.classList.contains('is-pending'), 'a first visit: the banner shows by itself', banner && banner.className);
+        var summary = q('summary');
+        H.check(summary.getAttribute('role') === 'dialog' && summary.getAttribute('aria-label') === 'Cookies' && summary.getAttribute('aria-live') === 'polite', 'a labelled dialog, announced politely');
+        H.check(document.activeElement === document.body, 'that does not take the focus', document.activeElement.tagName);
+        H.check(q('text', 'title').textContent === 'A question' && $id('privacy') !== null && q('accept').textContent === 'Agree' && q('refuse').textContent === 'Decline' && q('customize').textContent === 'Choose', 'with the site\'s words - a link among them');
+        H.check(q('details').hidden === true && q('countdown').hidden === true && !banner.classList.contains('is-counting'), 'the detailed section closed, and no countdown: none was asked for');
+        H.check(banner.getAttribute('data-cookie-position') === 'bottom-left' && banner.style.getPropertyValue('--cookie-accent') === 'rgb(1, 2, 3)', 'its position and its variables are written on it');
+        await H.after(300);
+        H.check(Cookie.pending() === true && banner.hidden === false, 'it waits: a silence is not an answer');
+
+        // ── Refuse, accept ──────────────────────────────────────────────────
+        heard.length = 0;
+        click(q('refuse'));
+        H.check(banner.hidden === true && Cookie.pending() === false && Cookie.granted('analytics') === false && Cookie.granted('preferences') === false && Cookie.granted('necessary') === true && started === 0, 'Decline: every category off but the required one, the banner closed');
+        H.check(heard.join(' | ') === 'cookie:consent refuse | cookie:close banner', 'cookie:consent (refuse), cookie:close', heard.join(' | '));
+
+        // ── The detailed section, from the footer ───────────────────────────
+        heard.length = 0;
+        $id('footer-link').focus();
+        click($id('footer-link'));
+        var details = q('details');
+        H.check(banner.hidden === false && details.hidden === false && summary.hidden === true && banner.classList.contains('is-customizing'), 'the footer\'s link opens the detailed section, the question aside');
+        H.check(details.getAttribute('role') === 'dialog' && details.getAttribute('aria-modal') === 'true' && details.getAttribute('aria-label') === 'Your choices', 'a modal dialog, labelled');
+        H.check(details.contains(document.activeElement) && heard.join() === 'cookie:open details', 'the focus goes into it', document.activeElement.outerHTML.slice(0, 80));
+        var rows = all('row');
+        var toggle = function (key) { return q('toggle', key); };
+        H.check(rows.length === 3 && rows.map(function (r) { return r.getAttribute('data-cookie-row'); }).join() === 'necessary,preferences,analytics', 'a row per category');
+        H.check(toggle('necessary').checked && toggle('necessary').disabled && !toggle('preferences').checked && !toggle('analytics').checked && toggle('analytics').getAttribute('role') === 'switch' && toggle('analytics').type === 'checkbox',
+            'each with its switch as answered - the required one locked on');
+        var analytics = q('row', 'analytics');
+        var described = document.getElementById(toggle('analytics').getAttribute('aria-describedby'));
+        H.check(analytics.querySelector('[data-cookie-label]').textContent === 'Audience' && described && described.textContent === 'An anonymous count.', 'its label, and its description read with the switch');
+        H.check(analytics.querySelector('[data-cookie-entries]').textContent === '_pk_*13moMatomo' && q('row', 'preferences').querySelector('[data-cookie-features]').textContent === 'Your time zone' && q('row', 'preferences').querySelector('[data-cookie-entries]').hidden,
+            'what it stores (name, duration, purpose) and what it governs', analytics.querySelector('[data-cookie-entries]').textContent);
+        H.check(q('row', 'necessary').querySelector('[data-cookie-required]').textContent === 'Always on' && !q('row', 'necessary').querySelector('[data-cookie-required]').hidden && analytics.querySelector('[data-cookie-required]').hidden, 'the required one says so');
+
+        // The keyboard: Tab stays inside, Escape closes and gives the focus back.
+        var focusables = Array.prototype.filter.call(details.querySelectorAll('button, input'), function (el) { return !el.disabled; });
+        var first = focusables[0], last = focusables[focusables.length - 1];
+        last.focus();
+        var tab = H.key('Tab', {}, last);
+        H.check(tab.defaultPrevented && document.activeElement === first, 'Tab on the last control goes to the first');
+        tab = H.key('Tab', { shiftKey: true }, first);
+        H.check(tab.defaultPrevented && document.activeElement === last, 'Shift+Tab on the first goes to the last');
+        tab = H.key('Tab', {}, first);
+        first.focus();
+        H.check(!H.key('Tab', {}, first).defaultPrevented || focusables.length === 1, 'in between, Tab is the browser\'s');
+        $id('elsewhere').focus();
+        tab = H.key('Tab', {}, $id('elsewhere'));
+        H.check(tab.defaultPrevented && details.contains(document.activeElement), 'a focus that got out is brought back');
+        toggle('analytics').focus();
+        toggle('analytics').click();
+        H.check(toggle('analytics').checked === true && Cookie.granted('analytics') === false, 'a switch is a checkbox: set, it changes nothing until saved');
+        heard.length = 0;
+        H.key('Escape', {}, toggle('analytics'));
+        H.check(banner.hidden === true && document.activeElement === $id('footer-link') && Cookie.granted('analytics') === false && heard.join() === 'cookie:close details', 'Escape closes it without answering, the focus back on the link', document.activeElement.id + ' ' + heard.join());
+
+        // Saved.
+        click($id('footer-link'));
+        H.check(toggle('analytics').checked === false, 'opened again: the switches as answered, not as left');
+        toggle('analytics').click();
+        toggle('preferences').click();
+        heard.length = 0;
+        click(q('save'));
+        H.check(Cookie.granted('analytics') === true && Cookie.granted('preferences') === true && started === 1 && banner.hidden === true && heard.join(' | ') === 'cookie:consent save | cookie:close details', 'Keep my choices: the switches are the answer, the feature starts', heard.join(' | '));
+        click($id('footer-link'));
+        toggle('analytics').click();
+        click(q('save'));
+        H.check(Cookie.granted('analytics') === false && stopped === 1, 'and stops when its switch is turned off');
+        click($id('footer-link'));
+        click(Array.prototype.filter.call(details.querySelectorAll('[data-cookie-accept]'), Boolean)[0]);
+        H.check(Cookie.granted('analytics') === true && started === 2 && details.querySelector('[data-cookie-accept]').textContent === 'All on', 'All on, from the detailed section');
+        click($id('banner-link'));
+        H.check(banner.hidden === false && summary.hidden === false && details.hidden === true, 'data-cookie-open="banner" opens the question instead');
+        click(q('close') || $id('banner-link'));
+        Cookie.close();
+        H.check(banner.hidden === true, 'Cookie.close()');
+
+        // ── Asking again ────────────────────────────────────────────────────
+        Cookie.ready({ version: '2' });
+        H.check(Cookie.pending() === true && banner.hidden === false && Cookie.state('analytics') === null && Cookie.granted('analytics') === false && Cookie.granted('preferences') === true, 'a new version: asked again, the old answers no longer count');
+        // "Choose" from the question, and back.
+        q('customize').focus();
+        click(q('customize'));
+        H.check(details.hidden === false && summary.hidden === true && q('customize').getAttribute('aria-expanded') === 'true' && toggle('preferences').checked === true && toggle('analytics').checked === false, 'Choose opens the detailed section, the switches at their defaults');
+        H.key('Escape');
+        H.check(banner.hidden === false && summary.hidden === false && details.hidden === true && document.activeElement === q('customize') && Cookie.pending() === true, 'Escape: back to the question, which still waits, the focus on Choose');
+        click(q('accept'));
+        H.check(Cookie.pending() === false && Cookie.granted('analytics') === true && banner.hidden === true, 'Agree: every category on');
+        var record = JSON.parse(decodeURIComponent(document.cookie.split('; ').filter(function (pair) { return pair.indexOf('cookie-consent=') === 0; })[0].split('=')[1]));
+        H.check(record.v === '2' && record.s === 'accept', 'kept with its version', JSON.stringify(record));
+
+        Cookie.category('ads', { label: 'Advertising' });
+        H.check(Cookie.pending() === true && banner.hidden === false && Cookie.state('analytics') === true && all('row').length === 4, 'a new category: asked again, the other answers kept, its row there');
+        click(q('refuse'));
+        H.check(Cookie.pending() === false && Cookie.granted('analytics') === false && Cookie.granted('ads') === false, 'answered');
+
+        // Too old.
+        record = { v: '2', t: Math.floor(Date.now() / 1000) - 200 * 86400, c: { PREFERENCES: 1, ANALYTICS: 1, ADS: 1 } };
+        document.cookie = 'cookie-consent=' + encodeURIComponent(JSON.stringify(record)) + '; path=/';
+        Cookie.ready({});
+        H.check(Cookie.pending() === true && Cookie.granted('analytics') === false && banner.hidden === false, 'an answer older than its lifetime (180d) no longer counts');
+        Cookie.ready({ record: { lifetime: '1y' } });
+        H.check(Cookie.pending() === false && Cookie.granted('analytics') === true && banner.hidden === true, 'within it (1y), it does');
+
+        // ── A privacy signal ────────────────────────────────────────────────
+        wipe();
+        var sent = { gpc: true, dnt: false };
+        var signals = Cookie.signals;
+        H.check(JSON.stringify(Object.keys(Cookie.signals())) === '["gpc","dnt"]', 'the browser\'s signals are read');
+        Cookie.signals = function () { return sent; };
+        Cookie.ready({ categories: categories(), texts: texts() });
+        H.check(Cookie.pending() === true && Cookie.banner().hidden === false, 'a signal the site did not ask to honour changes nothing');
+        wipe();
+        heard.length = 0;
+        Cookie.ready({ categories: categories(), texts: texts(), signals: { gpc: true } });
+        H.check(Cookie.pending() === false && Cookie.granted('analytics') === false && Cookie.granted('preferences') === false && Cookie.granted('necessary') === true && Cookie.banner() === null && heard.join() === 'cookie:consent signal',
+            'honoured (gpc: true): every category off but the required one, kept, and no banner', heard.join());
+        click($id('footer-link'));
+        Cookie.banner().querySelector('[data-cookie-toggle="analytics"]').click();
+        click(Cookie.banner().querySelector('[data-cookie-save]'));
+        H.check(Cookie.granted('analytics') === true && Cookie.granted('preferences') === false, 'the visitor can still decide otherwise: an explicit choice wins');
+        wipe();
+        Cookie.ready({ categories: categories(), texts: texts(), signals: { gpc: ['analytics'] } });
+        H.check(Cookie.pending() === true && Cookie.banner().hidden === false && Cookie.granted('analytics') === false && Cookie.granted('preferences') === true, 'for some categories only (gpc: [analytics]): those are off, the rest is asked');
+        Cookie.signals = signals;
+
+        // ── The site's own HTML ─────────────────────────────────────────────
+        wipe();
+        $id('site').innerHTML = '<div id="mine" data-consent-banner hidden>'
+            + '<p id="mine-text" data-consent-text="text">Written in the page.</p>'
+            + '<p id="mine-kept" data-consent-text="nothing">Left as written.</p>'
+            + '<button type="button" id="mine-yes" data-consent-accept>Yes</button><button type="button" id="mine-choose" data-consent-customize>Choose</button>'
+            + '<section id="mine-details" data-consent-details hidden><ul data-consent-categories></ul>'
+            + '<template data-consent-row><li class="mine-row"><input type="checkbox" data-consent-toggle><b data-consent-label></b></li></template>'
+            + '<button type="button" id="mine-save" data-consent-save>Save</button></section></div>'
+            + '<a href="#" id="mine-open" data-consent-open>Cookies</a>'
+            + '<script type="text/plain" data-consent-script="analytics">window.__mine = 1;<\/script>';
+        Cookie.ready({ prefix: 'data-consent', hooks: { category: 'data-consent-script' }, classes: { root: 'mine-banner', open: 'shown' }, categories: categories(), texts: { text: 'From the configuration.' } });
+        var mine = $id('mine');
+        H.check(Cookie.banner() === mine && mine.hidden === false && mine.classList.contains('mine-banner') && mine.classList.contains('shown') && !mine.classList.contains('cookie-banner'), 'a banner written in the page is the banner, under the site\'s prefix and classes');
+        H.check($id('mine-text').textContent === 'From the configuration.' && $id('mine-kept').textContent === 'Left as written.' && $id('mine-yes').textContent === 'Yes', 'a text of the configuration fills its place, the rest stays as written');
+        click($id('mine-choose'));
+        var mineRows = mine.querySelectorAll('.mine-row');
+        H.check(mineRows.length === 3 && mineRows[2].getAttribute('data-consent-row') === 'analytics' && mineRows[2].querySelector('b').textContent === 'Audience' && $id('mine-details').hidden === false, 'the site\'s row, once per category');
+        mineRows[2].querySelector('input').click();
+        click($id('mine-save'));
+        await H.after(30);
+        H.check(Cookie.granted('analytics') === true && window.__mine === 1 && mine.hidden === true, 'saved; the inert script under the site\'s own attribute ran');
+        click($id('mine-open'));
+        H.check(mine.hidden === false && $id('mine-details').hidden === false, 'and its own link opens it again');
+        wipe();
+        $id('site').innerHTML = '';
+
+        // The `template` option: HTML, a function.
+        Cookie.ready({ categories: categories(), template: '<aside id="given"><button type="button" data-cookie-refuse>No</button></aside>' });
+        H.check(Cookie.banner().id === 'given' && Cookie.banner().parentNode === document.body && Cookie.banner().hasAttribute('data-cookie-banner'), 'template: a string of HTML');
+        wipe();
+        $id('site').innerHTML = '<div id="here"></div>';
+        Cookie.ready({ categories: categories(), container: '#here', template: function () { var el = document.createElement('nav'); el.id = 'made'; return el; } });
+        H.check(Cookie.banner().id === 'made' && Cookie.banner().parentNode === $id('here'), 'template: a function; container: where it goes');
+        wipe();
+
+        // ── Less motion ─────────────────────────────────────────────────────
+        var reduced = Cookie.reduced;
+        Cookie.reduced = function () { return true; };
+        Cookie.ready({ categories: categories(), texts: texts() });
+        H.check(Cookie.banner().classList.contains('is-reduced'), 'prefers-reduced-motion: the banner says so to its stylesheet');
+        Cookie.reduced = reduced;
+        wipe();
+
+        // ── Not one word of the library's own ───────────────────────────────
+        Cookie.ready({ categories: { alpha: { required: true }, beta: {} } });
+        Cookie.open('details');
+        var said = Cookie.banner().textContent.replace(/alpha|beta/g, '').trim();
+        H.check(Cookie.banner().hidden === false && said === '' && Cookie.banner().querySelectorAll('button').length === 0, 'without texts, the default banner has no word and no button: only the categories\' keys', JSON.stringify(said));
+        H.check(Cookie.banner().querySelectorAll('[data-cookie-row]').length === 2, 'and still a row per category', Cookie.banner().outerHTML);
+        wipe();
+        var source = await (await fetch('../src/js/cookie.js')).text();
+        var sentences = [];
+        source.split('\n').forEach(function (line, n) {
+            var code = line.replace(/^\s*(\/\/|\*|\/\*).*$/, '').replace(/\s\/\/ .*$/, '');
+            // What the console is told in debug and what an Error says are for the developer, not the visitor.
+            if (/\blog\(|new Error\(/.test(code)) return;
+            (code.match(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g) || []).forEach(function (literal) {
+                if (/[A-Za-z]{2,} [A-Za-z]{2,}/.test(literal)) sentences.push((n + 1) + ': ' + literal);
+            });
+        });
+        H.check(source.length > 10000 && sentences.length === 0, 'no sentence in the module\'s strings', sentences.join(' | '));
+        H.done();
+    })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
+</script>
+</body>
+</html>

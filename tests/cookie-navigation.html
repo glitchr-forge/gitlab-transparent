@@ -1,0 +1,103 @@
+<!doctype html>
+<!--
+  The cookie module and the navigation together (tests/site.mjs serves the pages): a
+  configuration the page hands over as JSON starts the module without a script; the banner stays,
+  the same and still asking, across the pages the navigation swaps in; the inert elements of a
+  page that arrives by the navigation wait as those of the first page do, wake at the answer, and
+  those of the next page arriving are awake at once; a banner written in a page that is swapped
+  out gives way to the one of the page that comes. Opened by tests/run.mjs in a headless browser;
+  the page writes its verdict in #result.
+-->
+<html>
+<head><meta charset="utf-8"><link rel="stylesheet" href="/tests/site.css"><title>cookie navigation</title></head>
+<body>
+<div id="page" data-layout="main"><h1>Start</h1><a id="to-one" href="/site/page/one">one</a></div>
+<script type="application/json" data-cookie-config>{"version": "1", "categories": {"necessary": {"label": "Needed", "required": true}, "analytics": {"label": "Audience"}}, "texts": {"text": "A question", "accept": "Agree", "refuse": "Decline"}}</script>
+<pre id="result">pending</pre>
+<script src="jquery.js"></script>
+<script src="harness.js"></script>
+<script>
+    // As a first visit (the cookies of 127.0.0.1 are shared by the pages of a run), before the module reads anything.
+    document.cookie.split(';').forEach(function (pair) { var name = pair.trim().split('=')[0]; if (name) document.cookie = name + '=; max-age=0; path=/'; });
+    localStorage.clear();
+</script>
+<script src="../src/js/core.js"></script>
+<script src="../src/js/transparent.js"></script>
+<script src="../src/js/cookie.js"></script>
+<script>
+    (async function () {
+        var H = Harness;
+        var $id = function (id) { return document.getElementById(id); };
+        var heading = function () { var h = document.querySelector('#page h1'); return h ? h.textContent : null; };
+        function loaded() {
+            return new Promise(function (resolve, reject) {
+                var timer = setTimeout(function () { reject(new Error('no transparent:load (at ' + location.pathname + ')')); }, 4000);
+                window.addEventListener('transparent:load', function () {
+                    clearTimeout(timer);
+                    requestAnimationFrame(function () { setTimeout(function () { H.after(40).then(resolve); }, 0); });
+                }, { once: true });
+            });
+        }
+        async function click(id) {
+            var next = loaded();
+            $id(id).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+            await next;
+        }
+        var press = function (el) { el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); };
+
+        await new Promise(function (resolve) { window.addEventListener('load', resolve, { once: true }); });
+        Transparent.ready({ identifier: '#page', exceptions: [], nest: [], progress_bar: 'off' });
+        await H.after(60);
+        await H.frame();
+        H.check(Flow.navigation === Transparent && Flow.cookie === Cookie, 'the navigation and the cookie module know each other through the core');
+
+        // ── The page's own configuration ────────────────────────────────────
+        var banner = Cookie.banner();
+        H.check(banner !== null && banner.hidden === false && Cookie.pending() === true && Cookie.categories().length === 2 && banner.querySelector('[data-cookie-accept]').textContent === 'Agree',
+            'a configuration handed as JSON by the page starts the module: the banner shows, in the page\'s words');
+        banner.__mark = 'kept';
+
+        // ── Across pages ────────────────────────────────────────────────────
+        await click('to-one');
+        H.check(heading() === 'One' && Cookie.banner() === banner && banner.isConnected && banner.hidden === false && banner.__mark === 'kept' && Cookie.pending() === true, 'a page swapped in: the banner is the same, still there, still asking');
+        H.check(document.querySelectorAll('[data-cookie-banner]').length === 1, 'and there is one');
+
+        await click('to-waiting');
+        await H.after(60);
+        H.check(heading() === 'Waiting' && window.__inert === undefined && $id('late') === null && $id('holder').hidden === false, 'the inert elements of a page that came by the navigation wait: the script has not run, the placeholder shows');
+        press(banner.querySelector('[data-cookie-accept]'));
+        await H.after(60);
+        H.check(Cookie.granted('analytics') === true && window.__inert === 1 && $id('late') !== null && $id('holder').hidden === true && banner.hidden === true, 'at the answer they wake: the script runs, the block is in, the placeholder hides', window.__inert);
+
+        await click('to-one');
+        await click('to-waiting');
+        await H.after(60);
+        H.check(heading() === 'Waiting' && window.__inert === 2 && $id('late') !== null && $id('holder').hidden === true && banner.hidden === true, 'and those of the next page that comes are awake as it arrives', window.__inert);
+
+        Cookie.revoke('analytics');
+        await click('to-one');
+        await click('to-waiting');
+        await H.after(60);
+        H.check(window.__inert === 2 && $id('late') === null && $id('holder').hidden === false && banner.hidden === true, 'withdrawn, the next page\'s wait again - and nobody is asked: the answer stands', window.__inert);
+
+        // ── A banner written in a page ──────────────────────────────────────
+        Cookie.forget();
+        Cookie.destroy();
+        await click('to-own');
+        Cookie.ready({ categories: { analytics: { label: 'Audience' } } });
+        var own = $id('own-banner');
+        H.check(own !== null && Cookie.banner() === own && own.hidden === false && $id('own-words').textContent === 'the site\'s words', 'a banner written in the page is the banner');
+        await click('to-one');
+        H.check(!own.isConnected && Cookie.banner() !== own && Cookie.banner() !== null && Cookie.banner().isConnected && Cookie.banner().hidden === false && Cookie.pending() === true, 'swapped out with its page, the next page\'s takes its place (here the default), still asking');
+        var second = Cookie.banner();
+        await click('to-own');
+        H.check(Cookie.banner() === second && second.hidden === false && $id('own-banner').hidden === true, 'one banner asks at a time');
+        press($id('own-accept'));
+        H.check(Cookie.pending() === false && Cookie.granted('analytics') === true && second.hidden === true, 'and a button of the page answers as well');
+        Cookie.forget();
+        Cookie.destroy();
+        H.done();
+    })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
+</script>
+</body>
+</html>

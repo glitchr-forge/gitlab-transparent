@@ -667,7 +667,7 @@
     Cookie.scan = function (rootNode) { scan(rootNode); return this; };
 
     // ── The interface ────────────────────────────────────────────────────
-    var ui = { root: null, built: false, view: null, opener: null, closed: false, timer: null, left: 0, last: 0, action: null, bound: false, observer: null };
+    var ui = { root: null, built: false, view: null, opener: null, closed: false, auto: false, timer: null, left: 0, last: 0, action: null, bound: false, observer: null };
 
     function hook(name) {
         var hooks = setting('hooks');
@@ -785,8 +785,9 @@
         if (!found && template && template.nodeType === 1) found = template;
         if (!found) found = document.querySelector(sel('banner'));
         if (found && found.tagName === 'TEMPLATE') found = document.importNode(found.content, true).firstElementChild;
-        if (!found) { found = build(); built = true; }
-        if (!found.isConnected) place(found);
+        if (!found) found = build();
+        // Put in the page here, it is taken out by destroy(); found in the page, it is the page's.
+        if (!found.isConnected) { place(found); built = true; }
         found.setAttribute(hook('banner'), '');
 
         ui.root = found;
@@ -850,9 +851,13 @@
 
     function row(cat, list) {
         var classes = setting('classes');
-        var own = part('row');
+        var own = ui.root.querySelector('template' + sel('row'));
+        if (!own) {
+            var details = part('details');
+            own = details ? details.querySelector('template' + sel('row')) : null;
+        }
         var el;
-        if (own && own.tagName === 'TEMPLATE') {
+        if (own) {
             el = document.importNode(own.content, true).firstElementChild;
         } else {
             el = make('li', null, classes.row);
@@ -992,15 +997,16 @@
         var was = ui.view;
         ui.view = view;
         ui.closed = false;
+        if (view === 'details') ui.auto = false;
         if (view === 'details') {
             // Choosing is answering: no countdown behind the visitor's back.
             stopCountdown();
-            if (was !== 'details') {
-                ui.view = was;      // the switches take the answer as it stands
-                rows();
-                ui.view = view;
-                ui.opener = opener || document.activeElement;
-            }
+            if (was !== 'details') ui.opener = opener || document.activeElement;
+        }
+        if (was !== 'details') {
+            ui.view = was === 'details' ? null : was;   // the rows as declared, the switches as answered
+            rows();
+            ui.view = view;
         }
         paint();
         if (view === 'details' && was !== 'details') {
@@ -1022,7 +1028,9 @@
         var was = ui.view;
         if (was === null) return;
         ui.view = null;
-        if (byVisitor) ui.closed = true;
+        ui.auto = false;
+        // Closed without an answer, the question is not put again at each page of the visit.
+        ui.closed = !!byVisitor && pending();
         stopCountdown();
         paint();
         if (was === 'details') back(null);
@@ -1041,10 +1049,12 @@
 
     /** After an answer: the switches as answered, the banner closed once nothing is left to ask. */
     function settle() {
+        ui.closed = false;
         if (!ui.root) return;
         if (pending()) { rows(); paint(); return; }
         var was = ui.view;
         ui.view = null;
+        ui.auto = false;
         rows();
         paint();
         if (was !== null) {
@@ -1167,7 +1177,11 @@
         }
         if (open.length && ui.view === null && !ui.closed && setting('autoOpen')) {
             show('banner');
+            ui.auto = true;
             startCountdown();
+        } else if (!open.length && ui.view === 'banner' && ui.auto) {
+            // The question it put by itself has its answer (a configuration that came after it).
+            hide();
         } else if (ui.root) {
             rows();
             paint();
@@ -1297,7 +1311,7 @@
             document.removeEventListener('click', onClick);
             document.removeEventListener('keydown', onKey);
         }
-        ui = { root: null, built: false, view: null, opener: null, closed: false, timer: null, left: 0, last: 0, action: null, bound: false, observer: null };
+        ui = { root: null, built: false, view: null, opener: null, closed: false, auto: false, timer: null, left: 0, last: 0, action: null, bound: false, observer: null };
         cats = {};
         order = [];
         entries = [];

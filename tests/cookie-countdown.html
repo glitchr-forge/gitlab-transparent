@@ -1,0 +1,141 @@
+<!doctype html>
+<!--
+  The cookie banner's countdown, an option: none unless the site asks for one - the banner then
+  waits for an answer; with one, the seconds left are shown and, when the time is up, the
+  categories take their defaults ("default"), all go on ("accept"), all go off ("refuse"), or
+  nothing happens and the banner stays ("none"); it stops for good once the visitor opens the
+  detailed section, and an answer given in time is the answer; a category under a privacy signal
+  the site honours is not turned on by it; a click outside the banner answers as `dismiss` says;
+  with less motion asked for, the number does not pulse. Opened by tests/run.mjs in a headless
+  browser; the page writes its verdict in #result.
+-->
+<html>
+<head><meta charset="utf-8"><title>cookie countdown</title></head>
+<body>
+<button type="button" id="elsewhere">elsewhere</button>
+<pre id="result">pending</pre>
+<script src="harness.js"></script>
+<script src="../src/js/core.js"></script>
+<script src="../src/js/cookie.js"></script>
+<script>
+    (async function () {
+        var H = Harness;
+        var $id = function (id) { return document.getElementById(id); };
+        function wipe() {
+            Cookie.destroy();
+            document.cookie.split(';').forEach(function (pair) { var name = pair.trim().split('=')[0]; if (name) document.cookie = name + '=; max-age=0; path=/'; });
+            localStorage.clear();
+            sessionStorage.clear();
+        }
+        var click = function (el) { el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); };
+        var q = function (name) { return Cookie.banner().querySelector('[data-cookie-' + name + ']'); };
+        var options = function (more) {
+            return Object.assign({
+                categories: { necessary: { label: 'Needed', required: true }, preferences: { label: 'Preferences', default: true }, analytics: { label: 'Audience' } },
+                texts: { accept: 'Agree', refuse: 'Decline', customize: 'Choose', save: 'Save', countdown: 'Kept in {count} s, unless you say otherwise.' }
+            }, more || {});
+        };
+        var source = null;
+        window.addEventListener('cookie:consent', function (e) { source = e.detail.source; });
+        var states = function () { return [Cookie.granted('necessary'), Cookie.granted('preferences'), Cookie.granted('analytics')].join(); };
+
+        // ── None by default ─────────────────────────────────────────────────
+        wipe();
+        H.check(Cookie.defaults.countdown === false, 'the library\'s default: no countdown');
+        Cookie.ready(options());
+        H.check(q('countdown').hidden === true && !Cookie.banner().classList.contains('is-counting'), 'none asked for: none shown');
+        await H.after(400);
+        H.check(Cookie.pending() === true && Cookie.banner().hidden === false && source === null, 'and the banner waits');
+        wipe();
+        Cookie.ready(options({ countdown: 0 }));
+        await H.after(200);
+        H.check(Cookie.pending() === true && q('countdown').hidden === true, 'countdown: 0 is none too');
+
+        // ── The seconds left, and "default" ─────────────────────────────────
+        wipe();
+        Cookie.ready(options({ countdown: { duration: '2s', action: 'default' } }));
+        await H.after(60);
+        var sentence = q('countdown');
+        H.check(sentence.hidden === false && Cookie.banner().classList.contains('is-counting') && sentence.textContent === 'Kept in 2 s, unless you say otherwise.' && q('count').textContent === '2', 'a countdown of 2s: the site\'s sentence, with the seconds left', sentence.textContent);
+        H.check(q('count').classList.contains('is-tick'), 'the number pulses at each second');
+        await H.until(function () { return q('count').textContent === '1'; }, 1500);
+        H.check(q('count').textContent === '1' && Cookie.pending() === true, 'one second on: 1, still waiting', q('count').textContent);
+        await H.until(function () { return !Cookie.pending(); }, 1500);
+        H.check(Cookie.pending() === false && states() === 'true,true,false' && source === 'countdown' && Cookie.banner().hidden === true, 'time up, "default": each category takes its default, and that is kept', states() + ' ' + source);
+        await H.after(100);
+        H.check(Cookie.state('preferences') === true && Cookie.state('analytics') === false, 'as an answer');
+
+        // ── "accept", "refuse", "none" ──────────────────────────────────────
+        wipe(); source = null;
+        Cookie.ready(options({ countdown: { duration: '200ms', action: 'accept' } }));
+        H.check(q('count').textContent === '1', 'a countdown shorter than a second shows 1');
+        await H.until(function () { return !Cookie.pending(); }, 1500);
+        H.check(states() === 'true,true,true' && source === 'countdown', '"accept": every category on', states());
+
+        wipe(); source = null;
+        Cookie.ready(options({ countdown: { duration: '200ms', action: 'refuse' } }));
+        await H.until(function () { return !Cookie.pending(); }, 1500);
+        H.check(states() === 'true,false,false' && source === 'countdown', '"refuse": every category off but the required one', states());
+
+        wipe(); source = null;
+        Cookie.ready(options({ countdown: { duration: '200ms', action: 'none' } }));
+        await H.after(500);
+        H.check(Cookie.pending() === true && source === null && Cookie.banner().hidden === false && q('countdown').hidden === true && !Cookie.banner().classList.contains('is-counting'), '"none": the countdown ends, the banner stays and waits');
+
+        wipe(); source = null;
+        Cookie.ready(options({ countdown: '200ms' }));
+        await H.until(function () { return !Cookie.pending(); }, 1500);
+        H.check(states() === 'true,true,false', 'a bare duration counts down to the defaults', states());
+
+        // ── Stopped by the visitor ──────────────────────────────────────────
+        wipe(); source = null;
+        Cookie.ready(options({ countdown: { duration: '300ms', action: 'accept' } }));
+        click(q('customize'));
+        H.check(q('countdown').hidden === true && !Cookie.banner().classList.contains('is-counting'), 'opening the detailed section stops it');
+        await H.after(600);
+        H.check(Cookie.pending() === true && source === null, 'for good: nothing is answered behind the visitor\'s back');
+        H.key('Escape');
+        await H.after(500);
+        H.check(Cookie.pending() === true && Cookie.banner().hidden === false && q('countdown').hidden === true, 'nor once back at the question');
+
+        wipe(); source = null;
+        Cookie.ready(options({ countdown: { duration: '300ms', action: 'accept' } }));
+        click(q('refuse'));
+        await H.after(600);
+        H.check(states() === 'true,false,false' && source === 'refuse', 'an answer given in time is the answer', states() + ' ' + source);
+
+        // ── Under a privacy signal ──────────────────────────────────────────
+        wipe(); source = null;
+        var signals = Cookie.signals;
+        Cookie.signals = function () { return { gpc: true, dnt: false }; };
+        Cookie.ready(options({ signals: { gpc: ['analytics'] }, countdown: { duration: '200ms', action: 'accept' } }));
+        await H.until(function () { return !Cookie.pending(); }, 1500);
+        H.check(states() === 'true,true,false' && Cookie.state('analytics') === false, 'a category under a signal the site honours is not turned on by a countdown', states());
+        Cookie.signals = signals;
+
+        // ── A click outside ─────────────────────────────────────────────────
+        wipe(); source = null;
+        Cookie.ready(options());
+        click($id('elsewhere'));
+        H.check(Cookie.pending() === true && source === null, 'a click outside the banner answers nothing (dismiss: "none")');
+        wipe();
+        Cookie.ready(options({ dismiss: 'default' }));
+        click(q('accept').parentNode);
+        H.check(Cookie.pending() === true, 'with dismiss: "default", a click inside the banner is not one outside');
+        click($id('elsewhere'));
+        H.check(Cookie.pending() === false && states() === 'true,true,false' && source === 'dismiss', 'a click outside keeps the defaults', states() + ' ' + source);
+
+        // ── Less motion ─────────────────────────────────────────────────────
+        wipe();
+        var reduced = Cookie.reduced;
+        Cookie.reduced = function () { return true; };
+        Cookie.ready(options({ countdown: { duration: '2s', action: 'none' } }));
+        await H.after(60);
+        H.check(q('count').textContent === '2' && !q('count').classList.contains('is-tick'), 'prefers-reduced-motion: the number is written, it does not pulse');
+        Cookie.reduced = reduced;
+        wipe();
+        H.done();
+    })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
+</script>
+</body>
+</html>
