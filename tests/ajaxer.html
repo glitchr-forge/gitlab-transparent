@@ -11,6 +11,7 @@
 <head><meta charset="utf-8"><title>ajaxer</title></head>
 <body>
 <div id="target" style="position: relative; height: 100px"></div>
+<div id="box"></div>
 <pre id="result">pending</pre>
 <script src="jquery.js"></script>
 <script src="harness.js"></script>
@@ -90,6 +91,78 @@
         H.check(target.classList.contains('ajaxer-error'), 'a failed call marks the target in error', target.className);
         var status = target.querySelector('.ajaxer-loader .ajaxer-status');
         H.check(status && /404 Error/.test(status.textContent), 'the status is shown in the loader', status && status.textContent);
+        // The debounce: sends that follow each other closely go once, the last one's data.
+        var api = function (name, query) { Ajaxer.setUrl(name, '/site/api' + (query || '')); Ajaxer.setThrottle(name, 0); Ajaxer.setTarget(name, target); };
+        api('typed');
+        Ajaxer.setMethod('typed', 'POST');
+        Ajaxer.setDebounce('typed', 80);
+        answers = [];
+        ['r', 'ri', 'rice'].forEach(function (q) { Ajaxer.send('typed', { q: q }, function (data) { answers.push(data); }); });
+        await H.after(40);
+        H.check(answers.length === 0, 'a debounced channel waits');
+        await H.after(250);
+        H.check(answers.length === 1 && answers[0].method === 'POST' && JSON.stringify(answers[0].sent) === '[["q","rice"]]', 'then sends once, the last data, by its method', JSON.stringify(answers));
+
+        // The loader: shown once the call has been out for loader_debounce, gone when the answer is in.
+        var box = document.getElementById('box');
+        api('slow', '?ms=200');
+        Ajaxer.setMethod('slow', 'GET');
+        Ajaxer.setLoaderContainer('slow', box);
+        Ajaxer.setLoaderDebounce('slow', 60);
+        Ajaxer.send('slow', {});
+        await H.after(30);
+        var loader = box.querySelector('.ajaxer-loader');
+        H.check(loader && !loader.classList.contains('ajaxer-call'), 'the loader, in its container, waits for loader_debounce', loader && loader.className);
+        await H.after(90);
+        H.check(loader.classList.contains('ajaxer-call'), 'then shows while the call is out', loader.className);
+        await H.after(200);
+        H.check(!loader.classList.contains('ajaxer-call') && loader.classList.contains('ajaxer-success'), 'and goes when the answer is in', loader.className);
+
+        // loader_throttle: once shown, the loader stays at least that long (stored and never read up to 1.0.2).
+        Ajaxer.setLoaderDebounce('slow', 0);
+        Ajaxer.setLoaderThrottle('slow', '300ms');
+        Ajaxer.setUrl('slow', '/site/api?ms=60');
+        Ajaxer.send('slow', {});
+        await H.after(160);
+        H.check(loader.classList.contains('ajaxer-call') && target.classList.contains('ajaxer-success'), 'with loader_throttle the loader outlasts a quick answer', loader.className + ' / ' + target.className);
+        await H.after(260);
+        H.check(!loader.classList.contains('ajaxer-call'), 'and goes once its time is up', loader.className);
+        Ajaxer.setLoaderThrottle('slow', 0);
+        Ajaxer.send('slow', {});
+        await H.after(160);
+        H.check(!loader.classList.contains('ajaxer-call'), 'without it, the loader goes with the answer', loader.className);
+
+        // query_limit: one call at a time. Not cancelable, the newcomer is refused; cancelable, the one in flight is aborted.
+        api('one', '?ms=150');
+        Ajaxer.setMethod('one', 'GET');
+        Ajaxer.setQueryLimit('one', 1);
+        answers = [];
+        Ajaxer.send('one', { n: 1 }, function (data) { answers.push(data.sent[1][1]); });
+        Ajaxer.send('one', { n: 2 }, function (data) { answers.push(data.sent[1][1]); });
+        await H.after(350);
+        H.check(answers.join() === '1', 'past its query_limit a channel refuses the newcomer', answers.join());
+        Ajaxer.cancelable('one');
+        answers = [];
+        Ajaxer.send('one', { n: 1 }, function (data) { answers.push(data.sent[1][1]); });
+        Ajaxer.send('one', { n: 2 }, function (data) { answers.push(data.sent[1][1]); });
+        await H.after(350);
+        H.check(answers.join() === '2', 'cancelable, it aborts the one in flight for the newcomer', answers.join());
+        Ajaxer.send('one', { n: 3 }, function (data) { answers.push(data.sent[1][1]); });
+        Ajaxer.abort('one');
+        await H.after(300);
+        H.check(answers.join() === '2', 'Ajaxer.abort() drops the calls of a channel', answers.join());
+
+        // A failure with its reason: the status and the server's "response" in the loader, the target in error.
+        Harness.expect(/500/);
+        api('refused', '?fail=500');
+        Ajaxer.setMethod('refused', 'GET');
+        Ajaxer.setRetryLimit('refused', 1);
+        var completed = 0;
+        Ajaxer.send('refused', {}, function () {}, function () {}, function () { completed++; });
+        await H.after(300);
+        status = target.querySelector('.ajaxer-loader .ajaxer-status');
+        H.check(/500 Error: refused/.test(status.textContent) && target.classList.contains('ajaxer-error') && completed === 1, 'a failure shows its status and reason, and completes', status.textContent + ' ' + completed);
+        H.check(Ajaxer.getTarget('refused') === target && Ajaxer.get('url[refused]') === '/site/api?fail=500' && Ajaxer.xhr === Ajaxer.send, 'the channel\'s settings read back');
         H.done();
     })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
 </script>

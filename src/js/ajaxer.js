@@ -354,7 +354,24 @@
 
                 $(target).addClass("ajaxer-call");
                 const loaderDebounceTime = Ajaxer.parseTime(Ajaxer.get("loader_debounce["+name+"]") ?? Ajaxer.get("loader_debounce"));
-                let loaderTimeout = setTimeout(() => $(loader).addClass("ajaxer-call"), loaderDebounceTime);
+
+                // loader_throttle: once shown, the loader stays at least that long (0, the default: it
+                // goes the moment the answer is in) - an answer arriving right after the loader_debounce
+                // made it blink. The setter stored the value from the start and nothing read it.
+                const loaderThrottleTime = Ajaxer.parseTime(Ajaxer.get("loader_throttle["+name+"]") ?? Ajaxer.get("loader_throttle"));
+                let loaderShownAt = null;
+                const showLoader = function () {
+                    clearTimeout(loader.ajaxerHide);
+                    loaderShownAt = Date.now();
+                    $(loader).addClass("ajaxer-call");
+                };
+                const hideLoader = function () {
+                    const left = loaderShownAt === null ? 0 : loaderThrottleTime - (Date.now() - loaderShownAt);
+                    clearTimeout(loader.ajaxerHide);
+                    if (left > 0) loader.ajaxerHide = setTimeout(() => $(loader).removeClass("ajaxer-call"), left);
+                    else $(loader).removeClass("ajaxer-call");
+                };
+                let loaderTimeout = setTimeout(showLoader, loaderDebounceTime);
 
                 const response = $.ajax({
                     url: Ajaxer.get("url[" + name + "]"),
@@ -380,7 +397,7 @@
 
                         } else {
 
-                            $(loader).removeClass("ajaxer-call");
+                            hideLoader();
                             $(loader).addClass("ajaxer-success");
                             $(loader).removeClass("ajaxer-error");
                             $(target).each(function () {
