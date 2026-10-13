@@ -445,37 +445,6 @@
         return typeof entity  === 'object' && entity.nodeType !== undefined;
     }
 
-    Transparent.setResponse = function(uuid, responseText, scrollableXY = [], exceptionRaised = false)
-    {
-        if(isDomEntity(responseText))
-            responseText = responseText.outerHTML;
-
-        var array = JSON.parse(sessionStorage.getItem('transparent')) || [];
-        array.push(uuid);
-
-        while(array.length > Settings["response_limit"])
-            sessionStorage.removeItem('transparent['+array.shift()+']');
-
-        try {
-
-            if(isLocalStorageNameSupported()) {
-
-                sessionStorage.setItem('transparent', JSON.stringify(array));
-                sessionStorage.setItem('transparent[response]['+uuid+']', responseText);
-                sessionStorage.setItem('transparent[position]['+uuid+']', JSON.stringify(scrollableXY));
-            }
-
-        } catch(e) {
-
-            if (e.name === 'QuotaExceededError')
-                sessionStorage.clear();
-
-            return exceptionRaised === false ? Transparent.setResponse(uuid, responseText, scrollableXY, true) : this;
-        }
-
-        return this;
-    }
-
     // ── In-memory live-DOM cache ────────────────────────────────────────────
     //
     // Turbo-style: store cloned <html> Element nodes per uuid so popstate
@@ -742,6 +711,7 @@
                 sessionStorage.setItem('transparent', JSON.stringify(array));
                 sessionStorage.setItem('transparent[response]['+uuid+']', responseText);
                 sessionStorage.setItem('transparent[position]['+uuid+']', JSON.stringify(scrollableXY));
+                keepWindowPosition(uuid, scrollableXY);
             }
 
         } catch(e) {
@@ -763,12 +733,35 @@
         return this;
     }
 
-    // Remove both blobs for a cached page uuid (response HTML + scroll position).
+    // Remove the blobs of a cached page uuid (response HTML + scroll positions).
     function removeResponseEntry(uuid) {
         try {
             sessionStorage.removeItem('transparent[response]['+uuid+']');
             sessionStorage.removeItem('transparent[position]['+uuid+']');
+            sessionStorage.removeItem('transparent[window]['+uuid+']');
         } catch (e) {}
+    }
+
+    // Where the window itself was, [top, left], kept beside the list of
+    // positions. That list is given back to the page's scrollers BY INDEX
+    // (see getScrollableElement), which only holds while the page that comes
+    // back has as many scrollers as the page that was left - and a page given
+    // back from the cache is not there yet when its positions are: a row a
+    // script fills, a list whose pictures have no size until they load, the
+    // page itself not yet taller than the screen. One scroller short, every
+    // position was dropped and the page shown at its top; whether it was
+    // depended on what had loaded by then. The window's own position does
+    // not depend on that count.
+    function keepWindowPosition(uuid, scrollableXY) {
+        if (!Array.isArray(scrollableXY)) return;
+        sessionStorage.setItem('transparent[window]['+uuid+']', JSON.stringify([window.scrollY || window.pageYOffset || 0, window.scrollX || window.pageXOffset || 0]));
+    }
+
+    function windowPosition(uuid) {
+        try {
+            var position = JSON.parse(sessionStorage.getItem('transparent[window]['+uuid+']') || 'null');
+            return Array.isArray(position) ? [+position[0] || 0, +position[1] || 0] : null;
+        } catch (e) { return null; }
     }
 
     // Drop the N oldest cached pages and rewrite the index. Used to recover
@@ -830,6 +823,7 @@
 
                 sessionStorage.setItem('transparent', JSON.stringify(array));
                 sessionStorage.setItem('transparent[position]['+uuid+']', JSON.stringify(scrollableXY));
+                keepWindowPosition(uuid, scrollableXY);
             }
 
         } catch(e) {
@@ -1505,7 +1499,10 @@
             var id = this.getAttribute("id");
             if (id) {
 
-                var canvas = $(dom).find("#page #" + id);
+                // In the page block the site named (identifier), not "#page":
+                // on a site whose block is #content no canvas with an id was
+                // ever found in the new page, and each was drawn again.
+                var canvas = $(dom).find(Settings.identifier + " [id='" + id.replace(/'/g, "\\'") + "']");
                 canvas.replaceWith(this);
 
             } else {
@@ -1897,6 +1894,73 @@
         });
     }
 
+    // ── A position given back is held while the page grows ──────────────
+    // A page that comes back from the cache is given its scroll position a
+    // frame after it is swapped in, and it is not whole yet: pictures without
+    // a size load, a controller builds what it builds (a track as tall as its
+    // turns, a list it fills). Too short at that moment, the page was left at
+    // the end of what it had - or at its top - and nothing put it back; with
+    // the browser's scroll anchoring, what loaded above the reader pushed the
+    // position further off. So the position is held: put back each time the
+    // page changes size, anchoring off meanwhile, until the page has been
+    // quiet for a moment (HOLD_QUIET), for HOLD_MAX at most - and let go at
+    // once when the reader takes the scroll (a wheel, a finger, a press, a
+    // key), when anything else scrolls the page, or at the next navigation.
+    var HOLD_QUIET = 1500;
+    var HOLD_MAX = 6000;
+    var HOLD_EVENTS = ['wheel', 'touchstart', 'mousedown', 'keydown'];
+    var held = null;
+
+    function releaseScroll() {
+        if (!held) return;
+        var hold = held;
+        held = null;
+        if (hold.observer) hold.observer.disconnect();
+        clearTimeout(hold.quiet);
+        clearTimeout(hold.end);
+        Flow.offScroll(window, hold.onScroll);
+        HOLD_EVENTS.forEach(function(type) { window.removeEventListener(type, releaseScroll, true); });
+        document.documentElement.style.overflowAnchor = hold.anchor;
+    }
+
+    function holdScroll(top, left) {
+
+        releaseScroll();
+        if (typeof ResizeObserver !== 'function' || location.origin === 'null') return;
+        if (!(top > 0) && !(left > 0)) return;
+
+        var html = document.documentElement;
+        var hold = held = { anchor: html.style.overflowAnchor };
+        var there = function() { return Math.abs((window.scrollY || 0) - top) < 2 && Math.abs((window.scrollX || 0) - left) < 2; };
+        var apply = function() {
+            if (held !== hold) return;
+            // Transparent.scrollTo puts the page there itself, a tick after
+            // it was asked: nothing to do before that, nor once there.
+            if (!there()) Flow.jump(window, top, left);
+            clearTimeout(hold.quiet);
+            hold.quiet = setTimeout(function() { if (held === hold) releaseScroll(); }, HOLD_QUIET);
+        };
+
+        html.style.overflowAnchor = 'none';
+        // There at once (Transparent.scrollTo follows a tick later): a scroll
+        // event the swap left behind must find the page already put back.
+        Flow.jump(window, top, left);
+
+        // Anything but this (and the core's own scrolls) moving the page -
+        // a script of the page's - has it from then on.
+        hold.onScroll = function() { if (held === hold && !there() && !Flow.scripted(window)) releaseScroll(); };
+        Flow.onScroll(window, hold.onScroll);
+
+        hold.observer = new ResizeObserver(apply);
+        hold.observer.observe(document.body);
+        var page = $(Settings.identifier)[0];
+        if (page) hold.observer.observe(page);
+
+        hold.quiet = setTimeout(function() { if (held === hold) releaseScroll(); }, HOLD_QUIET);
+        hold.end = setTimeout(function() { if (held === hold) releaseScroll(); }, HOLD_MAX);
+        HOLD_EVENTS.forEach(function(type) { window.addEventListener(type, releaseScroll, { capture: true, passive: true }); });
+    }
+
     Transparent.onLoad = function(uuid, dom, callback = null, scrollTo = false, keepScroll = false) {
 
         // Where the reader is, read BEFORE the swap takes the page apart.
@@ -2085,9 +2149,11 @@
 
             if(scrollTo) {
 
-                // Go back to top of the page..
+                // Go back to top of the page.. or to where the page was left
                 var scrollableElements   = Transparent.getScrollableElement();
                 var scrollableElementsXY = Transparent.getResponsePosition(uuid);
+                var windowXY = windowPosition(uuid);
+                var windowSeen = false;
 
                 for(i = 0; i < scrollableElements.length; i++) {
 
@@ -2099,7 +2165,15 @@
 
                     if(el == window || el == document.documentElement) {
 
-                        if(positionXY != undefined) Transparent.scrollTo({top:positionXY[0], left:positionXY[1], duration:0});
+                        // The window's own position first: it does not
+                        // depend on how many scrollers the page has by now.
+                        windowSeen = true;
+                        if(windowXY) positionXY = windowXY;
+
+                        if(positionXY != undefined) {
+                            Transparent.scrollTo({top:positionXY[0], left:positionXY[1], duration:0});
+                            holdScroll(positionXY[0], positionXY[1]);
+                        }
                         else if (location.hash) Transparent.scrollToHash(location.hash, {duration:0});
                         else Transparent.scrollTo({top:0, left:0, duration:0});
 
@@ -2109,6 +2183,11 @@
                         else Transparent.scrollTo({top:0, left:0, duration:0}, el);
                     }
                 }
+
+                // The page does not scroll yet - what makes it tall is still
+                // to come - but did when it was left: its place is put back
+                // as it grows.
+                if(!windowSeen && windowXY) holdScroll(windowXY[0], windowXY[1]);
 
             } else if (keepScroll && keptScroll.top && !location.hash && (window.scrollY || window.pageYOffset || 0) !== keptScroll.top) {
 
@@ -3088,6 +3167,9 @@
             return;
         }
 
+        // A position still being held belongs to the page that is leaving.
+        releaseScroll();
+
         // right (still limited by browser policy):
         dispatchEvent(new Event('transparent:beforeunload'));
         dispatchEvent(new Event('beforeunload', { cancelable: true }));
@@ -3146,6 +3228,32 @@
                 }
 
                 responseText = request.responseText;
+
+                // No answer at all: the connection dropped, the server is out
+                // of reach. There is nothing to show in place of the page -
+                // handed to rescue() like a failed page, the empty answer
+                // replaced the whole document with nothing, and the reader
+                // was left on a blank page with no way back but a reload they
+                // could not make either. The page stays as it is, at its own
+                // address (nothing was pushed yet), and is announced again
+                // the way a swap announces one, so that whatever was put on
+                // for the wait - a curtain, a progress bar, the scroll
+                // effects let go at beforeunload - is taken off and on again.
+                // jQuery's ajaxError has told the page about the failure.
+                if(status === 0 && !responseText) {
+
+                    if (Settings.debug) console.warn("Transparent: no answer from " + url.href + ", the page stays");
+                    if (Transparent.formMemory) Transparent.formMemory.abandon();
+                    $(Transparent.html).prop("user-scroll", true);
+
+                    document.dispatchEvent(new Event('DOMContentLoaded'));
+                      window.dispatchEvent(new Event('DOMContentLoaded'));
+                    Transparent.activeOut();
+                    dispatchEvent(new Event('transparent:load'));
+                    dispatchEvent(new Event('load'));
+                    return;
+                }
+
                 if(status >= 500) {
 
                     console.error("Unexpected XHR response from "+uuid+": error code "+request.status);
@@ -3409,6 +3517,19 @@
             }
 
             return swap();
+        }
+
+        // Back or Forward: the page being left is kept as it is now, with its
+        // scroll positions, under its own entry. history.state is already the
+        // entry the browser is going TO, so the lines below never saw the one
+        // being left: Forward always gave a page back at its top, and Back a
+        // second time gave it where a link had been followed from, not where
+        // it was last read. (A nest iframe keeps its own: see nestReplay.)
+        if (e.type == Transparent.state.POPSTATE && e.state && location.origin !== 'null') {
+
+            var leavingUuid = currentNavUuid || initialUuid;
+            if (leavingUuid && leavingUuid !== e.state.uuid && !rescueMode)
+                Transparent.setResponse(leavingUuid, Transparent.html[0], Transparent.getScrollableElementXY());
         }
 
         var shownEntry = currentEntry();

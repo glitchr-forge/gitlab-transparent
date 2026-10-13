@@ -1,0 +1,101 @@
+<!doctype html>
+<!--
+  Back to a long page: it is given back where it was left even though it is not whole yet when its
+  position is - its sections get their height a moment after the page is in, one after the other
+  (pictures without a size, a controller that builds its layout), a script builds a row later still. Up to 1.0.2 the position was clamped to what the page had by then,
+  or dropped to the top when the page had one scroller less than when it was left; and the stops
+  could glide away from it. The reader taking the scroll meanwhile keeps it. Opened by
+  tests/run.mjs in a headless browser; the page writes its verdict in #result.
+-->
+<html>
+<head><meta charset="utf-8"><link rel="stylesheet" href="/tests/site.css"><title>navigation, back</title></head>
+<body>
+<div id="page" data-layout="main"><h1>Start</h1><a id="to-long" href="/site/page/long">long</a><a id="to-built" href="/site/page/built">built</a></div>
+<div id="loader"></div>
+<pre id="result">pending</pre>
+<script src="jquery.js"></script>
+<script src="harness.js"></script>
+<script src="../src/js/core.js"></script>
+<script src="../src/js/transparent.js"></script>
+<script src="../src/js/stops.js"></script>
+<script>
+    (async function () {
+        var H = Harness;
+        var $id = function (id) { return document.getElementById(id); };
+        var y = function () { return Math.round(window.scrollY); };
+        var top = function (id) { return Math.round($id(id).getBoundingClientRect().top + window.scrollY); };
+        var heading = function () { var h = document.querySelector('#page h1'); return h ? h.textContent : null; };
+        var pictures = function () { var late = document.querySelectorAll('#page .late'); return late.length > 0 && [].every.call(late, function (el) { return el.offsetHeight === 300; }); };
+        window.__marker = 'kept';
+
+        function loaded() {
+            return new Promise(function (resolve, reject) {
+                var timer = setTimeout(function () { reject(new Error('no transparent:load (at ' + location.pathname + ')')); }, 4000);
+                window.addEventListener('transparent:load', function () {
+                    clearTimeout(timer);
+                    requestAnimationFrame(function () { setTimeout(function () { H.after(40).then(resolve); }, 0); });
+                }, { once: true });
+            });
+        }
+        async function click(id) { var next = loaded(); $id(id).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); await next; }
+        async function back() { var next = loaded(); history.back(); await next; }
+
+        await new Promise(function (resolve) { window.addEventListener('load', resolve, { once: true }); });
+        Transparent.ready({ identifier: '#page', progress_bar: 'off' });
+        await H.after(60);
+        await H.frame();
+
+        // ── Sections that get their height late ─────────────────────────────
+        await click('to-long');
+        await H.until(pictures, 4000);
+        await H.frame();
+        var place = top('l9') + 40;
+        H.scroll(place);
+        await H.frame();
+        H.check(y() === place, 'the long page, read down to its ninth section', y() + ' vs ' + place);
+        await click('to-two');
+        H.check(heading() === 'Two' && y() === 0, 'another page');
+        await back();
+        H.check(heading() === 'Long' && !pictures(), 'Back: the page is in, not whole yet');
+        await H.until(pictures, 4000);
+        await H.after(120);
+        H.check(y() === place && H.near(top('l9') + 40, place, 1), 'once it is, the page is where it was left, at the same section', y() + ' vs ' + place + ' (l9 at ' + top('l9') + ')');
+        H.check(window.__marker === 'kept', 'in place');
+        await H.after(1700);
+        H.check(document.documentElement.style.overflowAnchor === '' && y() === place, 'and the position is let go once the page is quiet', document.documentElement.style.overflowAnchor + ' ' + y());
+
+        // The reader takes the scroll while the page is still growing: it is theirs.
+        await click('to-two');
+        await back();
+        window.dispatchEvent(new WheelEvent('wheel', { deltaY: -40 }));
+        var taken = y();
+        await H.until(pictures, 4000);
+        await H.after(150);
+        H.check(y() !== place && y() <= taken && document.documentElement.style.overflowAnchor === '', 'a reader who takes the scroll meanwhile is not put back', y() + ' (taken at ' + taken + ', left at ' + place + ')');
+
+        // ── A row a script builds a moment after the page is in, and the stops ─
+        history.back(); // from the long page, back to the start
+        await loaded();
+        await click('to-built');
+        await H.after(250);
+        H.check(Transparent.getScrollableElement().length === 2, 'the built page has two scrollers once its script has run', Transparent.getScrollableElement().length);
+        StickyStops.attach(window, { smooth: false, settle: 40 });
+        $id('row').scrollLeft = 200;
+        place = top('b5') + 250; // between two stops
+        Flow.jump(window, place);
+        await H.after(400);
+        H.check(y() === place, 'read down to between two stops (a script\'s scroll rests)', y() + ' vs ' + place);
+        await click('to-two');
+        await back();
+        H.check(heading() === 'Built' && Transparent.getScrollableElement().length === 1, 'Back: the row does not scroll yet', Transparent.getScrollableElement().length);
+        H.check(y() === place, 'the page is where it was left all the same', y() + ' vs ' + place);
+        await H.after(500);
+        H.check(y() === place, 'and the stops leave it there', y() + ' vs ' + place);
+        H.scroll(top('b6') - 80);
+        await H.after(250);
+        H.check(H.near(y(), top('b6') - 20, 3), 'while the reader\'s next rest glides to its stop', y() + ' vs ' + (top('b6') - 20));
+        H.done();
+    })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
+</script>
+</body>
+</html>

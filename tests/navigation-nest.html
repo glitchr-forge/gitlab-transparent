@@ -1,0 +1,83 @@
+<!doctype html>
+<!--
+  The nest: a link whose path the site names (nest: ['/site/admin/*']) and whose page says it may
+  be nested (X-Transparent-Nest) opens as a panel over the page - an iframe with the nested page,
+  its own library running in it - while the host page and its address stay; a link followed inside
+  stays inside; one that leaves the nest's paths closes the panel and takes the host there;
+  Transparent.nest.close() closes it. A page that does not say it may be nested is opened the
+  ordinary way. Opened by tests/run.mjs in a headless browser; the page writes its verdict in #result.
+-->
+<html>
+<head><meta charset="utf-8"><link rel="stylesheet" href="/tests/site.css"><title>navigation, nest</title></head>
+<body>
+<div id="page" data-layout="main"><h1>Host</h1><a id="to-admin" href="/site/admin/home">admin</a><a id="to-one" href="/site/page/one">one</a></div>
+<div id="loader"></div>
+<pre id="result">pending</pre>
+<script src="jquery.js"></script>
+<script src="harness.js"></script>
+<script src="../src/js/core.js"></script>
+<script src="../src/js/transparent.js"></script>
+<script>
+    (async function () {
+        var H = Harness;
+        var $id = function (id) { return document.getElementById(id); };
+        var heading = function () { var h = document.querySelector('#page h1'); return h ? h.textContent : null; };
+        var frame = function () { var c = Transparent.nest.getContainer(); return c ? c.querySelector('iframe') : null; };
+        var inside = function (id) { var f = frame(); try { return f && f.contentDocument ? f.contentDocument.getElementById(id) : null; } catch (e) { return null; } };
+        var title = function () { var el = inside('admin-title'); return el ? el.textContent : null; };
+        window.__marker = 'kept';
+
+        var heard = [];
+        ['open', 'navigate', 'navigated', 'close', 'leave', 'loading', 'error'].forEach(function (name) {
+            window.addEventListener('transparent:nest:' + name, function (e) { heard.push(name); });
+        });
+
+        await new Promise(function (resolve) { window.addEventListener('load', resolve, { once: true }); });
+        Transparent.ready({ identifier: '#page', nest: ['/site/admin/*'], progress_bar: 'off', nest_remember: false, nest_esc_confirm: '' });
+        await H.after(60);
+        await H.frame();
+        var here = location.href;
+
+        H.check(Transparent.nest.isOpen() === false && Transparent.isNested() === false && Transparent.openNest === Transparent.nest.open, 'no nest to begin with');
+        H.check(Transparent.nest.inScope('/site/admin/home') === true && Transparent.nest.inScope('/site/page/one') === false, 'the paths the site names are the nest\'s');
+
+        // ── Opened by its link ──────────────────────────────────────────────
+        $id('to-admin').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+        await H.until(function () { return title() === 'Admin home'; }, 4000);
+        H.check(Transparent.nest.isOpen() && $id('transparent-nest') !== null && title() === 'Admin home', 'a nest link opens the page in a panel', title());
+        H.check(heading() === 'Host' && location.href === here && window.__marker === 'kept', 'over the host page, which stays, at its address', heading() + ' ' + location.href);
+        await H.until(function () { return heard.indexOf('open') !== -1; }, 3000);
+        H.check(heard.indexOf('loading') !== -1 && heard.indexOf('open') > heard.indexOf('loading'), 'transparent:nest:loading, then :open', heard.join(' '));
+        var nested = frame().contentWindow;
+        await H.until(function () { return nested.Transparent && nested.document.documentElement.classList.contains('ready'); }, 3000);
+        H.check(!!nested.Transparent && nested.Transparent !== Transparent, 'the nested page runs its own library');
+
+        // ── A link inside stays inside ──────────────────────────────────────
+        inside('admin-next').dispatchEvent(new nested.MouseEvent('click', { bubbles: true, cancelable: true, button: 0, view: nested }));
+        await H.until(function () { return title() === 'Admin next'; }, 4000);
+        H.check(title() === 'Admin next' && Transparent.nest.isOpen() && heading() === 'Host', 'a link followed in the nest stays in the nest', title());
+        H.check(location.pathname === new URL(here).pathname, 'the host\'s address has not moved', location.pathname);
+
+        // ── Closed ──────────────────────────────────────────────────────────
+        Transparent.nest.close();
+        await H.until(function () { return !Transparent.nest.isOpen(); }, 3000);
+        await H.after(100);
+        H.check(!Transparent.nest.isOpen() && heard.indexOf('close') !== -1 && heading() === 'Host' && location.pathname === new URL(here).pathname, 'Transparent.nest.close() closes it, the host as it was', heard.join(' '));
+
+        // ── A link that leaves the nest's paths ─────────────────────────────
+        Transparent.nest.open('/site/admin/home');
+        await H.until(function () { return title() !== null && inside('admin-out') !== null; }, 4000);
+        nested = frame().contentWindow;
+        await H.until(function () { return nested.Transparent && nested.document.documentElement.classList.contains('ready'); }, 3000);
+        H.check(Transparent.nest.isOpen(), 'opened again, by Transparent.nest.open()');
+        var arrived = new Promise(function (resolve) { window.addEventListener('transparent:load', resolve, { once: true }); });
+        inside('admin-out').dispatchEvent(new nested.MouseEvent('click', { bubbles: true, cancelable: true, button: 0, view: nested }));
+        await Promise.race([arrived, H.after(4000)]);
+        await H.until(function () { return heading() === 'Two'; }, 2000);
+        H.check(heading() === 'Two' && location.pathname === '/site/page/two' && !Transparent.nest.isOpen(), 'a link out of the nest closes it and takes the host there', heading() + ' ' + location.pathname + ' ' + Transparent.nest.isOpen());
+        H.check(heard.indexOf('leave') !== -1 && window.__marker === 'kept', 'transparent:nest:leave, the host swapped in place', heard.join(' '));
+        H.done();
+    })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
+</script>
+</body>
+</html>

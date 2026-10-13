@@ -34,9 +34,15 @@ const pages = {
         <form id="refused" method="post" action="/site/refuse"><input name="title" value="x"><button type="submit" id="refused-go">send</button></form>`,
     two: () => `<h1>Two</h1><a id="to-one" href="/site/page/one">one</a><canvas id="kept-canvas" width="10" height="10"></canvas>${sections(6)}<h2 id="deep">Deep</h2>${sections(3, 't')}`,
     styled: () => `<h1>Styled</h1><a id="to-one" href="/site/page/one">one</a>`,
-    // A long page whose pictures have no size until they load, and load late.
+    // A long page that is not whole when it comes in: each section gets its height a moment later, one after
+    // the other, every time the page is put in (a controller that builds its layout, pictures without a size).
     long: () => `<h1>Long</h1><a id="to-two" href="/site/page/two">two</a>` + Array.from({ length: 12 }, (_, i) =>
-        `<section id="l${i + 1}" class="block grow"><img src="/site/img?h=300&ms=${80 + 20 * i}&n=${i}" alt=""><p>l${i + 1}</p></section>`).join('\n') + `<div id="row" class="row"><div class="wide">wide</div></div>`,
+        `<section id="l${i + 1}" class="block grow"><div class="late"></div><p>l${i + 1}</p></section>`).join('\n') + `
+        <script>(function () {
+            var late = document.querySelectorAll('.late');
+            for (var i = 0; i < late.length; i++) late[i].style.height = '0px';
+            [].forEach.call(late, function (el, i) { setTimeout(function () { el.style.height = '300px'; }, 80 + 25 * i); });
+        })();</script>`,
     // A page a script finishes: its row scrolls sideways only a moment after the page is in, each time.
     built: () => `<h1>Built</h1><a id="to-two" href="/site/page/two">two</a>` + Array.from({ length: 8 }, (_, i) =>
         `<section id="b${i + 1}" class="block sticky-stop">b${i + 1}</section>`).join('\n') + `<div id="row" class="row"><div class="wide">wide</div></div>

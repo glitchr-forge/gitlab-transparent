@@ -12,6 +12,7 @@
     <section class="player"><canvas class="music-wave"></canvas></section>
     <div class="chart"><canvas id="kept" data-drawn="yes"></canvas></div>
 </div>
+<div id="content"><canvas id="wave"></canvas></div>
 <pre id="result">pending</pre>
 <script src="jquery.js"></script>
 <script src="../src/js/core.js"></script>
@@ -33,7 +34,16 @@
                 inNew === live ? 'ok kept' : 'FAIL the canvas with an id after one without was not kept',
                 inNew && inNew.getAttribute('data-drawn') === 'yes' ? 'ok drawn' : 'FAIL not the drawn canvas',
                 errors.length === 0 ? 'ok quiet' : 'FAIL ' + errors.join(' | '),
-            ].join('\n');
+            ];
+
+            // On a site whose block is not #page (identifier: '#content'), a canvas with an id is kept too:
+            // up to 1.0.2 it was looked for under "#page" whatever the identifier, never found, and drawn again.
+            Transparent.configure({ identifier: '#content' });
+            var wave = document.getElementById('wave');
+            var next = new DOMParser().parseFromString('<html><body><div id="content"><p><canvas id="wave"></canvas></p></div></body></html>', 'text/html');
+            Transparent.replaceCanvases(next);
+            verdict.push(next.getElementById('wave') === wave ? 'ok kept in the block the site named' : 'FAIL a canvas with an id was not kept in #content');
+            verdict = verdict.join('\n');
         } catch (e) {
             verdict = 'FAIL ' + e;
         }

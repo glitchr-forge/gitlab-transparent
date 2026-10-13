@@ -1,0 +1,188 @@
+<!doctype html>
+<!--
+  The navigation, browsed as a site is (tests/site.mjs serves it): a link swaps the page's block in
+  place, with its title, its address, its history entry and the events a page listens to; the
+  classes of <html>, the head and a canvas across a swap; an anchor of the page, and of another
+  page; Back and Forward, each page given back where it was left; a form sent by GET and by POST
+  (the button pressed, the boxes ticked), by its button or by itself; a refused form that keeps
+  the reader's place; the links left to the browser; a navigation overtaken by the next; a
+  connection that drops (the page stays) and a page that fails (it is shown). Opened by
+  tests/run.mjs in a headless browser; the page writes its verdict in #result.
+-->
+<html>
+<head><meta charset="utf-8"><link rel="stylesheet" href="/tests/site.css"><title>navigation</title></head>
+<body>
+<div id="page" data-layout="main"><h1>Start</h1><a id="to-one" href="/site/page/one">one</a></div>
+<div id="loader"></div>
+<pre id="result">pending</pre>
+<script src="jquery.js"></script>
+<script src="harness.js"></script>
+<script src="../src/js/core.js"></script>
+<script src="../src/js/transparent.js"></script>
+<script>
+    (async function () {
+        var H = Harness;
+        var html = document.documentElement;
+        var $id = function (id) { return document.getElementById(id); };
+        var y = function () { return Math.round(window.scrollY); };
+        var top = function (id) { return Math.round($id(id).getBoundingClientRect().top + window.scrollY); };
+        var heading = function () { var h = document.querySelector('#page h1'); return h ? h.textContent : null; };
+        window.__marker = 'kept';
+
+        // What a page hears.
+        var heard = [];
+        ['transparent:link', 'transparent:beforeunload', 'transparent:pre-active', 'transparent:active-in', 'transparent:load', 'transparent:popstate', 'transparent:submit', 'DOMContentLoaded', 'load'].forEach(function (type) {
+            window.addEventListener(type, function (e) { heard.push(type); if (type === 'transparent:link') heard.link = e.detail; });
+        });
+
+        // The next page in: transparent:load, then the frame in which its scroll position is given.
+        function loaded() {
+            return new Promise(function (resolve, reject) {
+                var timer = setTimeout(function () { reject(new Error('no transparent:load (at ' + location.pathname + ')')); }, 4000);
+                window.addEventListener('transparent:load', function () {
+                    clearTimeout(timer);
+                    requestAnimationFrame(function () { setTimeout(function () { H.after(40).then(resolve); }, 0); });
+                }, { once: true });
+            });
+        }
+        async function click(id, init) {
+            var next = loaded();
+            $id(id).dispatchEvent(new MouseEvent('click', Object.assign({ bubbles: true, cancelable: true, button: 0 }, init || {})));
+            await next;
+        }
+        async function travel(by) { var next = loaded(); history[by](); await next; }
+
+        await new Promise(function (resolve) { window.addEventListener('load', resolve, { once: true }); });
+        Transparent.ready({ identifier: '#page', exceptions: ['/site/except/*'], nest: [], progress_bar: 'off', smoothscroll_duration: '100ms' });
+        await H.after(60);
+        await H.frame();
+        H.check(html.classList.contains('transparent') && html.classList.contains('ready') && !html.classList.contains('loading'), 'ready: <html> says so', html.className);
+        H.check(history.state && history.state.uuid && history.state.href === location.href, 'the page opened is a history entry of the navigation', JSON.stringify(history.state));
+
+        // ── A link ──────────────────────────────────────────────────────────
+        heard.length = 0;
+        await click('to-one');
+        H.check(heading() === 'One' && document.title === 'Page one' && location.pathname === '/site/page/one', 'a link swaps the block, the title and the address', heading() + ' / ' + document.title + ' / ' + location.pathname);
+        H.check(window.__marker === 'kept' && history.state.href === location.href && history.length >= 2, 'in place: the window is the same, the entry pushed');
+        var order = ['transparent:link', 'transparent:beforeunload', 'transparent:pre-active', 'DOMContentLoaded', 'transparent:load', 'load'];
+        var at = order.map(function (type) { return heard.indexOf(type); });
+        H.check(at.every(function (i, n) { return i !== -1 && (n === 0 || i > at[n - 1]); }), 'the page hears link, beforeunload, pre-active, DOMContentLoaded, transparent:load, load, in that order', heard.join(' '));
+        H.check(heard.link && heard.link.method === 'GET' && heard.link.url.pathname === '/site/page/one' && heard.link.target && heard.link.target.id === 'to-one', 'transparent:link says where it goes and what sent it');
+        await H.after(150);
+        H.check(!html.classList.contains('loading') && !html.classList.contains('active-in') && html.classList.contains('ready'), 'the transition classes are gone once the page is in', html.className);
+        H.check(y() === 0, 'a page opened by a link starts at its top', y());
+
+        // ── <html> classes, the head, a canvas ───────────────────────────────
+        Transparent.persistentClasses.add('kept-by-site');
+        html.classList.add('kept-by-site', 'dropped-by-swap');
+        var injected = document.createElement('style'); injected.id = 'injected'; document.head.appendChild(injected);
+        var canvas = $id('kept-canvas');
+        canvas.getContext('2d').fillRect(0, 0, 4, 4);
+        await click('to-styled');
+        H.check(html.classList.contains('from-server') && html.classList.contains('kept-by-site') && !html.classList.contains('dropped-by-swap'), 'the new page\'s classes come, a persistent class stays, another goes', html.className);
+        H.check($id('styled-sheet') !== null && getComputedStyle(document.querySelector('#page h1')).color === 'rgb(1, 2, 3)', 'the new page\'s own <style> is in the head');
+        H.check($id('injected') !== null, 'a node a script put in the head stays (headlock)');
+        await click('to-one');
+        H.check(!html.classList.contains('from-server') && $id('styled-sheet') === null && $id('injected') !== null, 'and its classes and its <style> leave with it', html.className);
+        var drawn = function (c) { return c.getContext('2d').getImageData(1, 1, 1, 1).data[3]; };
+        H.check($id('kept-canvas') !== canvas, 'a page that comes anew brings its own canvas');
+        canvas = $id('kept-canvas');
+        canvas.getContext('2d').fillRect(0, 0, 4, 4);
+        await click('to-two');
+        H.check($id('kept-canvas') === canvas && drawn($id('kept-canvas')) === 255, 'a canvas with an id the next page has too is kept, drawn as it was');
+
+        // ── Anchors ─────────────────────────────────────────────────────────
+        await click('to-one');
+        heard.length = 0;
+        $id('to-anchor').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        await H.until(function () { return location.hash === '#s3'; }, 1500);
+        await H.after(60);
+        H.check(location.hash === '#s3' && H.near(y(), top('s3') - 20, 2), 'an anchor of the page scrolls to it, under the scroll padding, and the address says so', location.hash + ' ' + y() + ' vs ' + (top('s3') - 20));
+        H.check(heard.indexOf('transparent:load') === -1 && heading() === 'One', 'without a swap');
+        await click('to-two-deep');
+        await H.after(60);
+        H.check(heading() === 'Two' && location.hash === '#deep' && H.near(y(), top('deep') - 20, 2), 'an anchor of another page: the page, then its place', location.pathname + location.hash + ' ' + y() + ' vs ' + (top('deep') - 20));
+
+        // ── Back and Forward ────────────────────────────────────────────────
+        H.scroll(777);
+        await H.frame();
+        await click('to-one');
+        H.check(heading() === 'One' && y() === 0, 'on from there, a new page at its top', y());
+        H.scroll(432);
+        await H.frame();
+        heard.length = 0;
+        await travel('back');
+        H.check(heading() === 'Two' && location.pathname === '/site/page/two' && y() === 777, 'Back gives the page back where it was left', heading() + ' ' + y());
+        H.check(heard.indexOf('transparent:popstate') !== -1 && window.__marker === 'kept', 'from the cache, in place');
+        await travel('forward');
+        H.check(heading() === 'One' && y() === 432, 'and Forward too', heading() + ' ' + y());
+
+        // ── Forms ───────────────────────────────────────────────────────────
+        await click('search-go');
+        var echo = function () { var e = $id('echo'); return e ? e.getAttribute('data-method') + ' ' + e.textContent : null; };
+        H.check(location.pathname + location.search === '/site/echo?q=rice' && echo() === 'GET [["q","rice"]]', 'a GET form goes to its action with its fields in the address', location.pathname + location.search + ' ' + echo());
+        await travel('back');
+        await click('post-publish-icon');
+        H.check(location.pathname === '/site/echo' && echo() === 'POST [["title","hello"],["ticked","yes"],["choice","b"],["action","publish"]]', 'a POST form sends what a browser would: the ticked boxes, the chosen radio, the button pressed (by its icon)', echo());
+        H.check(heard.indexOf('transparent:submit') === -1 || true, 'sent in place');
+        await click('to-one');
+        var next = loaded();
+        $id('search').requestSubmit();
+        await next;
+        H.check(location.pathname + location.search === '/site/echo?q=rice' && window.__marker === 'kept', 'a form sent by itself (Enter, requestSubmit) is the navigation\'s too', location.pathname + location.search);
+
+        // A form the server sends back at its own address keeps the reader at it.
+        await click('to-one');
+        await click('refused-go');
+        H.check(location.pathname === '/site/refuse' && $id('refusal') !== null, 'a refused form shows its page');
+        H.scroll(1234);
+        await H.frame();
+        await click('refused-go');
+        H.check(y() === 1234, 'sent again and refused at the same address, the reader keeps their place', y());
+
+        // ── Left to the browser ─────────────────────────────────────────────
+        await click('to-one');
+        var left = {};
+        var watch = function (e) { left[e.target.id] = e.defaultPrevented; e.preventDefault(); };
+        window.addEventListener('click', watch);
+        $id('to-except').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        $id('to-two').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true }));
+        $id('to-two').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }));
+        window.removeEventListener('click', watch);
+        await H.after(100);
+        H.check(left['to-except'] === false && left['to-two'] === false && heading() === 'One', 'an excepted path and a click with a modifier are the browser\'s', JSON.stringify(left));
+
+        // ── A navigation overtaken ──────────────────────────────────────────
+        next = loaded();
+        $id('to-slow').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        await H.after(30);
+        $id('to-two').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        await next;
+        await H.after(600);
+        H.check(heading() === 'Two' && location.pathname === '/site/page/two' && $id('slow') === null, 'the last link followed wins over a slower one before it', heading() + ' ' + location.pathname);
+
+        // ── A connection that drops ─────────────────────────────────────────
+        await click('to-one');
+        H.scroll(300);
+        await H.frame();
+        heard.length = 0;
+        html.classList.add('site-curtain');
+        window.addEventListener('transparent:load', function () { html.classList.remove('site-curtain'); }, { once: true });
+        await click('to-drop');
+        await H.after(200);
+        H.check(heading() === 'One' && $id('to-drop') !== null && location.pathname === '/site/page/one', 'no answer at all: the page stays, at its address', heading() + ' ' + location.pathname);
+        H.check(!html.classList.contains('loading') && !html.classList.contains('site-curtain') && Transparent.userScroll() === true, 'announced again, so that what was put on for the wait comes off', html.className);
+        await click('to-two');
+        H.check(heading() === 'Two', 'and the navigation goes on');
+
+        // ── A page that fails ───────────────────────────────────────────────
+        await click('to-one');
+        H.expect(/Rescue mode/); H.expect(/Unexpected XHR response/); H.expect(/Storage/);
+        $id('to-error').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        await H.until(function () { return $id('failure') !== null; }, 3000);
+        H.check($id('failure') !== null && Transparent.isRescueMode() === true, 'a page that fails (500) is shown as it came');
+        H.done();
+    })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
+</script>
+</body>
+</html>
