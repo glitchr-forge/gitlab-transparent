@@ -1,0 +1,10 @@
+/* The layout shared by the navigation tests' pages (tests/site.mjs) and the pages that drive them. */
+html { scroll-behavior: auto; scroll-padding-top: 20px; }
+body { margin: 0; font: 14px/1.4 sans-serif; }
+.block { min-height: 600px; border-top: 1px solid #ccc; }
+.grow { min-height: 0; }
+.grow img { display: block; }
+.row { overflow-x: auto; width: 300px; }
+.row .wide { width: 900px; height: 40px; }
+#result { position: fixed; top: 0; right: 0; margin: 0; font-size: 10px; background: #fff; max-height: 100vh; overflow: hidden; z-index: 10; }
+#loader { display: none; }

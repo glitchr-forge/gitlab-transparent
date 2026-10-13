@@ -8,7 +8,10 @@
     var lines = [];
     var errors = [];
 
-    window.addEventListener('error', function (e) { errors.push(String(e.message || e)); });
+    // Errors a page says it expects (Harness.expect(/text/)) are not failures.
+    var expected = [];
+    function known(text) { return expected.some(function (pattern) { return pattern.test(text); }); }
+    window.addEventListener('error', function (e) { if (!known(String(e.message || e))) errors.push(String(e.message || e)); });
     window.addEventListener('unhandledrejection', function (e) { errors.push('rejection: ' + String(e.reason && e.reason.stack || e.reason)); });
 
     // Listeners added, by "<target> <type>": window scroll, document keydown...
@@ -38,6 +41,11 @@
     };
 
     window.Harness = {
+        /** An uncaught error (or, for the runner, a console error) matching this is expected. */
+        expect: function (pattern) {
+            expected.push(pattern);
+            window.__expectedErrors = (window.__expectedErrors || []).concat([pattern.source.replace(/\\(.)/g, '$1')]);
+        },
         /** The listeners currently added, {"<target> <type>": count}, those matching a RegExp only when given. */
         listeners: function (match) {
             var out = {};
@@ -57,9 +65,29 @@
         done: function () {
             if (errors.length) lines.push('FAIL errors: ' + errors.join(' | '));
             if (!lines.length) lines.push('FAIL no checks');
-            document.getElementById('result').textContent = lines.join('\n');
+            // A page the navigation replaced whole (its rescue of a failed request) lost the element.
+            var result = document.getElementById('result');
+            if (!result) {
+                result = document.createElement('pre');
+                result.id = 'result';
+                document.body.appendChild(result);
+            }
+            result.textContent = lines.join('\n');
         },
         after: function (ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); },
+        /** Wait until fn() is truthy, ms at most (2000): what it gave last. For what takes a few frames, however slow they come. */
+        until: function (fn, ms) {
+            var end = performance.now() + (ms === undefined ? 2000 : ms);
+            return new Promise(function (resolve) {
+                (function poll() {
+                    var value;
+                    try { value = fn(); } catch (e) { value = false; }
+                    if (value || performance.now() > end) return resolve(value);
+                    requestAnimationFrame(function () {});
+                    setTimeout(poll, 15);
+                })();
+            });
+        },
         frame: function () { return new Promise(function (resolve) { requestAnimationFrame(function () { requestAnimationFrame(resolve); }); }); },
         /** A key pressed on the page (on an element when given). */
         key: function (key, init, target) {
@@ -68,7 +96,12 @@
             return event;
         },
         /** The reader's scroll: the window moved as a wheel would, instantly. */
-        scroll: function (top) { window.scrollTo({ top: top, behavior: 'instant' }); },
+        scroll: function (top) {
+            window.scrollTo({ top: top, behavior: 'instant' });
+            // A frame asked for: a headless browser draws none for a scroll that changes no pixel (empty
+            // sections), and the scroll event waits for the next frame.
+            requestAnimationFrame(function () {});
+        },
         near: function (a, b, tolerance) { return Math.abs(a - b) <= (tolerance === undefined ? 4 : tolerance); }
     };
 })();

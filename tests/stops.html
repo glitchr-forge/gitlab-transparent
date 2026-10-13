@@ -42,7 +42,9 @@
         H.check(stops === StickyStops.get(window), 'attached to the window');
         H.check(stops.measure().length === 5, 'five stops measured', stops.measure().length);
 
-        // A rest between a and b, heading down: on to b.
+        // A rest between a and b, heading down: on to b. (The page drawn once first: a headless browser sends
+        // no scroll event before its first frame.)
+        await H.frame();
         H.scroll(top('b') - 300);
         await H.after(SETTLE * 3);
         H.check(H.near(y(), top('b')), 'a rest heading down glides on to the next stop', y() + ' vs ' + top('b'));

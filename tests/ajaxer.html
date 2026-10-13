@@ -89,8 +89,7 @@
         await H.after(400);
         H.check(target.classList.contains('ajaxer-error'), 'a failed call marks the target in error', target.className);
         var status = target.querySelector('.ajaxer-loader .ajaxer-status');
-        // A file:// page has no HTTP status: jQuery answers statusText "error", shown as "Unexpected error".
-        H.check(status && /Unexpected error/.test(status.textContent), 'the status is shown in the loader', status && status.textContent);
+        H.check(status && /404 Error/.test(status.textContent), 'the status is shown in the loader', status && status.textContent);
         H.done();
     })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
 </script>
