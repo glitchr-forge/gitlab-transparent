@@ -28,6 +28,11 @@ brings in nothing else.
 <div id="site" class="sticky-stop" data-sticky-band-up="90" data-sticky-band-down="280"></div>
 ```
 
+A stop rests where the browser would put an anchor: below the scroller's
+`scroll-padding-top` (`-left` for a row) plus the stop's own `scroll-margin-top`
+(`-left`), the two added. A section with `scroll-margin-top: 4rem` under a
+header of that height rests under it, as a link to its id does.
+
 Each stop has a band above and below it, in px (`rem` and `em` work too).
 Once a scroll comes to rest - trackpad momentum included:
 

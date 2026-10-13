@@ -114,15 +114,16 @@
 
     // ── Scrollers ────────────────────────────────────────────────────────
     /** Whether ONE node scrolls (content larger than its box, and overflow that
-     *  scrolls - or the <html> element, which always may). The cheap layout
+     *  scrolls (scroll or auto) - or the <html> element, which always may). The cheap layout
      *  comparison first: getComputedStyle, the expensive half, is only reached
      *  for the few elements that could qualify. */
     Flow.isScrollableNode = function (node) {
         if (node === window || node === document) node = document.documentElement;
         if (!node || node.nodeType !== 1) return false;
         var isDom = node === document.documentElement;
-        if (node.scrollWidth > node.clientWidth && (isDom || getComputedStyle(node).overflowX.indexOf('scroll') !== -1)) return true;
-        if (node.scrollHeight > node.clientHeight && (isDom || getComputedStyle(node).overflowY.indexOf('scroll') !== -1)) return true;
+        var scrolls = function (overflow) { return overflow.indexOf('scroll') !== -1 || overflow.indexOf('auto') !== -1; };
+        if (node.scrollWidth > node.clientWidth && (isDom || scrolls(getComputedStyle(node).overflowX))) return true;
+        if (node.scrollHeight > node.clientHeight && (isDom || scrolls(getComputedStyle(node).overflowY))) return true;
         return false;
     };
 
@@ -138,12 +139,14 @@
 
     /** The window for the document, <html> or <body> (or nothing); the element otherwise. */
     Flow.normalize = function (scroller) {
+        if (scroller && scroller.jquery) scroller = scroller[0];
         if (!scroller || scroller === document || scroller === document.documentElement || scroller === document.body) return window;
         return scroller;
     };
 
     /** The element to read scrollTop from and to scroll: <html> for the window. */
     Flow.element = function (scroller) {
+        if (scroller && scroller.jquery) scroller = scroller[0];
         return scroller === window || scroller === document || !scroller ? document.documentElement : scroller;
     };
 

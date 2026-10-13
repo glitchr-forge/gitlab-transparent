@@ -402,6 +402,12 @@
         return this.horizontal ? padding.left : padding.top;
     };
 
+    /** A stop's own scroll-margin-top (-left): the browser adds it to the scroller's padding for an anchor, and so do the stops. */
+    Stops.prototype.margin = function (el) {
+        var value = Flow.parseToPixel(getComputedStyle(el)['scroll-margin-' + (this.horizontal ? 'left' : 'top')] || 0, el);
+        return isNaN(value) ? 0 : value;
+    };
+
     /** An element's near edge (top, or left) on screen, and its size along the axis. */
     Stops.prototype.edge = function (el) {
         var rect = el.getBoundingClientRect();
@@ -412,10 +418,10 @@
         return this.horizontal ? rect.width : rect.height;
     };
 
-    /** A stop's scroll position: where it is on screen now, not its layout box. */
+    /** A stop's scroll position: where it is on screen now, not its layout box, less the scroller's scroll-padding and the stop's scroll-margin. */
     Stops.prototype.position = function (el) {
         var origin = this.isWindow ? 0 : this.edge(this.scroller);
-        return this.edge(el) - origin + this.top() - this.padding();
+        return this.edge(el) - origin + this.top() - this.padding() - this.margin(el);
     };
 
     /**
@@ -457,7 +463,7 @@
                 top: top,
                 // Where its bottom meets the bottom of the screen: the end of
                 // its free reading. The top itself for a stop the screen holds.
-                end: Math.min(Math.max(top, Math.round(position + this.padding() + this.size(el) - this.viewport())), max),
+                end: Math.min(Math.max(top, Math.round(position + this.padding() + this.margin(el) + this.size(el) - this.viewport())), max),
                 bandUp: Math.max(0, toPixels(el.dataset.stickyBandUp, el, options.bandUp)),
                 bandDown: Math.max(0, toPixels(el.dataset.stickyBandDown, el, options.bandDown))
             });

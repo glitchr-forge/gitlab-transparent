@@ -1434,7 +1434,7 @@
                         }, debounceTime));
                     });
 
-                }, 1000*Sticky.parseDuration(Sticky.get("swipehint_delay") + 1));
+                }, 1000*Sticky.parseDuration(Sticky.get("swipehint_delay")) + 1);
             }
 
             // Sticky magnet control
@@ -1500,7 +1500,7 @@
 
                         $(scroller).data("autoscroll-prevent", false);
                         // The reader taking over gives the scroll back (the core's one listener per scroller).
-                        Flow.onInterrupt(scroller, Flow.release);
+                        Flow.onInterrupt(container, Flow.release);
 
                         var autoscrollTimeout = undefined;
                         var payloadAutoscroll = function() {
@@ -1564,7 +1564,7 @@
                                 top:scrollHeight,
                                 duration:reverseDuration,
                                 speed:reverseSpeed
-                            }, payloadAutoscroll, scroller), 1000*Sticky.parseDuration(reverseDelay + 1));
+                            }, payloadAutoscroll, scroller), 1000*Sticky.parseDuration(reverseDelay) + 1);
 
                         } else payloadAutoscroll();
                     }

@@ -107,6 +107,16 @@
         H.check(document.documentElement.style.getPropertyValue('--sticky-stop') === '0', 'progress written to --sticky-stop', document.documentElement.style.getPropertyValue('--sticky-stop'));
         H.check(stopped.length >= 8, 'sticky:stop announced each glide', stopped.join(', '));
 
+        // scroll-margin-top of a stop is added to the scroller's scroll-padding, as the browser does for an anchor.
+        var d = document.getElementById('d');
+        var plain = stops.measure().filter(function (s) { return s.element === d; })[0].top;
+        d.style.scrollMarginTop = '30px';
+        document.documentElement.style.scrollPaddingTop = '10px';
+        var shifted = stops.measure().filter(function (s) { return s.element === d; })[0].top;
+        H.check(plain === top('d') && shifted === top('d') - 40, 'a stop rests under the scroller\'s padding and its own scroll-margin-top', plain + ' -> ' + shifted);
+        d.style.scrollMarginTop = '';
+        document.documentElement.style.scrollPaddingTop = '';
+
         // One listener of each kind, through the core.
         var l = H.listeners(/^window (scroll|wheel|touchstart|mousedown|resize|keydown)$/);
         H.check(l['window scroll'] === 1 && l['window keydown'] === 1 && l['window wheel'] === 1, 'one native listener per kind on the window', JSON.stringify(l));

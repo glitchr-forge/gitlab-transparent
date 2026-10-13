@@ -1,0 +1,102 @@
+<!doctype html>
+<!--
+  Sticky's effects, each initialised with every option on and none of the page's other elements to
+  lean on: an element of each class the module reads (.sticky-autoscroll, -bottom, -widget, -easein
+  and -easeout, -headlines-skip, the magnet buttons, -prevent-scroll, -scrollpercent-from-N, -swipe,
+  -swipehint) is on the page, and the page scrolled through; the verdict is that no error was raised
+  (tests/harness.js collects them, tests/run.mjs the console's) and that what is observable happened.
+  The autoscroll is checked end to end: it scrolls by itself, stops when the reader takes the scroll
+  (a wheel), and takes up again once the pointer has left. Opened by tests/run.mjs in a headless
+  browser; the page writes its verdict in #result.
+-->
+<html>
+<head>
+<meta charset="utf-8"><title>sticky effects</title>
+<style>
+    html { scroll-behavior: auto; scroll-padding-top: 0; }
+    body { margin: 0; }
+    section { height: 100vh; }
+    #box { height: 300px; width: 400px; overflow: auto; }
+    #box > div { height: 3000px; }
+    #hint { width: 200px; overflow: auto; white-space: nowrap; }
+    #hint > div { width: 900px; }
+    #widget, #bottom { position: sticky; top: 0; height: 30px; background: #ddd; }
+    #result { position: fixed; bottom: 0; left: 0; margin: 0; }
+</style>
+</head>
+<body>
+<div id="box" class="sticky-autoscroll" data-autoscroll-delay="50ms" data-autoscroll-minheight="10" data-autoscroll-speed="4000"><div></div></div>
+<div id="widget" class="sticky sticky-widget"></div>
+<div id="bottom" class="sticky sticky-bottom"></div>
+<div class="sticky-swipehint-container"><div id="hint" class="sticky-swipehint"><div></div></div></div>
+<div id="swipe" class="sticky-swipe">swipe</div>
+<div id="prevent" class="sticky-prevent-scroll"></div>
+<button id="mfirst" class="sticky-magnet-first">first</button>
+<button id="mprev" class="sticky-magnet-prev">prev</button>
+<button id="mnext" class="sticky-magnet-next">next</button>
+<button id="mlast" class="sticky-magnet-last">last</button>
+<section id="one" class="sticky-headlines sticky-magnet">One</section>
+<section id="skip" class="sticky-headlines sticky-headlines-skip">Skipped</section>
+<section id="two" class="sticky-headlines sticky-magnet">Two <div id="in" class="sticky sticky-easein" data-sticky-easein="0" style="height: 40px">in</div> <div id="out" class="sticky sticky-easeout" data-sticky-easeout="0" style="height: 40px">out</div></section>
+<section id="three" class="sticky-headlines sticky-magnet"></section>
+<pre id="result">pending</pre>
+<script src="jquery.js"></script>
+<script src="harness.js"></script>
+<script src="../src/js/core.js"></script>
+<script src="../src/js/sticky.js"></script>
+<script>
+    (async function () {
+        var H = Harness;
+        var box = document.getElementById('box');
+        var $box = $(box);
+        var percent = [];
+        document.documentElement.classList.add('sticky-scrollpercent-from-10');
+        window.addEventListener('scrollpercent', function (e) { percent.push(e.detail.trigger); });
+        var swiped = [];
+        document.getElementById('swipe').addEventListener('sticky.swipe_left', function () { swiped.push('left'); });
+
+        Sticky.ready({ autoscroll: true, scrollsnap: true, swipe: true, swipehint: true, swipehint_delay: '10ms' });
+        await H.after(30); // onLoad binds a tick after DOMContentLoaded
+
+        // The autoscroll: by itself, and giving the scroll back to the reader.
+        await H.after(250);
+        var moved = box.scrollTop;
+        H.check(moved > 0, 'a .sticky-autoscroll element scrolls by itself', moved);
+        H.check(H.listeners(/^div#box (wheel|touchstart|mousedown)$/)['div#box wheel'] === 1, 'one interrupt listener per autoscroll element', JSON.stringify(H.listeners(/^div#box/)));
+        box.dispatchEvent(new WheelEvent('wheel', { deltaY: 10, bubbles: true }));
+        await H.frame();
+        var held = box.scrollTop;
+        await H.after(200);
+        H.check($box.prop('user-scroll') === true && box.scrollTop === held, 'the autoscroll stops when the reader takes the scroll', held + ' -> ' + box.scrollTop);
+        $box.trigger('mouseleave');
+        await H.after(400);
+        H.check(box.scrollTop !== held, 'and takes up again once the pointer has left', held + ' -> ' + box.scrollTop);
+
+        // The page scrolled through: every other effect runs on each scroll.
+        var vh = window.innerHeight;
+        var offset = function (id) { return Math.round(document.getElementById(id).getBoundingClientRect().top + window.scrollY); };
+        for (var y = 0; y <= offset('three') + vh; y += Math.round(vh / 3)) {
+            H.scroll(y);
+            await H.frame();
+        }
+        H.scroll(offset('two') + 10);
+        await H.frame();
+        H.check(document.getElementById('two').classList.contains('highlight') && !document.getElementById('skip').classList.contains('highlight'), '.sticky-headlines-skip leaves the headline to the next', document.querySelector('.highlight') && document.querySelector('.highlight').id);
+        H.check(document.getElementById('in').classList.contains('show'), '.sticky-easein shows the block as it comes', document.getElementById('in').className);
+        H.scroll(offset('three') + 10);
+        await H.frame();
+        H.check(percent.length > 0, '.sticky-scrollpercent-from-N dispatches scrollpercent', percent.join(','));
+
+        // The hint, the swipe, the magnets and the rest: initialised, no error (the harness would have them).
+        H.check(document.getElementById('hint').classList.contains('sticky-swipehint-reveal'), '.sticky-swipehint is revealed', document.getElementById('hint').className);
+        document.getElementById('mnext').click();
+        document.getElementById('mprev').click();
+        document.getElementById('mlast').click();
+        document.getElementById('mfirst').click();
+        await H.after(300);
+        H.check(true, '.sticky-swipe, .sticky-widget, .sticky-bottom, .sticky-easeout, .sticky-prevent-scroll and the magnet controls initialise without an error');
+        H.done();
+    })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
+</script>
+</body>
+</html>
