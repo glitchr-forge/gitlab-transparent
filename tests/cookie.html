@@ -1,0 +1,207 @@
+<!doctype html>
+<!--
+  Cookie without its banner: what @glitchr/cookie 1.0.53 did is still done under the same names
+  (groups, their consents in localStorage, the cookies GROUP/NAME, the events - heard by jQuery
+  too); the categories a site declares, their states and their defaults; what is stored, by its
+  declaration - nothing read or written under a category that is not granted, said in debug, and
+  everything erased at a refusal; the features that start at the grant and stop at the withdrawal;
+  the page's inert elements (a script, a template, a frame, a placeholder); the record of the
+  answer (a cookie with the attributes asked for, localStorage, a store of the site's own); an
+  answer @glitchr/cookie kept, taken over; a group that is a category. Opened by tests/run.mjs in
+  a headless browser; the page writes its verdict in #result.
+-->
+<html>
+<head><meta charset="utf-8"><title>cookie</title></head>
+<body>
+<div id="inert"></div>
+<template id="inert-source">
+    <script type="text/plain" data-cookie-category="analytics" data-kept="yes">window.__ran = (window.__ran || 0) + 1;</script>
+    <template data-cookie-category="analytics"><p id="from-template">here</p></template>
+    <iframe id="frame" data-cookie-category="analytics" data-cookie-src="/tests/site.css"></iframe>
+    <p id="holder" data-cookie-placeholder="analytics">meanwhile</p>
+</template>
+<pre id="result">pending</pre>
+<script src="jquery.js"></script>
+<script src="harness.js"></script>
+<script src="../src/js/core.js"></script>
+<script src="../src/js/cookie.js"></script>
+<script>
+    (async function () {
+        var H = Harness;
+        var $id = function (id) { return document.getElementById(id); };
+        var has = function (name) { return document.cookie.split('; ').some(function (pair) { return pair.split('=')[0] === name; }); };
+        // As a first visit: nothing configured, nothing kept (the cookies of 127.0.0.1 are shared by the pages of a run).
+        function wipe() {
+            Cookie.destroy();
+            document.cookie.split(';').forEach(function (pair) { var name = pair.trim().split('=')[0]; if (name) document.cookie = name + '=; max-age=0; path=/'; });
+            localStorage.clear();
+            sessionStorage.clear();
+        }
+        var categories = function () {
+            return {
+                necessary: { label: 'Needed', required: true, storage: [{ name: 'SID', duration: 'session', purpose: 'the session' }] },
+                preferences: { label: 'Preferences', default: true, storage: [{ name: 'USER/*', duration: '30d' }, { type: 'local', name: 'theme' }] },
+                analytics: { label: 'Audience', storage: [{ name: '_pk_*', duration: '13mo' }, { name: 'VISITOR_ID', duration: '1y' }, { type: 'local', name: 'stats*' }, { type: 'session', name: 'visit' }] },
+                location: { label: 'Position', storage: [{ type: 'session', name: 'position' }] }
+            };
+        };
+        wipe();
+
+        // ── @glitchr/cookie ─────────────────────────────────────────────────
+        H.check(Flow.cookie === Cookie && Cookie.version === Flow.version, 'Cookie is the core\'s cookie module');
+        var heard = [];
+        var byJquery = [];
+        ['cookie:ready', 'cookie:confirm', 'cookie:deny', 'cookie:consent', 'cookie:grant', 'cookie:revoke'].forEach(function (type) {
+            window.addEventListener(type, function (e) { heard.push(type); if (type === 'cookie:consent') heard.last = e.detail; });
+        });
+        $(window).on('cookie:deny cookie:confirm', function (e) { byJquery.push(e.type); });
+        var confirmed = 0, denied = 0;
+        Cookie.onConfirm(function () { confirmed++; }).onDeny(function () { denied++; });
+
+        Cookie.ready();
+        H.check(heard.indexOf('cookie:ready') !== -1 && heard.indexOf('cookie:deny') !== -1 && denied === 1 && byJquery.join() === 'cookie:deny', 'ready() without a group: cookie:ready, then cookie:deny - jQuery hears it too', heard.join(' ') + ' / ' + byJquery.join());
+        H.check(Cookie.banner() === null && Cookie.pending() === false, 'and no banner: nothing was declared');
+
+        Cookie.set('user', 'info', { zone: 'Europe/Paris' }, 3600);
+        H.check(has('USER/INFO') && Cookie.get('user', 'info') === '{"zone":"Europe/Paris"}', 'Cookie.set() writes GROUP/NAME, Cookie.get() reads it', document.cookie);
+        Cookie.setConsent(false, 'USER');
+        H.check(localStorage.getItem('cookie/USER') === 'false' && Cookie.checkConsent('USER') === false && !has('USER/INFO'), 'setConsent(false) is kept in localStorage cookie/USER and deletes the group\'s cookies', localStorage.getItem('cookie/USER') + ' ' + document.cookie);
+        Cookie.set('USER', 'INFO', 'x', 3600);
+        H.check(!has('USER/INFO'), 'a refused group is not written');
+        Cookie.setConsent(true, 'USER');
+        Cookie.set('USER', 'INFO', 'x', 3600);
+        H.check(has('USER/INFO') && Cookie.checkConsent('USER') === true && confirmed >= 1 && byJquery.indexOf('cookie:confirm') !== -1, 'accepted again, it is - and cookie:confirm was heard');
+        H.check(Cookie.getConsents().join() === 'cookie/USER' && Cookie.hasConsents() === 1 && Cookie.hasConsents('USER') === 1 && Cookie.checkConsent('OTHER') === null, 'getConsents(), hasConsents(), an unknown group is null');
+        Cookie.delete('USER');
+        H.check(!has('USER/INFO'), 'Cookie.delete() deletes the group\'s cookies');
+        Cookie.setOption('colour', 'red').addOption('list', 'a').addOption('list', 'b').addOption('list', 'a');
+        H.check(Cookie.getOption('colour') === 'red' && Cookie.getOption('list').join() === 'a,b' && Cookie.removeOption('list', 'a').join() === 'b' && Cookie.getOption('none') === null, 'the options: set, add, remove, get');
+        H.check(Cookie.seconds('30d') === 2592000 && Cookie.seconds('12h') === 43200 && Cookie.seconds('1y') === 31536000 && Cookie.seconds('250ms') === 0.25 && Cookie.seconds(90) === 90 && Cookie.seconds('session') === null && Cookie.seconds('13mo') === 13 * 2592000, 'a duration: seconds, or what its unit says (the core\'s for s and ms)');
+
+        // ── Categories ──────────────────────────────────────────────────────
+        wipe();
+        $id('inert').innerHTML = $id('inert-source').innerHTML;
+        var said = [];
+        var log = console.log;
+        console.log = function () { said.push(Array.prototype.join.call(arguments, ' ')); };
+        Cookie.ready({ debug: true, autoOpen: false, version: '1', categories: categories() });
+        H.check(Cookie.categories().map(function (c) { return c.key; }).join() === 'necessary,preferences,analytics,location', 'the categories the site declared, in order');
+        H.check(Cookie.state('necessary') === true && Cookie.state('preferences') === null && Cookie.granted('preferences') === true && Cookie.state('analytics') === null && Cookie.granted('analytics') === false && Cookie.granted('ANALYTICS') === false,
+            'before an answer: a required one is granted, the others follow their default');
+        H.check(Cookie.pending() === true && Cookie.answered() === false && Cookie.banner() === null, 'an answer is wanted (autoOpen: false - no banner)');
+        var one = Cookie.category('analytics');
+        H.check(one.label === 'Audience' && one.storage.length === 4 && one.storage[1].duration === '1y' && one.granted === false && one.state === null, 'a category says what it stores', JSON.stringify(one.storage));
+
+        // ── What is stored ──────────────────────────────────────────────────
+        said.length = 0;
+        H.check(Cookie.cookies.set('VISITOR_ID', 'abc') === false && !has('VISITOR_ID') && Cookie.local.set('stats.day', 1) === false && localStorage.getItem('stats.day') === null && Cookie.session.set('visit', 1) === false,
+            'under a category that is not granted, nothing is written');
+        H.check(said.some(function (line) { return /write cookie VISITOR_ID/.test(line) && /analytics/.test(line); }), 'and debug says which entry, which category', said.join(' | '));
+        document.cookie = 'VISITOR_ID=direct; path=/';
+        H.check(Cookie.cookies.get('VISITOR_ID') === null, 'nor read');
+        H.check(Cookie.local.set('theme', 'dark') === true && Cookie.local.get('theme') === 'dark' && Cookie.cookies.set('USER/ZONE', 'Asia/Tokyo') === true && Cookie.cookies.get('USER/ZONE') === 'Asia/Tokyo',
+            'under a granted one (on by default), it is - by name and by pattern');
+        said.length = 0;
+        H.check(Cookie.local.set('unknown', 1) === false && localStorage.getItem('unknown') === null && said.some(function (line) { return /not declared/.test(line); }), 'an entry nobody declared is refused');
+        Cookie.configure({ undeclared: 'allow' });
+        H.check(Cookie.local.set('unknown', 1) === true && localStorage.getItem('unknown') === '1', 'unless undeclared: "allow"');
+        Cookie.configure({ undeclared: 'deny' });
+
+        // ── Features ────────────────────────────────────────────────────────
+        var started = 0, stopped = 0;
+        var on = Cookie.use('analytics', function () { started++; }, function () { stopped++; });
+        H.check(on === false && started === 0 && stopped === 0 && window.__ran === undefined, 'a feature of a category not granted waits');
+        H.check($id('from-template') === null && !$id('frame').hasAttribute('src') && $id('holder').hidden === false, 'and so do the page\'s inert elements: the script, the template, the frame - the placeholder shows');
+
+        heard.length = 0;
+        Cookie.grant('analytics');
+        H.check(started === 1 && stopped === 0 && Cookie.state('analytics') === true, 'granted: the feature starts');
+        H.check(heard.indexOf('cookie:grant') !== -1 && heard.indexOf('cookie:consent') !== -1 && heard.last.granted.join() === 'analytics' && heard.last.categories.analytics === true && heard.last.source === 'api' && heard.last.pending === true,
+            'cookie:grant, then cookie:consent with the categories', JSON.stringify(heard.last));
+        await H.after(50);
+        H.check(window.__ran === 1 && document.querySelector('#inert script[data-kept="yes"]').type !== 'text/plain', 'the inert script ran, once, its attributes kept', window.__ran);
+        H.check($id('from-template') !== null && /site\.css$/.test($id('frame').getAttribute('src') || '') && $id('holder').hidden === true, 'the template is in the page, the frame has its src, the placeholder is hidden');
+        Cookie.scan();
+        Cookie.grant('analytics');
+        await H.after(30);
+        H.check(window.__ran === 1 && document.querySelectorAll('#from-template').length === 1 && started === 1, 'granted again: nothing runs twice');
+        H.check(Cookie.use('analytics', function () { started += 10; }) === true && started === 11, 'a feature registered under a granted category starts at once');
+
+        H.check(Cookie.cookies.set('VISITOR_ID', 'abc') === true && Cookie.cookies.get('VISITOR_ID') === 'abc', 'and its entries are written and read');
+        var kept = await cookieStore.get('VISITOR_ID');
+        H.check(kept && kept.sameSite === 'lax' && kept.path === '/' && Math.abs(kept.expires - Date.now() - 31536000000) < 60000, 'a cookie lasts what its declaration says (1y), with the attributes of `cookie`', kept && (kept.sameSite + ' ' + (kept.expires - Date.now())));
+        document.cookie = '_pk_id.1=x; path=/';
+        Cookie.local.set('stats.day', { n: 3 });
+        Cookie.session.set('visit', 'now');
+        Cookie.set('analytics', 'id', 7, 3600);
+        H.check(has('_pk_id.1') && localStorage.getItem('stats.day') === '{"n":3}' && sessionStorage.getItem('visit') === 'now' && has('ANALYTICS/ID') && Cookie.get('ANALYTICS', 'ID') === '7', 'a cookie of a third party, localStorage, sessionStorage, a cookie written the old way under the category\'s name');
+        H.check(localStorage.getItem('cookie/ANALYTICS') === 'true' && Cookie.checkConsent('ANALYTICS') === true, '@glitchr/cookie\'s key is kept in step');
+
+        heard.length = 0;
+        Cookie.revoke('analytics');
+        H.check(stopped === 1 && heard.indexOf('cookie:revoke') !== -1 && heard.last.revoked.join() === 'analytics', 'withdrawn: the feature stops, cookie:revoke');
+        H.check(!has('VISITOR_ID') && !has('_pk_id.1') && localStorage.getItem('stats.day') === null && sessionStorage.getItem('visit') === null && !has('ANALYTICS/ID'), 'and everything the category declared is erased', document.cookie + ' ' + JSON.stringify(localStorage));
+        H.check(has('USER/ZONE') && localStorage.getItem('theme') === 'dark', 'what another category keeps is left');
+        H.check($id('from-template') === null && !$id('frame').hasAttribute('src') && $id('holder').hidden === false, 'the template\'s content is taken out, the frame emptied, the placeholder back');
+        Cookie.set('ANALYTICS', 'ID', 7, 3600);
+        H.check(!has('ANALYTICS/ID') && Cookie.cookies.set('VISITOR_ID', 'abc') === false && localStorage.getItem('cookie/ANALYTICS') === 'false', 'and nothing of it is written again');
+
+        // A group that is a category; a cookie written the old way that another category declares.
+        Cookie.setConsent(true, 'ANALYTICS');
+        H.check(Cookie.state('analytics') === true && started === 22, 'setConsent() on a category\'s name answers for the category', started);
+        Cookie.set('USER', 'TZ', 'x', 60);
+        H.check(has('USER/TZ'), 'USER/TZ, declared by "preferences" (USER/*), is written while it is granted');
+        Cookie.revoke('preferences');
+        Cookie.set('USER', 'TZ', 'x', 60);
+        H.check(!has('USER/TZ') && !has('USER/ZONE') && localStorage.getItem('theme') === null && Cookie.get('USER', 'TZ') === null, 'and erased, and refused, once it is not');
+        console.log = log;
+
+        // ── The record ──────────────────────────────────────────────────────
+        var record = JSON.parse(decodeURIComponent(document.cookie.split('; ').filter(function (pair) { return pair.indexOf('cookie-consent=') === 0; })[0].split('=')[1]));
+        H.check(record.v === '1' && record.c.ANALYTICS === 1 && record.c.PREFERENCES === 0 && record.t > 0, 'the answer is a cookie: version, date, one yes or no per category', JSON.stringify(record));
+        kept = await cookieStore.get('cookie-consent');
+        H.check(kept.sameSite === 'lax' && kept.path === '/' && Math.abs(kept.expires - Date.now() - 180 * 86400000) < 60000, 'kept 180 days, SameSite=Lax, on /');
+
+        wipe();
+        Cookie.ready({ autoOpen: false, categories: categories(), record: { name: 'my-choice', lifetime: '30d', sameSite: 'Strict', path: '/tests' } });
+        Cookie.accept();
+        kept = await cookieStore.get('my-choice');
+        H.check(kept && kept.sameSite === 'strict' && kept.path === '/tests' && Math.abs(kept.expires - Date.now() - 30 * 86400000) < 60000 && !has('cookie-consent'), 'its name, its duration, its SameSite and its path are the site\'s', kept && JSON.stringify([kept.sameSite, kept.path]));
+        H.check(Cookie.pending() === false && Cookie.answered() === true && Cookie.granted('location') === true, 'accept(): every category on');
+        Cookie.forget();
+        H.check(!has('my-choice') && Cookie.pending() === true && Cookie.granted('location') === false, 'forget(): the answer is erased, the categories back to their default');
+
+        wipe();
+        Cookie.ready({ autoOpen: false, categories: categories(), record: { store: 'local', name: 'choice' } });
+        Cookie.refuse();
+        H.check(JSON.parse(localStorage.getItem('choice')).c.PREFERENCES === 0 && !has('cookie-consent') && Cookie.granted('preferences') === false && Cookie.granted('necessary') === true, 'kept in localStorage instead; refuse(): every category off but the required one');
+
+        wipe();
+        var own = null;
+        Cookie.ready({ autoOpen: false, legacy: false, categories: categories(), record: { store: { read: function () { return own; }, write: function (text) { own = text; }, clear: function () { own = null; } } } });
+        Cookie.save({ analytics: true, location: false, preferences: true });
+        H.check(own !== null && JSON.parse(own).c.ANALYTICS === 1 && !has('cookie-consent') && localStorage.getItem('cookie/ANALYTICS') === null && Cookie.pending() === false, 'or in a store of the site\'s own - and without @glitchr/cookie\'s keys when legacy is false');
+
+        // ── An answer @glitchr/cookie kept ──────────────────────────────────
+        wipe();
+        localStorage.setItem('cookie/PREFERENCES', 'true');
+        localStorage.setItem('cookie/ANALYTICS', 'false');
+        localStorage.setItem('cookie/LOCATION', 'true');
+        Cookie.ready({ autoOpen: false, categories: categories() });
+        H.check(Cookie.state('analytics') === false && Cookie.state('location') === true && Cookie.pending() === false && has('cookie-consent'), 'the answers found in localStorage cookie/<KEY> are taken over: the visitor is not asked again');
+
+        // ── On demand ───────────────────────────────────────────────────────
+        var shown = 0;
+        H.check(Cookie.use('captcha', { label: 'Captcha', description: 'A puzzle', erase: ['_grecaptcha'] }, function () { shown++; }) === false && Cookie.pending() === false, 'a script declares a category of its own (Consent.use\'s shape): off, listed, and no reason to ask again');
+        one = Cookie.category('captcha');
+        H.check(one && one.label === 'Captcha' && one.onDemand === true && one.storage[0].name === '_grecaptcha*' && Cookie.categories().length === 5, 'with its words and what to erase', JSON.stringify(one));
+        Cookie.use('captcha', { label: 'Other words' }, function () {});
+        H.check(Cookie.category('captcha').label === 'Captcha', 'the words it has are not replaced by a later script');
+        Cookie.grant('captcha');
+        H.check(shown === 1, 'granted, it starts');
+        wipe();
+        H.done();
+    })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
+</script>
+</body>
+</html>

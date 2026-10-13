@@ -1,0 +1,39 @@
+// The cookie banner, at its barest: where it sits for each position, what is
+// hidden, the row of a category - and nothing a site cannot change through the
+// --cookie-* properties (or by not importing this file at all: no entry does).
+[data-cookie-banner] {
+    position: fixed;
+    z-index: var(--cookie-z-index, 1000);
+    inset: auto var(--cookie-gap, 1rem) var(--cookie-gap, 1rem) auto;
+    box-sizing: border-box;
+    width: min(var(--cookie-width, 24rem), calc(100vw - 2 * var(--cookie-gap, 1rem)));
+    max-height: calc(100vh - 2 * var(--cookie-gap, 1rem));
+    overflow: auto;
+    padding: var(--cookie-padding, 1rem);
+    color: var(--cookie-ink, inherit);
+    background: var(--cookie-bg, Canvas);
+    border: var(--cookie-border, 1px solid currentColor);
+    border-radius: var(--cookie-radius, 0);
+    box-shadow: var(--cookie-shadow, none);
+    font: var(--cookie-font, inherit);
+    transition: var(--cookie-transition, opacity .2s);
+
+    &[hidden], [hidden] { display: none; }
+
+    &[data-cookie-position^="top"] { inset-block: var(--cookie-gap, 1rem) auto; }
+    &[data-cookie-position$="left"] { inset-inline: var(--cookie-gap, 1rem) auto; }
+    &[data-cookie-position$="center"], &[data-cookie-position="top"], &[data-cookie-position="bottom"] { inset-inline: 0; margin-inline: auto; }
+    &[data-cookie-position="center"] { inset-block: 0; margin-block: auto; height: fit-content; }
+
+    &.is-reduced, &.is-reduced * { transition: none; animation: none; }
+
+    [data-cookie-categories] { list-style: none; margin: 0; padding: 0; }
+    [data-cookie-row] { margin-block: var(--cookie-row-gap, .75rem); }
+    [data-cookie-toggle] { accent-color: var(--cookie-accent, auto); margin-inline-end: .5em; }
+    [data-cookie-entries], [data-cookie-features] { margin: .25em 0 0; padding-inline-start: 1.25em; font-size: var(--cookie-small, .85em); }
+    [data-cookie-entry] > span + span::before { content: var(--cookie-separator, " - "); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    [data-cookie-banner], [data-cookie-banner] * { transition: none; animation: none; }
+}

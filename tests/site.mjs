@@ -13,6 +13,8 @@ const pages = {
             <a id="to-two-deep" href="/site/page/two#deep">two, deep</a>
             <a id="to-long" href="/site/page/long">long</a>
             <a id="to-built" href="/site/page/built">built</a>
+            <a id="to-waiting" href="/site/page/waiting">waiting</a>
+            <a id="to-own" href="/site/page/own">own</a>
             <a id="to-slow" href="/site/slow?ms=400">slow</a>
             <a id="to-styled" href="/site/page/styled">styled</a>
             <a id="to-error" href="/site/error">error</a>
@@ -47,6 +49,14 @@ const pages = {
     // headline with a block that fades in, under a header that hides.
     perf: () => `<header id="top" class="sticky sticky-top"><a id="to-perf" href="/site/page/perf?n=${Date.now()}${Math.random()}">again</a></header>` + Array.from({ length: 40 }, (_, i) =>
         `<section id="p${i + 1}" class="block sticky-stop sticky-headlines"><h2>p${i + 1}</h2><div class="sticky sticky-easein" data-sticky-easein="0">block</div><p><a href="#p${(i + 2) % 40 + 1}">on</a></p></section>`).join('\n'),
+    // Pages with what waits for the visitor's consent (the cookie module): a script and a block that are
+    // inert until "analytics" is granted, what is shown meanwhile, and a page that brings a banner of its own.
+    waiting: () => `<h1>Waiting</h1><a id="to-one" href="/site/page/one">one</a><a id="to-own" href="/site/page/own">own</a>
+        <script type="text/plain" data-cookie-category="analytics">window.__inert = (window.__inert || 0) + 1;</script>
+        <template data-cookie-category="analytics"><p id="late">late</p></template>
+        <p id="holder" data-cookie-placeholder="analytics">meanwhile</p>`,
+    own: () => `<h1>Own</h1><a id="to-one" href="/site/page/one">one</a><a id="to-waiting" href="/site/page/waiting">waiting</a>
+        <div id="own-banner" data-cookie-banner hidden><p id="own-words">the site's words</p><button type="button" id="own-accept" data-cookie-accept>yes</button></div>`,
     // A page a script finishes: its row scrolls sideways only a moment after the page is in, each time.
     built: () => `<h1>Built</h1><a id="to-two" href="/site/page/two">two</a>` + Array.from({ length: 8 }, (_, i) =>
         `<section id="b${i + 1}" class="block sticky-stop">b${i + 1}</section>`).join('\n') + `<div id="row" class="row"><div class="wide">wide</div></div>
