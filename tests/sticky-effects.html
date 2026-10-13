@@ -95,6 +95,37 @@
         document.getElementById('mfirst').click();
         await H.after(300);
         H.check(true, '.sticky-swipe, .sticky-widget, .sticky-bottom, .sticky-easeout, .sticky-prevent-scroll and the magnet controls initialise without an error');
+
+        // The magnet controls go where they say: from the first magnet, "next" is the second (up to 1.0.2 every
+        // magnet was read as the window, and the controls went nowhere in particular).
+        await H.after(600);
+        H.scroll(offset('one'));
+        await H.after(600);
+        document.getElementById('mnext').click();
+        await H.after(500);
+        H.check(H.near(window.scrollY, document.getElementById('two').offsetTop, 2), '.sticky-magnet-next scrolls to the next magnet', Math.round(window.scrollY) + ' vs ' + document.getElementById('two').offsetTop);
+        document.getElementById('mlast').click();
+        await H.after(500);
+        H.check(H.near(window.scrollY, document.getElementById('three').offsetTop, 2), '.sticky-magnet-last to the last', Math.round(window.scrollY) + ' vs ' + document.getElementById('three').offsetTop);
+        document.getElementById('mfirst').click();
+        await H.after(500);
+        H.check(H.near(window.scrollY, document.getElementById('one').offsetTop, 2), '.sticky-magnet-first to the first', Math.round(window.scrollY) + ' vs ' + document.getElementById('one').offsetTop);
+
+        // A page loaded again (the navigation dispatches DOMContentLoaded at each swap) binds the autoscroll's
+        // handlers again, not once more: 1.7.0 added a mouseleave handler - and a restart of its own - per load.
+        window.dispatchEvent(new Event('DOMContentLoaded'));
+        window.dispatchEvent(new Event('DOMContentLoaded'));
+        await H.after(30);
+        var events = $._data(box, 'events') || {};
+        var bound = [].concat.apply([], Object.keys(events).map(function (type) { return events[type]; })).filter(function (handler) { return handler.origType === 'mouseleave'; });
+        H.check(bound.length === 1, 'an autoscroll element keeps one mouseleave handler across loads', bound.length);
+
+        // The element gone with the page the navigation swapped out: the core lets go of its listeners
+        // (kept, every page visited stayed in memory through them).
+        box.remove();
+        window.dispatchEvent(new Event('transparent:load'));
+        await H.after(30);
+        H.check(Object.keys(H.listeners(/^div#box (wheel|mousedown)$/)).length === 0, 'an autoscroll element that left the page lets go of the core\'s listeners', JSON.stringify(H.listeners(/^div#box/)));
         H.done();
     })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
 </script>

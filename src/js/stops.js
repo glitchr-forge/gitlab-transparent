@@ -710,6 +710,13 @@
             // a position or going to an anchor, an autoscroll): it rests
             // where the script put it, wherever that falls between the stops.
             this.revealing = now() - this.focusedAt < REVEAL || now() - this.keyedAt < REVEAL || Flow.scripted(this.scroller);
+        } else if (!this.gliding && !this.revealing && Flow.scripted(this.scroller)) {
+            // A script's scroll in the middle of the reader's own (a link
+            // followed while the page still coasts, Back swiped on a
+            // trackpad): the navigation put the page somewhere, and that is
+            // where it rests - the gesture it interrupted is not completed
+            // from there.
+            this.revealing = true;
         }
         this.last = y;
 

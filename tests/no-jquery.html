@@ -1,0 +1,80 @@
+<!doctype html>
+<!--
+  The modules that do without jQuery, on a page that has none: the core, the stops and the sortable
+  load and work (the stops glide, the keyboard sorts, Flow.scrollTo jumps where jQuery would have
+  animated); the ones that need it say so when loaded. Opened by tests/run.mjs in a headless
+  browser; the page writes its verdict in #result.
+-->
+<html>
+<head>
+<meta charset="utf-8"><title>no jQuery</title>
+<style>
+    html { scroll-behavior: auto; }
+    body { margin: 0; }
+    section { height: 100vh; }
+    #result { position: fixed; top: 0; left: 0; margin: 0; }
+</style>
+</head>
+<body>
+<section id="a" class="sticky-stop"><ul id="list"><li data-sortable-item id="i1"><button class="handle">::</button></li><li data-sortable-item id="i2"><button class="handle">::</button></li></ul></section>
+<section id="b" class="sticky-stop"></section>
+<section id="c" class="sticky-stop"></section>
+<pre id="result">pending</pre>
+<script src="harness.js"></script>
+<script src="../src/js/core.js"></script>
+<script src="../src/js/stops.js"></script>
+<script src="../src/js/sortable.js"></script>
+<script>
+    (async function () {
+        var H = Harness;
+        var top = function (id) { return Math.round(document.getElementById(id).getBoundingClientRect().top + window.scrollY); };
+        var y = function () { return Math.round(window.scrollY); };
+
+        await H.after(20); // the document parsed: the stops attach themselves then
+        await H.frame();   // and drawn once: a headless browser sends no scroll event before its first frame
+        H.check(typeof window.jQuery === 'undefined' && Flow.jquery() === null, 'no jQuery on the page');
+        H.check(window.StickyStops && window.StickySortable && Flow.stops === StickyStops, 'the core, the stops and the sortable loaded');
+        H.check(StickyStops.get(window) !== null && StickyStops.get(window).stops.length === 3, 'the stops attached themselves', StickyStops.get(window) && StickyStops.get(window).stops.length);
+
+        StickyStops.attach(window, { smooth: false, settle: 40 });
+        H.scroll(top('b') - 300);
+        await H.after(160);
+        H.check(H.near(y(), top('b')), 'a rest glides to the stop', y() + ' vs ' + top('b'));
+
+        // The core's programmatic scroll without jQuery: at once, the callback called, the scroll a script's.
+        await H.after(300);
+        var called = false;
+        Flow.scrollTo(window, { top: top('b') + 200, duration: '200ms' }, function () { called = true; });
+        H.check(called && y() === top('b') + 200, 'Flow.scrollTo jumps and calls back', y() + ' ' + called);
+        H.check(Flow.userScroll() === true, 'the scroll is the reader\'s again');
+        await H.after(160);
+        H.check(y() === top('b') + 200, 'and rests where it was put', y());
+        H.check(Flow.closestScrollable(document.getElementById('list')) === document.documentElement && Flow.closestScrollable(document.createElement('div')) === undefined, 'the closest scroller of an element, none for one out of the page');
+
+        var changes = 0;
+        var sortable = new StickySortable(document.getElementById('list'), { handle: '.handle', onChange: function () { changes++; } });
+        var handle = document.querySelector('#i2 .handle');
+        handle.focus();
+        H.key('ArrowUp', {}, handle);
+        H.check(document.getElementById('list').firstElementChild.id === 'i2' && changes === 1, 'the sortable sorts');
+
+        // The modules made of jQuery say what they miss.
+        var said = [];
+        var load = function (name) {
+            return new Promise(function (resolve) {
+                var el = document.createElement('script');
+                el.src = '../src/js/' + name + '.js';
+                var heard = function (e) { said.push(String(e.message)); e.preventDefault(); };
+                window.addEventListener('error', heard, true);
+                el.onload = el.onerror = function () { setTimeout(function () { window.removeEventListener('error', heard, true); resolve(); }, 0); };
+                document.head.appendChild(el);
+            });
+        };
+        Harness.expect(/jQuery is needed/);
+        await load('sticky'); await load('transparent'); await load('ajaxer');
+        H.check(said.length === 3 && said.every(function (m) { return /jQuery is needed/.test(m); }), 'sticky, the navigation and ajaxer say they need jQuery', said.join(' | '));
+        H.done();
+    })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
+</script>
+</body>
+</html>

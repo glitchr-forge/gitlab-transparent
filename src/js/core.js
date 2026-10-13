@@ -24,7 +24,7 @@
 
     var document = window.document;
 
-    var Flow = { core: true, version: '1.0.0' };
+    var Flow = { core: true, version: '1.0.3' };
 
     // ── jQuery ───────────────────────────────────────────────────────────
     // A bundler's ProvidePlugin gives the bare `jQuery` identifier; a page
@@ -102,6 +102,7 @@
 
     /** The scroll-padding of an element (the <html> element by default), in px: {top, left, right, bottom}. */
     Flow.scrollPadding = function (el) {
+        el = unwrap(el);
         if (el === window || el === document || !el) el = document.documentElement;
         var style = el instanceof Element ? getComputedStyle(el) : {};
         var dict = {};
@@ -113,26 +114,37 @@
     };
 
     // ── Scrollers ────────────────────────────────────────────────────────
+    // The modules that came from jQuery code still hand jQuery objects around
+    // (Sticky.userScroll(e.target), Sticky.getScrollPadding(scroller)): the
+    // first element of one is what is meant, everywhere an element is taken.
+    function unwrap(el) { return el && el.jquery ? el[0] : el; }
+
+    // An overflow that scrolls: scroll or auto.
+    function scrolls(overflow) { return overflow.indexOf('scroll') !== -1 || overflow.indexOf('auto') !== -1; }
+
     /** Whether ONE node scrolls (content larger than its box, and overflow that
      *  scrolls (scroll or auto) - or the <html> element, which always may). The cheap layout
      *  comparison first: getComputedStyle, the expensive half, is only reached
      *  for the few elements that could qualify. */
     Flow.isScrollableNode = function (node) {
+        node = unwrap(node);
         if (node === window || node === document) node = document.documentElement;
         if (!node || node.nodeType !== 1) return false;
         var isDom = node === document.documentElement;
-        var scrolls = function (overflow) { return overflow.indexOf('scroll') !== -1 || overflow.indexOf('auto') !== -1; };
         if (node.scrollWidth > node.clientWidth && (isDom || scrolls(getComputedStyle(node).overflowX))) return true;
         if (node.scrollHeight > node.clientHeight && (isDom || scrolls(getComputedStyle(node).overflowY))) return true;
         return false;
     };
 
-    /** The element itself if it scrolls, else the closest ancestor that does; the <html> element if it scrolls; undefined otherwise. */
+    /** The element itself if it scrolls, else the closest ancestor that does; the <html> element if it scrolls; undefined
+     *  otherwise - and for an element that is no longer in the page (a node the navigation has just swapped out). */
     Flow.closestScrollable = function (el) {
+        el = unwrap(el);
         var target = el === window || el === document || el === undefined || el === null ? document.documentElement : el;
-        while (target && target !== document.documentElement) {
+        while (target !== document.documentElement) {
             if (Flow.isScrollableNode(target)) return target;
             target = target.parentElement;
+            if (!target) return undefined;
         }
         return Flow.isScrollableNode(document.documentElement) ? document.documentElement : undefined;
     };
@@ -218,6 +230,7 @@
             self.pending = [];
             var last = events[events.length - 1];
             self.fns.slice().forEach(function (fn) { fn.call(target, last, target); });
+            if (self.after) self.after(target);
         };
     }
     Channel.prototype.add = function (fn) {
@@ -247,7 +260,9 @@
 
     /** fn(event, scroller) once per frame in which the scroller scrolled. The window for the page. */
     Flow.onScroll = function (scroller, fn) {
-        channel('scroll', Flow.normalize(scroller), ['scroll'], { passive: true }, true).add(fn);
+        var made = channel('scroll', Flow.normalize(scroller), ['scroll'], { passive: true }, true);
+        made.after = heard;
+        made.add(fn);
         return fn;
     };
     Flow.offScroll = function (scroller, fn) {
@@ -295,6 +310,21 @@
     window.addEventListener('load', pageLoaded);
     window.addEventListener('transparent:load', pageLoaded);
 
+    // A scroller that left the page with the page the navigation swapped out
+    // (an autoscroll block, a scroll-percent list) lets go of its listeners:
+    // kept, each page visited stayed in memory through them.
+    function prune() {
+        ['scroll', 'interrupt'].forEach(function (kind) {
+            channels[kind] = channels[kind].filter(function (made) {
+                var target = made.target;
+                if (target === window || !target || target.isConnected !== false) return true;
+                made.fns.slice().forEach(function (fn) { made.remove(fn); });
+                return false;
+            });
+        });
+    }
+    window.addEventListener('transparent:load', prune);
+
     // ── Programmatic scroll ──────────────────────────────────────────────
     // The modules tell a scroll of their own from the reader's by the
     // "user-scroll" flag on the scroller (false while a script moves it) and
@@ -320,13 +350,30 @@
         var entry = record(el);
         entry.running = running;
         entry.until = Flow.now() + SCRIPTED;
+        // Where the script left the scroller: until it has been heard there
+        // (or has moved from there), a scroll event found at that very place
+        // is the script's, however late it arrives - after a page was swapped
+        // in, the frame that carries it can be more than a moment away.
+        entry.at = running ? null : { top: el.scrollTop, left: el.scrollLeft };
     }
 
-    /** Whether a script is scrolling the scroller, or did within the last moment. */
+    function here(el, at) { return Math.abs(el.scrollTop - at.top) <= 1 && Math.abs(el.scrollLeft - at.left) <= 1; }
+
+    /** Whether a script is scrolling the scroller, did within the last moment, or left it where it still is and has not been heard since. */
     Flow.scripted = function (scroller) {
-        var entry = record(Flow.element(scroller));
-        return !!entry.running || (entry.until !== undefined && Flow.now() < entry.until);
+        var el = Flow.element(scroller);
+        var entry = record(el);
+        if (entry.running) return true;
+        if (entry.until !== undefined && Flow.now() < entry.until) return true;
+        return !!entry.at && here(el, entry.at);
     };
+
+    // Once the scroll listeners have heard a scroller, the place a script
+    // left it at has been told: the next scroll there is the reader's.
+    function heard(scroller) {
+        var entry = record(Flow.element(scroller));
+        if (entry.at && !entry.running && Flow.now() >= entry.until) entry.at = null;
+    }
 
     function prop(el, name, value) {
         var jq = Flow.jquery();
@@ -354,8 +401,8 @@
         var options = { behavior: 'instant' };
         if (top !== undefined && top !== null) options.top = top;
         if (left !== undefined && left !== null) options.left = left;
-        mark(el, false);
         try { target.scrollTo(options); } catch (e) { options.behavior = 'auto'; target.scrollTo(options); }
+        mark(el, false);
     };
 
     /**
@@ -411,9 +458,16 @@
             return;
         }
 
-        jq(el).stop(true).animate({ scrollTop: scrollTop }, durationY, easing, function () {
-            jq(el).stop(true).animate({ scrollLeft: scrollLeft }, durationX, easing, debounce ? Flow.debounce(done, debounce) : done);
-        });
+        // Down the page, then across - each only when there is a way to go:
+        // a scroll that moves along one axis used to wait the other's
+        // duration out, at rest, before calling back.
+        var end = debounce ? Flow.debounce(done, debounce) : done;
+        var across = function () {
+            if (Math.abs(el.scrollLeft - scrollLeft) < 1) return end();
+            jq(el).stop(true).animate({ scrollLeft: scrollLeft }, durationX, easing, end);
+        };
+        if (Math.abs(el.scrollTop - scrollTop) < 1) return across();
+        jq(el).stop(true).animate({ scrollTop: scrollTop }, durationY, easing, across);
     };
 
     // The reader taking over gives the scroll back, on the page and on every
@@ -422,6 +476,11 @@
         var el = Flow.element(scroller);
         var jq = Flow.jquery();
         if (jq) jq(el).stop(true);
+        // The movement stopped where the reader took it: no longer a script's
+        // (left "running", every later scroll of the reader's was taken for
+        // the script's and the stops never settled again).
+        var entry = record(el);
+        if (entry.running) { entry.running = false; entry.until = 0; entry.at = null; }
         prop(el, 'user-scroll', true);
     }
     Flow.release = release;
@@ -506,19 +565,19 @@
 
         $.fn.isScrollableX = function () {
             return this.map(function () {
-                var el = this === window ? document.documentElement : this;
+                var el = this === window || this === document ? document.documentElement : this;
                 if (!(el.scrollWidth > el.clientWidth)) return false;
                 if (el === document.documentElement) return true;
-                return getComputedStyle(el).overflowX.indexOf('scroll') !== -1;
+                return scrolls(getComputedStyle(el).overflowX);
             });
         };
 
         $.fn.isScrollableY = function () {
             return this.map(function () {
-                var el = this === window ? document.documentElement : this;
+                var el = this === window || this === document ? document.documentElement : this;
                 if (!(el.scrollHeight > el.clientHeight)) return false;
                 if (el === document.documentElement) return true;
-                return getComputedStyle(el).overflowY.indexOf('scroll') !== -1;
+                return scrolls(getComputedStyle(el).overflowY);
             });
         };
 

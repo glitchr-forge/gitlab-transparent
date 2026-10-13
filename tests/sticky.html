@@ -27,6 +27,8 @@
 <section id="two" class="sticky-headlines sticky-magnet">Two</section>
 <section id="three" class="sticky-headlines">Three <div id="fade" class="sticky sticky-easein" data-sticky-easein="0" style="height: 40px">fade</div></section>
 <section id="four" class="sticky-headlines">Four</section>
+<div id="inner" style="overflow-y: scroll; height: 60px; scroll-padding-top: 12px"><div style="height: 300px"></div></div>
+<div id="auto" style="overflow: auto; height: 60px; width: 100px"><div style="height: 300px"></div></div>
 <pre id="result">pending</pre>
 <script src="jquery.js"></script>
 <script src="harness.js"></script>
@@ -43,16 +45,70 @@
 
         Sticky.ready({ scrollsnap: false, autoscroll: false, swipehint: false });
         await H.after(20); // onLoad binds a tick after DOMContentLoaded
+        await H.frame();
         H.check(Sticky.version === '1.7.0' && Flow.sticky === Sticky, 'Sticky is the core\'s sticky module');
         // Sticky.scrollTo: the core's engine, the scroll a script's meanwhile.
         var called = false;
         Sticky.scrollTo({ top: 200, duration: '80ms' }, function () { called = true; });
         H.check(Sticky.userScroll() === false && Flow.scripted(window), 'while Sticky scrolls, the scroll is a script\'s');
-        await H.after(200);
+        await H.until(function () { return called; }, 600);
         H.check(called && Math.round(window.scrollY) === 200 && Sticky.userScroll() === true, 'Sticky.scrollTo arrives, calls back and gives the scroll back', window.scrollY + ' ' + called);
         H.scroll(0);
         await H.frame();
-        H.check(header.getAttribute('aria-scrollhide') === 'false', 'the hiding header is left as 1.7.0 has it (aria-scrollhide written false)', header.getAttribute('aria-scrollhide'));
+
+        // The hiding header (.sticky-top): gone as the page goes down, back on the way up. Up to 1.0.2 every
+        // scroll wrote aria-scrollhide="false" on it first and it never hid.
+        await H.after(600); // the scroll at rest: the next event starts a gesture
+        H.scroll(300); await H.frame();
+        H.scroll(400); await H.frame();
+        H.check(header.getAttribute('aria-scrollhide') === null, 'the library leaves aria-scrollhide to the page', header.getAttribute('aria-scrollhide'));
+        H.check(!header.classList.contains('show') && parseFloat(header.style.top) <= -header.clientHeight, 'the header hides as the page scrolls down', header.className + ' top ' + header.style.top);
+        H.scroll(350); await H.frame();
+        H.check(header.classList.contains('show') && header.style.top === '', 'and shows again on the way up', header.className + ' top ' + header.style.top);
+        H.scroll(450); await H.frame();
+        H.check(!header.classList.contains('show'), 'hidden again going down');
+        await H.after(600); // at rest, hidden: the first event of the next gesture tells no direction
+        H.scroll(500); await H.frame();
+        H.check(!header.classList.contains('show'), 'a header hidden stays hidden when the scroll takes up again downwards', header.className);
+        header.setAttribute('aria-scrollhide', 'false');
+        H.scroll(200); await H.frame();
+        H.scroll(100); await H.frame();
+        H.check(header.classList.contains('show'), 'up: shown');
+        H.scroll(500); await H.frame();
+        H.scroll(600); await H.frame();
+        H.check(header.classList.contains('show'), 'aria-scrollhide="false" keeps the header', header.className);
+        header.removeAttribute('aria-scrollhide');
+        Sticky.set('scrollhide', false);
+        H.scroll(700); await H.frame();
+        H.check(header.classList.contains('show'), 'and so does the scrollhide option set to false', header.className);
+        Sticky.set('scrollhide', true);
+        H.scroll(0);
+        await H.frame();
+        await H.after(600);
+
+        // The magnets (.sticky-magnet): each one's own place, top to bottom. getMagnets() read them off `this` in an
+        // Array.map callback - the window - and every magnet came back as {element: window, offsetTop: undefined}.
+        var magnets = Sticky.getMagnets(document.documentElement);
+        H.check(magnets.length === 2 && magnets[0].element === document.getElementById('one') && magnets[1].element === document.getElementById('two'), 'getMagnets() gives the magnets themselves', magnets.map(function (m) { return m.element && m.element.id; }).join());
+        H.check(magnets[0].offsetTop === document.getElementById('one').offsetTop && magnets[1].offsetTop === document.getElementById('two').offsetTop, 'with their own offsetTop', magnets.map(function (m) { return m.offsetTop; }).join());
+        H.check(magnets[0].visible > 0 && magnets[0].visible <= 1 && magnets[1].visible >= 0, 'and the share of the screen they fill', magnets.map(function (m) { return m.visible; }).join());
+        H.check(Sticky.getNextSnap(document.documentElement).element === document.getElementById('two') && Sticky.getFirstSnap(document.documentElement).element === document.getElementById('one'), 'the next and the first snap are magnets');
+        H.scroll(top('two')); await H.frame();
+        H.check(document.getElementById('first').classList.contains('show'), 'past the first magnet, .sticky-magnet-first shows', document.getElementById('first').className);
+        H.scroll(0); await H.frame();
+        H.check(!document.getElementById('first').classList.contains('show'), 'and not at the first one');
+
+        // A jQuery object where an element is meant (the module hands itself some): an inner scroller's own flag and padding.
+        var inner = document.getElementById('inner');
+        $(inner).prop('user-scroll', false);
+        H.check(Sticky.userScroll($(inner)) === false && Sticky.userScroll(inner) === false && Sticky.userScroll($(inner).children()) === false, 'Sticky.userScroll reads the scroller of a jQuery object', Sticky.userScroll($(inner)));
+        H.check(Sticky.userScroll() === true && Sticky.userScroll($('#nothing-there')) === true, 'the page\'s own flag is untouched');
+        $(inner).prop('user-scroll', true);
+        H.check(Sticky.getScrollPadding($(inner)).top === 12 && Sticky.getScrollPadding(inner.firstElementChild).top === 12 && Sticky.getScrollPadding('#inner').top === 12, 'Sticky.getScrollPadding reads it too', Sticky.getScrollPadding($(inner)).top);
+        var detached = document.createElement('div');
+        H.check($(detached).closestScrollable().length === 0 && Sticky.userScroll(detached) === true, 'an element out of the page has no scroller');
+        var auto = document.getElementById('auto');
+        H.check($(auto).isScrollableY()[0] === true && $(auto).isScrollableX()[0] === false && $(auto).isScrollable() === true, 'overflow: auto scrolls for isScrollableX/Y as for isScrollable', $(auto).isScrollableY()[0] + ' ' + $(auto).isScrollableX()[0]);
 
         // The headline being read: reached where its own link lands it.
         H.scroll(top('two') + 10);

@@ -73,6 +73,54 @@
         await H.after(SETTLE * 3);
         H.check(H.near(y(), top('b')), 'the reader\'s next rest glides again', y() + ' vs ' + top('b'));
 
+        // The navigation's scroll in the middle of the reader's own (a link followed while the page still coasts):
+        // it rests where the navigation put it. Up to 1.0.2 the gesture was completed from there, to a stop.
+        await H.after(300);
+        H.scroll(top('a') + 150);
+        await H.after(5);
+        target = top('b') + 250;
+        Flow.jump(window, target);
+        await H.after(SETTLE * 4);
+        H.check(H.near(y(), target), 'a script\'s scroll during the reader\'s rests where it was put', y() + ' vs ' + target);
+
+        // A scroll event that comes late (a heavy page swapped in: the frame is hundreds of ms away) is still the
+        // script's while the page is where the script left it.
+        await H.after(300);
+        target = top('a') + 320;
+        Flow.jump(window, target);
+        var until = performance.now() + 320;
+        while (performance.now() < until) { /* the main thread, busy */ }
+        await H.after(SETTLE * 4);
+        H.check(H.near(y(), target), 'a script\'s scroll heard late rests where it was put', y() + ' vs ' + target);
+        await H.after(300);
+        H.scroll(top('b') - 200);
+        await H.after(SETTLE * 3);
+        H.check(H.near(y(), top('b')), 'and the reader\'s next rest still glides', y() + ' vs ' + top('b'));
+
+        // The reader stopping an animated scroll of the navigation (a wheel, a press) takes the scroll back for good:
+        // up to 1.0.2 the core kept it "a script's" for ever after, and the stops never settled again.
+        await H.after(300);
+        Transparent.scrollTo({ top: top('c'), duration: '400ms' });
+        await H.after(80);
+        window.dispatchEvent(new WheelEvent('wheel', { deltaY: 10 }));
+        var stoppedAt = y();
+        await H.after(350);
+        H.check(Math.abs(y() - stoppedAt) < 3 && y() < top('c') - 50, 'a wheel stops the navigation\'s animated scroll where it is', y() + ' (stopped at ' + stoppedAt + ')');
+        H.check(Flow.scripted(window) === false && Transparent.userScroll() === true, 'and the scroll is the reader\'s again', Flow.scripted(window) + ' ' + Transparent.userScroll());
+        H.scroll(top('b') - 60);
+        await H.after(SETTLE * 3);
+        H.check(H.near(y(), top('b')), 'whose next rest glides to its stop', y() + ' vs ' + top('b'));
+
+        // Stops made twice at the same place (a script's markers found again in a page the navigation gives back
+        // from its cache, and made again by the script): one stop.
+        var count = StickyStops.get(window).measure().length;
+        var twin = document.createElement('i');
+        twin.className = 'sticky-stop';
+        twin.style.cssText = 'position: absolute; left: 0; width: 1px; height: 1px; top: ' + top('b') + 'px';
+        document.body.appendChild(twin);
+        H.check(StickyStops.get(window).measure().length === count, 'two stops at the same place are one', StickyStops.get(window).measure().length + ' vs ' + count);
+        twin.remove();
+
         // A page swapped in: the row leaves, a stop arrives; transparent:load dispatched as the navigation does.
         var row = document.getElementById('row');
         row.remove();

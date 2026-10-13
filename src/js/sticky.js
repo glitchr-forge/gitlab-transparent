@@ -129,7 +129,7 @@
     Sticky.percentToPixel = function(p, el) { return parseFloat(p) * $(el).outerWidth(); };
     Sticky.parseToPixel   = Flow.parseToPixel;
     Sticky.getScrollPadding = function(el = document.documentElement) {
-        return Flow.scrollPadding(Flow.closestScrollable(el));
+        return Flow.scrollPadding(Flow.closestScrollable(typeof el === "string" ? $(el)[0] : el));
     }
 
     Sticky.epsilon = function(x1, x0) { return Math.abs(x1-x0) < 1; }
@@ -472,7 +472,13 @@
         return parseInt(closest);
     }
 
-    Sticky.userScroll = Flow.userScroll;
+    // An element, a jQuery object (the module's own calls hand it one) or a
+    // selector; nothing found is the reader's scroll, as before.
+    Sticky.userScroll = function(el = undefined) {
+        if (typeof el === "string") el = $(el);
+        if (el && el.jquery && !el.length) return true;
+        return Flow.userScroll(el);
+    };
 
     /** Scroll an element (the window by default) through the core's engine - unless a script has the scroll already. */
     Sticky.scrollTo = function(dict, callback = function() {}, el = window)
@@ -528,7 +534,7 @@
         var magnets = Sticky.getMagnets(el);
         if(!magnets.length) return undefined;
 
-        return magnets[Sticky.closestTo(el.scrollTop || el.scrollY, magnets.map(function() { return this.offsetTop; }))];
+        return magnets[Sticky.closestTo(el.scrollTop || el.scrollY, magnets.map(function(magnet) { return magnet.offsetTop; }))];
     }
 
     Sticky.scrollToPreviousSnap = function (el = window, callback = function() {}) {
@@ -541,7 +547,7 @@
         var magnets = Sticky.getMagnets(el);
         if(!magnets.length) return undefined;
 
-        var current = Sticky.closestTo(el.scrollTop || el.scrollY, magnets.map(function() { return this.offsetTop; }));
+        var current = Sticky.closestTo(el.scrollTop || el.scrollY, magnets.map(function(magnet) { return magnet.offsetTop; }));
         return current > 0 ? magnets[current-1] : magnets[current];
     }
 
@@ -610,7 +616,7 @@
         var magnets = Sticky.getMagnets(el);
         if(!magnets.length) return undefined;
 
-        var current = Sticky.closestTo(el.scrollTop || el.scrollY, magnets.map(function() { return this.offsetTop; }));
+        var current = Sticky.closestTo(el.scrollTop || el.scrollY, magnets.map(function(magnet) { return magnet.offsetTop; }));
         return current < magnets.length-1 ? magnets[current+1] : magnets[current];
     }
 
@@ -764,7 +770,7 @@
         var magnets = Sticky.getMagnets(e.target);
         if(!magnets.length) return;
 
-        var currentId  = Sticky.closestToZero(magnets.map(function() { return this.offsetTop-window.scrollY; }));
+        var currentId  = Sticky.closestToZero(magnets.map(function(magnet) { return magnet.offsetTop-window.scrollY; }));
         var currMagnet = magnets[currentId];
         var magnet     = currMagnet;
 
@@ -777,10 +783,10 @@
         lastScrollTop = st <= 0 ? 0 : st;
 
         var magnet = currMagnet;
-        var closestMagnets = magnets.filter(function() { return this.visible > scrollSnapProximity; });
+        var closestMagnets = magnets.filter(function(magnet) { return magnet.visible > scrollSnapProximity; });
 
-        if  (roll) closestMagnets = closestMagnets.filter(function() { return this.element.offsetTop                                  >= window.scrollY && this.element.offsetLeft                            >= window.scrollX; });
-        else if(unroll) closestMagnets = closestMagnets.filter(function() { return this.element.offsetTop + this.element.offsetHeight >= window.scrollY && this.element.offsetLeft + this.element.offsetWidth >= window.scrollX; });
+        if  (roll) closestMagnets = closestMagnets.filter(function(magnet) { return magnet.element.offsetTop                                  >= window.scrollY && magnet.element.offsetLeft                            >= window.scrollX; });
+        else if(unroll) closestMagnets = closestMagnets.filter(function(magnet) { return magnet.element.offsetTop + magnet.element.offsetHeight >= window.scrollY && magnet.element.offsetLeft + magnet.element.offsetWidth >= window.scrollX; });
 
         var scrollTo = closestMagnets.length && (closestMagnets[0]["element"] ?? undefined) !== currMagnet["element"] && !scrollSnapDebounce && (roll || unroll);
         if (scrollTo) {
@@ -812,12 +818,13 @@
             $(magnets).each((e) => $(magnets[e].element).removeClass("magnet closest"));
             $(magnet.element).addClass("magnet");
 
-            $(closestMagnets).each((e) => $(magnets[e].element).addClass("closest"));
+            $(closestMagnets).each((e) => $(closestMagnets[e].element).addClass("closest"));
         }
 
         return this;
     }
 
+    /** The magnets (.sticky-magnet) of an element, top to bottom: {element, offsetTop, offsetLeft, visible} - visible, the share of its scroller's box the magnet fills (0 to 1). */
     Sticky.getMagnets = function (el)
     {
         return $(el).find(".sticky-magnet").toArray()
@@ -825,31 +832,32 @@
 
                 return m1.offsetTop > m2.offsetTop ? 1 : (m1.offsetTop < m2.offsetTop ?  -1 : 0);
 
-            }).map(function() {
+            }).map(function(magnet) {
 
-                var scroller  = $(this).closestScrollable()[0];
-                var $scroller = $(scroller);
-                var padding   = Sticky.getScrollPadding(scroller);
-                var scrollTop     = $scroller.scrollTop()  + padding.top;
+                // `this` was read here, in an Array.map callback: the window
+                // (or nothing, in a module), never the magnet.
+                var scroller  = Flow.closestScrollable(magnet) || document.documentElement;
+                var padding   = Flow.scrollPadding(scroller);
+                var scrollTop     = scroller.scrollTop  + padding.top;
                 var scrollBottom  = scrollTop + scroller.clientHeight;
-                var scrollLeft    = $scroller.scrollLeft() + padding.left;
+                var scrollLeft    = scroller.scrollLeft + padding.left;
                 var scrollRight   = scrollLeft + scroller.clientWidth;
 
-                var offsetTop     = this.offsetTop;
-                var offsetBottom  = this.offsetTop + this.clientHeight;
-                var offsetLeft    = this.offsetLeft;
-                var offsetRight   = this.offsetLeft + this.clientWidth;
+                var offsetTop     = magnet.offsetTop;
+                var offsetBottom  = magnet.offsetTop + magnet.clientHeight;
+                var offsetLeft    = magnet.offsetLeft;
+                var offsetRight   = magnet.offsetLeft + magnet.clientWidth;
 
                 var visibleTop    = offsetTop    < scrollTop    ? scrollTop    : offsetTop;
                 var visibleBottom = offsetBottom > scrollBottom ? scrollBottom : offsetBottom;
-                var visibleLeft   = offsetLeft    < scrollLeft   ? scrollLeft    : offsetLeft;
-                var visibleRight  = offsetRight > scrollRight    ? scrollRight : offsetRight;
+                var visibleLeft   = offsetLeft   < scrollLeft   ? scrollLeft   : offsetLeft;
+                var visibleRight  = offsetRight  > scrollRight  ? scrollRight  : offsetRight;
 
                 var visibleX = Math.min(1, Math.max(0, (visibleRight - visibleLeft) / scroller.clientWidth ));
                 var visibleY = Math.min(1, Math.max(0, (visibleBottom - visibleTop) / scroller.clientHeight));
                 var visible  = visibleX * visibleY;
 
-                return {element: this, offsetTop: this.offsetTop, offsetLeft: this.offsetLeft, visible:visible };
+                return {element: magnet, offsetTop: magnet.offsetTop, offsetLeft: magnet.offsetLeft, visible:visible };
             });
     }
 
@@ -864,7 +872,7 @@
         var magnets = Sticky.getMagnets(e.target);
         if(magnets.length) {
 
-            var currentId  = Sticky.closestToZero(magnets.map(function() { return this.offsetTop-window.scrollY; }));
+            var currentId  = Sticky.closestToZero(magnets.map(function(magnet) { return magnet.offsetTop-window.scrollY; }));
             if(currentId == 0) $(e.target).find(".sticky-magnet-first").removeClass("show");
             else $(e.target).find(".sticky-magnet-first").addClass("show");
 
@@ -877,8 +885,11 @@
             $(e.target).find(".sticky-magnet-last").hide();
         }
 
+        // (Every scroll used to write aria-scrollhide="false" on the
+        // .sticky-top elements here, before the attribute was read below: the
+        // header never hid, whatever the attribute or the `scrollhide` option
+        // said. The attribute is the page's to set.)
         var scroller = $(this).closestScrollable();
-        $(scroller).find(".sticky-top").attr("aria-scrollhide", false);
 
         function PayloadReplaceHash() {
 
@@ -974,10 +985,19 @@
             if(scrollhide) {
 
                 var isAnchor = Sticky.epsilon(e.scrollY.top, anchorY);
-                if(e.first || isAnchor) {
+                // Hidden by the scroll, and the scroll takes up again: the
+                // first event after a rest tells no direction (its delta is
+                // 0), and showing the header on it slid it in, then out again
+                // at the next event, each time the reader went on down.
+                var isHidden = !$this.hasClass("show") && this.style.top !== "" && e.scrollY.top > this.clientHeight;
+                if(isAnchor || (e.first && !isHidden)) {
 
                     $this.addClass("show");
                     $this.removeAttr("style");
+
+                } else if(e.first) {
+
+                    // stays as it is
 
                 } else if(e.scrollY.top > this.clientHeight || $this.hasClass("show")) {
 
@@ -1012,6 +1032,11 @@
                     if(e.scrollY.top > 0 && !e.first)
                         $this.addClass("skip-transition");
                 }
+            } else if(!$this.hasClass("show") && this.style.top !== "") {
+
+                // Not to be hidden (any more): one the scroll had hidden comes back.
+                $this.addClass("show");
+                $this.removeAttr("style");
             }
 
             var style = window.getComputedStyle(this);
@@ -1521,7 +1546,7 @@
                                 $(scroller).stop();
                             });
 
-                            $(scroller).on("mouseleave.autoscroll touchend.autoscroll");
+                            $(scroller).off("mouseleave.autoscroll touchend.autoscroll");
                             $(scroller).on("mouseleave.autoscroll touchend.autoscroll", function() {
 
                                 if(startOver) payloadAutoscroll();
@@ -1534,7 +1559,7 @@
                         }
 
                         // Disable on user scroll before unloading
-                        $(scroller).on("beforeunload.autoscroll");
+                        $(scroller).off("beforeunload.autoscroll");
                         $(scroller).on("beforeunload.autoscroll", function() {
 
                             if (mouseAction) {
