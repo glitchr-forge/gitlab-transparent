@@ -81,6 +81,8 @@
         "scrollsnap"           : true   ,
         "scrollsnap_start"     : "start", //start, center, end
         "scrollsnap_proximity" : 0.01   ,
+        "scrollsnap_hold"      : true   , // the way to a magnet holds the scroll; false: the reader's gesture stops it
+        "scrollsnap_keys"      : false  , // the arrow keys go from magnet to magnet
 
         "swipe"                : true,
         "swipe_timegate"       : "1s",
@@ -775,6 +777,9 @@
         var scrollSnapStart = Sticky.get("scrollsnap_start");
         var scrollSnapProximity  = Sticky.get("scrollsnap_proximity");
 
+        // After a way the reader could take: not before the scroll has rested.
+        if (scrollSnapDebounce && !magnetWay) magnetRest();
+
         var magnets = Sticky.getMagnets(e.target);
         if(!magnets.length) return;
 
@@ -801,33 +806,10 @@
 
             if (closestMagnets.length) magnet = closestMagnets[0];
 
-            $(scroller).addClass("sticky-prevent-scroll");
-            if (Sticky.get("scrolllock"))
-                Sticky.disableScroll();
-
-            // The way to the magnet holds the scroll, as the page's
-            // overflow says (.sticky-prevent-scroll): a wheel on the way is
-            // not the reader taking over, the page lands on the magnet. And
-            // however the movement ends - arrived, refused, replaced - the
-            // page is given back: left set, it answered nothing any more.
-            scrollSnapDebounce = true;
-            Sticky.scrollTo({
-
+            Sticky.toMagnet(scroller, {
                 top:magnet.offsetTop - Sticky.getScrollPadding(scroller).top,
-                left:magnet.offsetLeft - Sticky.getScrollPadding(scroller).left,
-                easing:Settings["smoothscroll_easing"],
-                duration: Settings["smoothscroll_duration"],
-                speed: Settings["smoothscroll_speed"],
-                hold: true
-
-            }, Sticky.debounce(function() {
-
-                scrollSnapDebounce = false;
-                $(scroller).removeClass("sticky-prevent-scroll");
-                if (Sticky.get("scrolllock"))
-                    Sticky.enableScroll();
-
-            }, 1000*Sticky.parseDuration(Sticky.get("debounce"))), scroller);
+                left:magnet.offsetLeft - Sticky.getScrollPadding(scroller).left
+            });
 
             $(magnets).each((e) => $(magnets[e].element).removeClass("magnet closest"));
             $(magnet.element).addClass("magnet");
@@ -837,6 +819,242 @@
 
         return this;
     }
+
+    // The way to a magnet in progress, the snap's or a key's: {el, hold, aim,
+    // axis, over}. One at a time.
+    var magnetWay = null;
+
+    // After a way the reader could take, the snap waits for the scroll to
+    // have been quiet for `debounce`: it does not start again against the
+    // gesture that stopped it, nor against the one that follows an arrival.
+    var magnetQuiet = null;
+    function magnetRest() {
+        if (!magnetQuiet) magnetQuiet = Sticky.debounce(function() {
+            if (!magnetWay) scrollSnapDebounce = false;
+        }, 1000*Sticky.parseDuration(Sticky.get("debounce")));
+        magnetQuiet();
+    }
+
+    /**
+     * Take a scroller (the window by default) to {top, left}, a magnet's
+     * place, the way the `scrollsnap_hold` option says. Held (the default):
+     * the page carries .sticky-prevent-scroll and the reader's gesture does
+     * not stop the movement; the page is given back `debounce` after it
+     * ended. Not held (`scrollsnap_hold: false`): nothing is set on the
+     * page, and a wheel, a finger, a press or a key stops the movement where
+     * it is - the snap then waits for the scroll to rest before it acts again.
+     */
+    Sticky.toMagnet = function (scroller, dict, aim)
+    {
+        var el = Flow.element($(scroller).length ? $(scroller)[0] : window);
+        var page = el === document.documentElement;
+        var hold = Sticky.get("scrollsnap_hold") !== false;
+        var chained = magnetWay && !magnetWay.over && magnetWay.el === el;
+        var way = magnetWay = {el: el, hold: hold, aim: aim, over: false};
+
+        dict = Object.assign({
+            easing:Settings["smoothscroll_easing"],
+            duration: Settings["smoothscroll_duration"],
+            speed: Settings["smoothscroll_speed"],
+            hold: hold
+        }, dict);
+
+        // However the movement ends - arrived, refused, replaced, taken by
+        // the reader - the page is given back: left set, it answered nothing
+        // any more.
+        scrollSnapDebounce = true;
+        var given;
+        if (hold) {
+
+            // The way to the magnet holds the scroll, as the page's
+            // overflow says (.sticky-prevent-scroll): a wheel on the way is
+            // not the reader taking over, the page lands on the magnet.
+            // (The page's: on a scrolling element the class would resize it.)
+            if (page) $(el).addClass("sticky-prevent-scroll");
+            if (Sticky.get("scrolllock"))
+                Sticky.disableScroll();
+
+            given = Sticky.debounce(function() {
+
+                // A key went on to the next magnet meanwhile: that way's to lift.
+                if (magnetWay !== way) return;
+                magnetWay = null;
+
+                scrollSnapDebounce = false;
+                if (page) $(el).removeClass("sticky-prevent-scroll");
+                if (Sticky.get("scrolllock"))
+                    Sticky.enableScroll();
+
+            }, 1000*Sticky.parseDuration(Sticky.get("debounce")));
+
+        } else {
+
+            // The reader's gesture is heard on the page by the core; on a
+            // scrolling element, from here on (one listener, however often).
+            if (!page) Flow.onInterrupt(el, Flow.release);
+
+            given = function() {
+
+                if (magnetWay !== way) return;
+                magnetWay = null;
+                magnetRest();
+            };
+        }
+
+        var end = function(outcome) { way.over = true; given(outcome); };
+
+        // A key pressed on the way goes on from where the way was going: the
+        // movement is ours, and gives place to the next.
+        if (chained) Flow.scrollTo(el, dict, end);
+        else Sticky.scrollTo(dict, end, el);
+
+        return this;
+    }
+
+    // ── The keys ─────────────────────────────────────────────────────────
+    // With `scrollsnap_keys`, the arrows go from magnet to magnet: ArrowDown
+    // and ArrowUp where the magnets follow each other down the scroller,
+    // ArrowRight and ArrowLeft where they do across it. The scroller is the
+    // one the focus is in (or the pointer over), the page otherwise. The key
+    // is left alone - to the browser, or to the page - in a field, on a
+    // widget with keys of its own, in a dialog, with a modifier held, when a
+    // handler of the page took it, inside an element that scrolls by itself
+    // along the key's axis, where no magnets follow each other along that
+    // axis, and past the last magnet (before the first): the stops' rules.
+    var MAGNET_KEYS = { ArrowDown: ['y', 1], Down: ['y', 1], ArrowUp: ['y', -1], Up: ['y', -1], ArrowRight: ['x', 1], Right: ['x', 1], ArrowLeft: ['x', -1], Left: ['x', -1] };
+    var MODIFIER = { Shift: 1, Control: 1, Alt: 1, AltGraph: 1, Meta: 1, OS: 1, CapsLock: 1, Fn: 1 };
+    var TYPING = 'input, textarea, select, iframe, [contenteditable]:not([contenteditable="false"])';
+    var WIDGET = '[role="slider"], [role="spinbutton"], [role="scrollbar"], [role="tab"], [role="tablist"], [role="menu"], [role="menubar"], [role="menuitem"], [role="listbox"], [role="option"], [role="radiogroup"], [role="radio"], [role="grid"], [role="tree"], [role="textbox"], [role="combobox"], audio, video';
+    var MAGNET_TOLERANCE = 3; // px: within this of a magnet is at it
+
+    function scrollsAlong(el, axis) {
+        var style = getComputedStyle(el);
+        var overflow = axis == 'x' ? style.overflowX : style.overflowY;
+        if (overflow !== 'auto' && overflow !== 'scroll' && overflow !== 'overlay') return false;
+        return axis == 'x' ? el.scrollWidth > el.clientWidth + 1 : el.scrollHeight > el.clientHeight + 1;
+    }
+
+    /** Where the magnets of a scroller are along an axis ('y' by default): the scroll positions that meet them, in order, each once. Its own magnets: not those of a scroller inside it. */
+    Sticky.getMagnetPositions = function (scroller = window, axis = 'y')
+    {
+        var el = Flow.element($(scroller).length ? $(scroller)[0] : window);
+        var page = el === document.documentElement;
+        var box = page ? {top: 0, left: 0} : el.getBoundingClientRect();
+        var padding = Flow.scrollPadding(el);
+        var max = axis == 'x' ? el.scrollWidth - el.clientWidth : el.scrollHeight - el.clientHeight;
+
+        var positions = [];
+        $(el).find(".sticky-magnet").each(function() {
+
+            if ((Flow.closestScrollable(this) || document.documentElement) !== el) return;
+
+            var rect = this.getBoundingClientRect();
+            var at = axis == 'x'
+                ? rect.left - box.left - (page ? 0 : el.clientLeft) + el.scrollLeft - padding.left
+                : rect.top  - box.top  - (page ? 0 : el.clientTop)  + el.scrollTop  - padding.top;
+
+            // A magnet past the end of the scroll is at the end of the scroll.
+            at = Math.round(Math.max(0, Math.min(at, max)));
+            if (positions.indexOf(at) === -1) positions.push(at);
+        });
+
+        return positions.sort(function(a, b) { return a - b; });
+    }
+
+    // The scroller a key is for, and its magnets along the key's axis; null
+    // to leave the key where it belongs.
+    function magnetScroller(target, axis)
+    {
+        var positions;
+        for (var node = target; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
+
+            if (!scrollsAlong(node, axis)) continue;
+            // It scrolls by itself along the axis: its magnets, or the key is its own.
+            positions = Sticky.getMagnetPositions(node, axis);
+            return positions.length > 1 ? {el: node, positions: positions} : null;
+        }
+
+        // The pointer over a scroller with magnets along the axis: the innermost.
+        var hovered = null;
+        $(".sticky-magnet").each(function() {
+
+            var scroller = Flow.closestScrollable(this);
+            if (!scroller || scroller === document.documentElement || scroller === hovered) return;
+            if (hovered && !hovered.contains(scroller)) return;
+            try { if (!scroller.matches(":hover")) return; } catch (e) { return; }
+            if (scrollsAlong(scroller, axis)) hovered = scroller;
+        });
+        if (hovered) {
+            positions = Sticky.getMagnetPositions(hovered, axis);
+            if (positions.length > 1) return {el: hovered, positions: positions};
+        }
+
+        positions = Sticky.getMagnetPositions(window, axis);
+        return positions.length > 1 ? {el: document.documentElement, positions: positions} : null;
+    }
+
+    /** Whether the key was taken: the scroller is on its way to the next magnet (or kept on the way it was on). */
+    function magnetKey(event)
+    {
+        if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.isComposing) return false;
+
+        var move = MAGNET_KEYS[event.key];
+        if (!move) return false;
+        var axis = move[0], direction = move[1];
+
+        var target = event.target instanceof Element ? event.target : null;
+        var active = document.activeElement;
+        if (active && active.tagName === 'IFRAME') return false;
+        if (target && (target.closest(TYPING) || target.closest(WIDGET) || target.closest('dialog[open]'))) return false;
+        try { if (document.querySelector('dialog:modal')) return false; } catch (e) { /* :modal unknown */ }
+
+        var found = magnetScroller(target, axis);
+        if (!found) return false;
+
+        var el = found.el, positions = found.positions;
+        var chained = magnetWay && !magnetWay.over && magnetWay.el === el && magnetWay.axis === axis && magnetWay.aim !== undefined;
+        var from = chained ? magnetWay.aim : (axis == 'x' ? el.scrollLeft : el.scrollTop);
+
+        var to = null, i;
+        if (direction > 0) {
+            for (i = 0; i < positions.length && to === null; i++)
+                if (positions[i] > from + MAGNET_TOLERANCE) to = positions[i];
+        } else {
+            for (i = positions.length - 1; i >= 0 && to === null; i--)
+                if (positions[i] < from - MAGNET_TOLERANCE) to = positions[i];
+        }
+
+        // Past the last magnet (before the first): the browser's - unless a
+        // way is being made there, which the key does not disturb.
+        if (to === null) {
+            if (!chained) return false;
+            event.preventDefault();
+            return true;
+        }
+
+        event.preventDefault();
+        // A key held down: one magnet at a time, each way finished first.
+        if (event.repeat && magnetWay && !magnetWay.over && magnetWay.el === el) return true;
+        // A way of the snap's that holds the scroll is not a key's to replace.
+        if (magnetWay && !magnetWay.over && magnetWay.el === el && magnetWay.hold && !chained) return true;
+
+        Sticky.toMagnet(el, axis == 'x' ? {left: to} : {top: to}, to);
+        if (magnetWay) magnetWay.axis = axis;
+        return true;
+    }
+
+    // On the window, in the bubble phase: the page's own handlers have had
+    // the key first. A key that is not a magnet's is the reader's, and stops
+    // a way they may take, as a wheel does.
+    window.addEventListener('keydown', function (event) {
+
+        if (MODIFIER[event.key]) return;
+
+        var keys = Sticky.get("scrollsnap_keys") && Sticky.get("scrollsnap") && Settings.ready && !Sticky.get("disable");
+        if (keys && magnetKey(event)) return;
+
+        if (magnetWay && !magnetWay.over && !magnetWay.hold) Flow.release(event, magnetWay.el);
+    });
 
     /** The magnets (.sticky-magnet) of an element, top to bottom: {element, offsetTop, offsetLeft, visible} - visible, the share of its scroller's box the magnet fills (0 to 1). */
     Sticky.getMagnets = function (el)

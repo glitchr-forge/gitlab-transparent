@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.1.0 - 2026-10-14
+
+Two options for the magnets (`.sticky-magnet`), both leaving a site as it was
+until it sets them.
+
+- **sticky** - `scrollsnap_hold` (`true`): the way to a magnet holds the
+  scroll, as in 1.0.4. `false` makes it the reader's to take: nothing is set
+  on `<html>` (no `.sticky-prevent-scroll`), a wheel, a finger, a press or a
+  key on the way stops the page where it is, and the snap waits for the scroll
+  to have been quiet for `debounce` before it acts again - it does not start
+  against the gesture that stopped it.
+- **sticky** - `scrollsnap_keys` (`false`): the arrow keys go from magnet to
+  magnet, down the page (ArrowDown, ArrowUp) and along a row that scrolls
+  sideways (ArrowRight, ArrowLeft, pressed in the row or with the pointer over
+  it), under the scroller's `scroll-padding`. Left to the browser past the
+  last magnet, along an axis without magnets, in a field, on a widget, in a
+  dialog, with a modifier, inside an element that scrolls by itself, and when
+  the page took the key - the rules of the stops' `keys`. A key held down goes
+  one magnet at a time; two presses lead two magnets further. A key's way
+  follows `scrollsnap_hold`.
+- **sticky** - new: `Sticky.toMagnet(scroller, {top, left})`, the way both
+  take, and `Sticky.getMagnetPositions(scroller, axis)`. One keydown listener
+  on the window.
+- The stops already went from stop to stop along a `data-sticky-axis="x"` row
+  with ArrowLeft and ArrowRight (`keys`); `tests/stops-row-keys.html` now says
+  so.
+
+`tests/sticky-magnets-interruptible.html` (a wheel, a key, a finger on the
+way: stopped in place, nothing held, no restart against the reader, the snap
+back after a rest; a modifier alone stops nothing), `tests/sticky-magnet-keys.html`
+(down and up the page, along a row, the bounds, what is left alone, a key
+held, two presses, the held and the taken way), `tests/stops-row-keys.html`.
+The held way of 1.0.4 is unchanged: `tests/sticky-magnets.html` as it was.
+
 ## 1.0.4 - 2026-10-14
 
 ### A page that stopped answering, fixed

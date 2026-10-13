@@ -70,7 +70,9 @@ dock, swipe, keepalive, remember) are all on by default. Details in
 **Sticky** - `Sticky.ready({...})`, defaults in `Sticky.settings`: `easein`
 (`"100px"`), `easeout` (`"50px"`), `easetime` (`"250ms"`), `easedelay`,
 `replacehash` (`true`), `scrollhide` (`true`), `scrolllock` (`true`),
-`scrollsnap` (`true`), `swipe` (`true`), `swipehint` (`true`), `autoscroll`
+`scrollsnap` (`true`; `scrollsnap_hold` `true`: the way to a magnet holds the
+scroll, `scrollsnap_keys` `false`: the arrows go from magnet to magnet),
+`swipe` (`true`), `swipehint` (`true`), `autoscroll`
 (`true`, with `autoscroll_speed` 100 px/s, `autoscroll_delay` `"2s"`,
 `autoscroll_minwidth` 200, `autoscroll_minheight` 400, `autoscroll_reverse`),
 `smoothscroll_duration` (`"250ms"`), `debug`, `disable`. Classes: `.sticky-top`,

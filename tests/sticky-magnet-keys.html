@@ -1,0 +1,226 @@
+<!doctype html>
+<!--
+  The magnets under the arrow keys (scrollsnap_keys: true). Down the page ArrowDown and ArrowUp
+  go from magnet to magnet, met under the page's scroll-padding-top; in a row that scrolls
+  sideways ArrowRight and ArrowLeft do, when the key is pressed in it. A key along an axis with no
+  magnets, past the last magnet, in a field, with a modifier, taken by the page or pressed inside
+  an element that scrolls by itself is left alone. A key held down goes one magnet at a time; two
+  presses in a row go two magnets. The way a key starts is the snap's: held by default, the
+  reader's to take with scrollsnap_hold: false.
+  Opened by tests/run.mjs in a headless browser; the page writes its verdict in #result.
+-->
+<html>
+<head>
+<meta charset="utf-8"><title>sticky magnet keys</title>
+<style>
+    html { scroll-behavior: auto; scroll-padding-top: 50px; }
+    body { margin: 0; }
+    section { height: 100vh; }
+    /* src/css/sticky.scss */
+    .sticky-prevent-scroll { overflow: hidden; block-size: 100%; }
+    #row { display: flex; overflow-x: auto; width: 600px; height: 120px; scroll-padding-left: 20px; }
+    #row > div { flex: 0 0 600px; height: 120px; }
+    #inner { overflow-y: auto; height: 100px; width: 200px; }
+    #inner > div { height: 400px; }
+    #result { position: fixed; left: 0; bottom: 0; margin: 0; }
+</style>
+</head>
+<body>
+<section id="one" class="sticky-magnet">
+    <input id="field" type="text">
+    <div id="editable" contenteditable="true">text</div>
+    <div id="inner" tabindex="0"><div></div></div>
+</section>
+<section id="two" class="sticky-magnet">
+    <div id="row" tabindex="0"><div id="r1" class="sticky-magnet"></div><div id="r2" class="sticky-magnet"></div><div id="r3" class="sticky-magnet"></div></div>
+</section>
+<section id="three" class="sticky-magnet">Three</section>
+<section id="four" class="sticky-magnet">Four</section>
+<pre id="result">pending</pre>
+<script src="jquery.js"></script>
+<script src="harness.js"></script>
+<script src="../src/js/core.js"></script>
+<script src="../src/js/sticky.js"></script>
+<script>
+    (async function () {
+        var H = Harness;
+        var html = document.documentElement;
+        var row = document.getElementById('row');
+        var PAD = 50;
+        function top(id) { return Math.max(0, document.getElementById(id).offsetTop - PAD); }
+        function y() { return Math.round(window.scrollY); }
+        function x() { return Math.round(row.scrollLeft); }
+        function held() { return html.classList.contains('sticky-prevent-scroll'); }
+        function el(id) { return document.getElementById(id); }
+        /** The page (or the row) has come to `to` and is the reader's again. */
+        async function at(to) { await H.until(function () { return H.near(y(), to, 1) && $(html).prop('user-scroll') !== false; }, 3000); return H.near(y(), to, 1); }
+        async function rowAt(to) { await H.until(function () { return H.near(x(), to, 1) && $(row).prop('user-scroll') !== false; }, 3000); return H.near(x(), to, 1); }
+        async function rest(id) {
+            Flow.release(null, window);
+            await H.until(function () { return !held(); }, 3000);
+            window.scrollTo({ top: top(id), behavior: 'instant' });
+            await H.after(100);
+        }
+        function notch(delta) {
+            document.body.dispatchEvent(new WheelEvent('wheel', { deltaY: delta, bubbles: true }));
+            if (getComputedStyle(html).overflowY !== 'hidden') window.scrollBy({ top: delta, behavior: 'instant' });
+            requestAnimationFrame(function () {});
+        }
+
+        H.check(Sticky.settings.scrollsnap_keys === false, 'scrollsnap_keys is false by default', Sticky.settings.scrollsnap_keys);
+
+        // Off (the default): the keys are the browser's.
+        Sticky.ready({ scrollsnap: true });
+        await H.after(60);
+        var off = H.key('ArrowDown');
+        await H.after(100);
+        H.check(!off.defaultPrevented && y() === 0, 'without scrollsnap_keys an arrow is left to the browser', off.defaultPrevented + ' ' + y());
+
+        Sticky.set('scrollsnap_keys', true);
+        H.check(JSON.stringify(Sticky.getMagnetPositions(window)) === JSON.stringify([top('one'), top('two'), top('three'), top('four')]), 'the page\'s magnets, without the row\'s, under the scroll padding', JSON.stringify(Sticky.getMagnetPositions(window)));
+        H.check(JSON.stringify(Sticky.getMagnetPositions(row, 'x')) === JSON.stringify([0, 580, 1180]), 'the row\'s magnets along x, under its scroll padding, the last at the end of its scroll', JSON.stringify(Sticky.getMagnetPositions(row, 'x')));
+
+        // Down the page, magnet after magnet, then back up.
+        var ids = ['two', 'three', 'four'];
+        for (var i = 0; i < ids.length; i++) {
+            var down = H.key('ArrowDown');
+            H.check(down.defaultPrevented && await at(top(ids[i])), 'ArrowDown goes to the magnet "' + ids[i] + '"', down.defaultPrevented + ' ' + y() + ' vs ' + top(ids[i]));
+        }
+        var last = H.key('ArrowDown');
+        await H.after(150);
+        H.check(!last.defaultPrevented && H.near(y(), top('four'), 1), 'ArrowDown at the last magnet is left to the browser', last.defaultPrevented + ' ' + y());
+        ids = ['three', 'two', 'one'];
+        for (i = 0; i < ids.length; i++) {
+            var up = H.key('ArrowUp');
+            H.check(up.defaultPrevented && await at(top(ids[i])), 'ArrowUp goes to the magnet "' + ids[i] + '"', up.defaultPrevented + ' ' + y() + ' vs ' + top(ids[i]));
+        }
+        var first = H.key('ArrowUp');
+        await H.after(150);
+        H.check(!first.defaultPrevented && y() === 0, 'ArrowUp at the first magnet is left to the browser', first.defaultPrevented + ' ' + y());
+
+        // From between two magnets: on to the next, back to the one being read.
+        await rest('two');
+        window.scrollTo({ top: top('two') + 200, behavior: 'instant' });
+        await H.after(100);
+        H.key('ArrowUp');
+        H.check(await at(top('two')), 'ArrowUp between two magnets goes back to the one above', y() + ' vs ' + top('two'));
+        window.scrollTo({ top: top('two') + 200, behavior: 'instant' });
+        await H.after(100);
+        H.key('ArrowDown');
+        H.check(await at(top('three')), 'ArrowDown between two magnets goes on to the one below', y() + ' vs ' + top('three'));
+
+        // Sideways on the page: no magnets follow each other across it.
+        await rest('two');
+        var side = H.key('ArrowRight');
+        await H.after(150);
+        H.check(!side.defaultPrevented && H.near(y(), top('two'), 1) && x() === 0, 'ArrowRight on the page (no magnets across it) is left to the browser', side.defaultPrevented + ' ' + y() + ' ' + x());
+
+        // In the row: ArrowRight and ArrowLeft, magnet after magnet; the page stays.
+        var right = H.key('ArrowRight', {}, row);
+        H.check(right.defaultPrevented && await rowAt(580), 'ArrowRight in the row goes to its second magnet', right.defaultPrevented + ' ' + x());
+        H.check(!held(), 'a row\'s way sets nothing on <html>, and nothing on the row', html.className + '|' + row.className);
+        H.check(row.className === '', 'the row carries no class', row.className);
+        right = H.key('ArrowRight', {}, el('r2'));
+        H.check(right.defaultPrevented && await rowAt(1180), 'ArrowRight from inside the row goes to its third magnet', right.defaultPrevented + ' ' + x());
+        right = H.key('ArrowRight', {}, row);
+        await H.after(150);
+        H.check(!right.defaultPrevented && H.near(x(), 1180, 1), 'ArrowRight at the row\'s last magnet is left to the browser', right.defaultPrevented + ' ' + x());
+        var left = H.key('ArrowLeft', {}, row);
+        H.check(left.defaultPrevented && await rowAt(580), 'ArrowLeft in the row goes back', left.defaultPrevented + ' ' + x());
+        H.key('ArrowLeft', {}, row);
+        H.check(await rowAt(0), 'ArrowLeft again reaches the first', x());
+        left = H.key('ArrowLeft', {}, row);
+        await H.after(150);
+        H.check(!left.defaultPrevented && x() === 0, 'ArrowLeft at the row\'s first magnet is left to the browser', left.defaultPrevented + ' ' + x());
+        H.check(H.near(y(), top('two'), 1), 'the page did not move for the row\'s keys', y() + ' vs ' + top('two'));
+
+        // ArrowDown in the row (it does not scroll down): the page's magnets.
+        var through = H.key('ArrowDown', {}, row);
+        H.check(through.defaultPrevented && await at(top('three')) && x() === 0, 'ArrowDown pressed in the row goes to the page\'s next magnet', through.defaultPrevented + ' ' + y() + ' ' + x());
+
+        // Left alone.
+        await rest('one');
+        async function alone(what, key, init, target) {
+            var event = H.key(key, init, target);
+            await H.after(120);
+            H.check(!event.defaultPrevented && y() === 0, what + ' is left alone', event.defaultPrevented + ' ' + y());
+        }
+        await alone('an arrow in a field', 'ArrowDown', {}, el('field'));
+        await alone('an arrow in an editable element', 'ArrowDown', {}, el('editable'));
+        await alone('an arrow inside an element that scrolls by itself', 'ArrowDown', {}, el('inner'));
+        await alone('Ctrl+arrow', 'ArrowDown', { ctrlKey: true });
+        await alone('Meta+arrow', 'ArrowDown', { metaKey: true });
+        await alone('Alt+arrow', 'ArrowDown', { altKey: true });
+        await alone('Shift+arrow (a selection)', 'ArrowDown', { shiftKey: true });
+        await alone('another key', 'PageDown', {});
+        var theirs = function (e) { e.preventDefault(); };
+        document.addEventListener('keydown', theirs);
+        var took = H.key('ArrowDown');
+        document.removeEventListener('keydown', theirs);
+        await H.after(120);
+        H.check(y() === 0, 'an arrow a handler of the page took is theirs', y());
+        Sticky.set('scrollsnap', false);
+        await alone('an arrow with scrollsnap off', 'ArrowDown', {});
+        Sticky.set('scrollsnap', true);
+
+        // A key held down: the first press and the repeats that follow lead one magnet further, each way finished first.
+        await rest('one');
+        H.key('ArrowDown');
+        var swallowed = true;
+        for (i = 0; i < 6; i++) { swallowed = H.key('ArrowDown', { repeat: true }).defaultPrevented && swallowed; }
+        H.check(swallowed && await at(top('two')), 'a key held down goes one magnet at a time', swallowed + ' ' + y() + ' vs ' + top('two'));
+        await H.after(150);
+        H.check(H.near(y(), top('two'), 1), 'the repeats of the way did not carry the page past the magnet', y() + ' vs ' + top('two'));
+        H.key('ArrowDown', { repeat: true });
+        H.check(await at(top('three')), 'still held once arrived: the next magnet', y() + ' vs ' + top('three'));
+
+        // Two presses in a row: the second goes on from where the first was going.
+        await rest('one');
+        H.key('ArrowDown');
+        H.key('ArrowDown');
+        H.check(await at(top('three')), 'two presses in a row lead two magnets further', y() + ' vs ' + top('three'));
+        await H.until(function () { return !held(); }, 3000);
+        H.check(!held(), 'and the page is given back once', html.className);
+
+        // Held (the default): a key's way is the snap's - a wheel on the way does not take it.
+        await rest('one');
+        Sticky.set('smoothscroll_duration', '600ms');
+        H.key('ArrowDown');
+        await H.until(function () { return y() > 60; }, 2000);
+        H.check(held(), 'a key\'s way holds the page as the snap\'s does (scrollsnap_hold, true by default)', html.className);
+        notch(40);
+        H.check(await at(top('two')), 'a wheel on a held way does not take it', y() + ' vs ' + top('two'));
+        await H.until(function () { return !held(); }, 3000);
+        H.check(!held(), 'the page is given back after the held way', html.className);
+
+        // scrollsnap_hold: false - the wheel takes it, nothing held; so does another key.
+        Sticky.set('scrollsnap_hold', false);
+        await rest('one');
+        H.key('ArrowDown');
+        await H.until(function () { return y() > 60; }, 2000);
+        H.check(!held() && y() < top('two') - 100, 'with scrollsnap_hold false a key\'s way sets nothing on the page', html.className + ' ' + y());
+        notch(40);
+        var stoppedAt = y();
+        await H.after(700);
+        H.check(H.near(y(), stoppedAt, 1) && $(html).prop('user-scroll') !== false, 'and a wheel on the way stops it where it is', y() + ' vs ' + stoppedAt);
+        await rest('one');
+        H.key('ArrowDown');
+        await H.until(function () { return y() > 60; }, 2000);
+        H.key('a');
+        stoppedAt = y();
+        await H.after(700);
+        H.check(H.near(y(), stoppedAt, 1) && stoppedAt < top('two') - 100, 'and so does a key that is not a magnet\'s', y() + ' vs ' + stoppedAt);
+        // A way in the row is the reader's to take too.
+        row.scrollLeft = 0;
+        H.key('ArrowRight', {}, row);
+        await H.until(function () { return x() > 30; }, 2000);
+        row.dispatchEvent(new WheelEvent('wheel', { deltaX: 10, bubbles: true }));
+        stoppedAt = x();
+        await H.after(700);
+        H.check(H.near(x(), stoppedAt, 1) && stoppedAt < 560 && $(row).prop('user-scroll') !== false, 'a wheel on the row stops the row\'s way where it is', x() + ' vs ' + stoppedAt);
+
+        H.done();
+    })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
+</script>
+</body>
+</html>

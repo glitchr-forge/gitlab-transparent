@@ -39,6 +39,60 @@ the scroll: a wheel on the way neither stops it nor adds to it, so a quick
 gesture leads one magnet further, not two. The class is taken off `debounce`
 after the movement ended, however it ended.
 
+### A way the reader may take: `scrollsnap_hold` (1.1)
+
+`scrollsnap_hold` (`true`) is that held way. Set to `false`, the way to a
+magnet is the reader's to take: nothing is set on `<html>`, and a wheel, a
+finger, a press or a key on the way stops the page where it is and gives the
+scroll back at once. The snap does not start again against that gesture: it
+waits until the scroll has been quiet for `debounce`, then acts as it always
+does, at the reader's next scroll. The option is the library's, read each time
+a way begins: `Sticky.ready({...})` or `Sticky.set("scrollsnap_hold", false)`.
+
+```js
+Sticky.ready({ scrollsnap: true, passive: false, scrollsnap_hold: false });
+```
+
+### The arrow keys: `scrollsnap_keys` (1.1)
+
+`scrollsnap_keys` (`false`): the arrows go from magnet to magnet, with the
+snap's movement (`smoothscroll_duration`, `smoothscroll_easing`) and the way
+`scrollsnap_hold` says. <kbd>↓</kbd> / <kbd>↑</kbd> where the magnets follow
+each other down a scroller - the page, most often -, <kbd>→</kbd> /
+<kbd>←</kbd> where they follow each other across one (a row with
+`overflow-x: auto` holding `.sticky-magnet` children). The scroller is the one
+the key is pressed in (the focus inside it, or the pointer over it), the page
+otherwise; a magnet is met under the scroller's `scroll-padding`, and a
+scroller's magnets are its own: the page's keys never count a row's.
+
+```html
+<section class="sticky-magnet">…</section>
+<section class="sticky-magnet">
+    <div class="row" tabindex="0" style="display: flex; overflow-x: auto">
+        <article class="sticky-magnet">…</article>
+        <article class="sticky-magnet">…</article>
+    </div>
+</section>
+<script>Sticky.ready({ scrollsnap: true, scrollsnap_keys: true });</script>
+```
+
+Down goes on to the next magnet, up back to the one being read, then to the
+one before. Two presses in a row lead two magnets further (the second goes on
+from where the first was going); a key held down goes one magnet at a time,
+each way finished first. The key is left alone - to the browser, or to the
+page - past the last magnet and before the first, along an axis where no
+magnets follow each other, in a field (`input`, `textarea`, `select`,
+`contenteditable`), on a widget with keys of its own (a slider, tabs, a menu,
+audio, video), in an open `<dialog>`, with Shift, Alt, Ctrl or Meta held,
+inside an element that scrolls by itself along that axis, and when a handler
+of the page took it (`preventDefault`): the library listens on the window, in
+the bubble phase. The keys do not need `passive: false`: they work with or
+without the snap under the wheel. `Sticky.getMagnetPositions(scroller, axis)`
+gives the scroll positions the keys go through (`"y"` by default).
+
+The buttons (`.sticky-magnet-prev`, `-next`...) are as they were. For
+`.sticky-stop` sections, the same keys are the stops' `keys` option, below.
+
 `Sticky.scrollTo(dict, callback, el)` and `Flow.scrollTo(el, dict, callback)`
 call back once, whatever becomes of the movement, with
 `{completed, reason, top, left}`: `"arrived"` (also when there was no way to

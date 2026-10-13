@@ -24,7 +24,7 @@
 
     var document = window.document;
 
-    var Flow = { core: true, version: '1.0.4' };
+    var Flow = { core: true, version: '1.1.0' };
 
     // ── jQuery ───────────────────────────────────────────────────────────
     // A bundler's ProvidePlugin gives the bare `jQuery` identifier; a page
