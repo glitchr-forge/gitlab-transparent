@@ -43,6 +43,10 @@ const pages = {
             for (var i = 0; i < late.length; i++) late[i].style.height = '0px';
             [].forEach.call(late, function (el, i) { setTimeout(function () { el.style.height = '300px'; }, 80 + 25 * i); });
         })();</script>`,
+    // A page as the sites make them, for the measurements (tests/perf/): forty sections, each a stop and a
+    // headline with a block that fades in, under a header that hides.
+    perf: () => `<header id="top" class="sticky sticky-top"><a id="to-perf" href="/site/page/perf?n=${Date.now()}${Math.random()}">again</a></header>` + Array.from({ length: 40 }, (_, i) =>
+        `<section id="p${i + 1}" class="block sticky-stop sticky-headlines"><h2>p${i + 1}</h2><div class="sticky sticky-easein" data-sticky-easein="0">block</div><p><a href="#p${(i + 2) % 40 + 1}">on</a></p></section>`).join('\n'),
     // A page a script finishes: its row scrolls sideways only a moment after the page is in, each time.
     built: () => `<h1>Built</h1><a id="to-two" href="/site/page/two">two</a>` + Array.from({ length: 8 }, (_, i) =>
         `<section id="b${i + 1}" class="block sticky-stop">b${i + 1}</section>`).join('\n') + `<div id="row" class="row"><div class="wide">wide</div></div>

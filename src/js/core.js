@@ -182,27 +182,49 @@
     // order they were queued.
     var queued = [];
     var frameId = null;
+    // While the frame's functions run: the ones that have, this frame.
+    var ran = null;
+    var later = [];
 
     Flow.frame = function (fn) {
+        // Asked for from inside the frame (a scroll heard there queues what
+        // it has to draw): run in this same frame, after the ones already
+        // queued - waiting for the next one put everything a scroll draws a
+        // frame behind the scroll. Unless it has already run in this frame:
+        // then it is asking for the next.
+        if (ran !== null && ran.indexOf(fn) !== -1) {
+            if (later.indexOf(fn) === -1) later.push(fn);
+            return fn;
+        }
         if (queued.indexOf(fn) === -1) queued.push(fn);
-        if (frameId === null) frameId = requestAnimationFrame(runFrame);
+        if (ran === null && frameId === null) frameId = requestAnimationFrame(runFrame);
         return fn;
     };
 
     Flow.cancelFrame = function (fn) {
         var at = queued.indexOf(fn);
         if (at !== -1) queued.splice(at, 1);
+        at = later.indexOf(fn);
+        if (at !== -1) later.splice(at, 1);
     };
 
     function runFrame(time) {
         frameId = null;
-        var batch = queued;
-        queued = [];
         viewportCache = null;
-        for (var i = 0; i < batch.length; i++) {
-            try { batch[i](time); } catch (e) { setTimeout(function () { throw e; }, 0); }
+        ran = [];
+        while (queued.length) {
+            var fn = queued.shift();
+            ran.push(fn);
+            try { fn(time); } catch (e) { rethrow(e); }
+        }
+        ran = null;
+        if (later.length) {
+            queued = later;
+            later = [];
+            frameId = requestAnimationFrame(runFrame);
         }
     }
+    function rethrow(e) { setTimeout(function () { throw e; }, 0); }
 
     // ── Listeners ────────────────────────────────────────────────────────
     // One native listener per scroller and per kind, however many modules

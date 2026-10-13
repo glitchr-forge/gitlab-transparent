@@ -74,7 +74,8 @@
             }
             result.textContent = lines.join('\n');
         },
-        after: function (ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); },
+        /** ms from the next frame on: a scroll just made is heard in that frame, and what it starts (a rest's timer) has the whole wait. */
+        after: function (ms) { return new Promise(function (resolve) { requestAnimationFrame(function () { setTimeout(resolve, ms); }); }); },
         /** Wait until fn() is truthy, ms at most (2000): what it gave last. For what takes a few frames, however slow they come. */
         until: function (fn, ms) {
             var end = performance.now() + (ms === undefined ? 2000 : ms);

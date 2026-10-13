@@ -861,6 +861,10 @@
             });
     }
 
+    // Each headline's scroll-margin-top, kept between two loads or resizes.
+    var headlineMargins = new WeakMap();
+    Flow.onResize(function () { headlineMargins = new WeakMap(); });
+
     var first = true;
     var hasReset = false;
     Sticky.onScrollDelta = function (e) {
@@ -922,7 +926,11 @@
                 // (a section that lands under a fixed header, a band lower
                 // than the rest). Without the margin, a headline landed on
                 // by its own link was not the current one yet.
-                var margin = parseFloat(getComputedStyle(this).scrollMarginTop) || 0;
+                // (Read once per headline and kept until the page is loaded
+                // again or resized: asked of every headline at every frame
+                // of a scroll, it was the scroll's first cost.)
+                var margin = headlineMargins.get(this);
+                if (margin === undefined) headlineMargins.set(this, margin = parseFloat(getComputedStyle(this).scrollMarginTop) || 0);
                 return this.getBoundingClientRect().top - margin < scrollPaddingTop;
             }).toArray().sort(function (el1, el2) {
                 return el1.offsetTop > el2.offsetTop ? -1
@@ -1412,6 +1420,7 @@
             }
 
             Sticky.reset(el);
+            headlineMargins = new WeakMap();
 
             if(Sticky.get("passive") == false)
                 $(el).off('wheel.sticky').on('wheel.sticky', Sticky.onWheel);

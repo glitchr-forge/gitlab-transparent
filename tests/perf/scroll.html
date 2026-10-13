@@ -1,0 +1,106 @@
+<!doctype html>
+<!--
+  What a scroll costs, on a page as the sites make them (forty sections, each a stop and a headline
+  with a block that fades in, under a header that hides; the navigation, the sticky effects and the
+  stops loaded): the native listeners by type, and per scroll frame the time spent in the scroll
+  listeners and the animation frames, the Sticky.compute() calls, the getComputedStyle() and
+  getBoundingClientRect() reads - when the page has just been opened, and again after thirty
+  navigations. Not part of the suite: node tests/run.mjs perf/scroll.html (JQUERY=...; CPU=4 for a
+  processor four times slower; perf/scroll.html?nosticky for the stops and the navigation alone).
+  The result is one line of JSON after "ok".
+-->
+<html>
+<head><meta charset="utf-8"><link rel="stylesheet" href="/tests/site.css"><title>perf, scroll</title>
+<style>.sticky-top { position: sticky; top: 0; height: 60px; background: #eee; } .sticky-easein { height: 40px; opacity: 0; transition: opacity 250ms; } .sticky-easein.show { opacity: 1; }</style></head>
+<body>
+<div id="page" data-layout="main"><a id="to-perf" href="/site/page/perf">perf</a></div>
+<div id="loader"></div>
+<pre id="result">pending</pre>
+<script src="../jquery.js"></script>
+<script src="../harness.js"></script>
+<script>
+    // The time spent in scroll listeners and animation frames, and the reads that force style or layout.
+    var Cost = { ms: 0, style: 0, rect: 0, compute: 0 };
+    (function () {
+        var add = EventTarget.prototype.addEventListener;
+        EventTarget.prototype.addEventListener = function (type, fn, options) {
+            if (type !== 'scroll' || typeof fn !== 'function') return add.call(this, type, fn, options);
+            var timed = function () { var t = performance.now(); try { return fn.apply(this, arguments); } finally { Cost.ms += performance.now() - t; } };
+            return add.call(this, type, timed, options);
+        };
+        var raf = window.requestAnimationFrame;
+        window.requestAnimationFrame = function (fn) {
+            if (fn && fn.untimed) return raf.call(window, fn);
+            return raf.call(window, function (time) { var t = performance.now(); try { return fn(time); } finally { Cost.ms += performance.now() - t; } });
+        };
+        var style = window.getComputedStyle;
+        window.getComputedStyle = function () { Cost.style++; return style.apply(window, arguments); };
+        var rect = Element.prototype.getBoundingClientRect;
+        Element.prototype.getBoundingClientRect = function () { Cost.rect++; return rect.call(this); };
+    })();
+</script>
+<script src="../../src/js/core.js"></script>
+<script src="../../src/js/transparent.js"></script>
+<script>if (!/nosticky/.test(location.search)) document.write('<script src="../../src/js/sticky.js"><\/script>');</script>
+<script src="../../src/js/stops.js"></script>
+<script>
+    (async function () {
+        var H = Harness;
+        // ?nosticky: the stops and the navigation alone, as most sites load them.
+        var sticky = !!window.Sticky;
+        if (sticky) {
+            var compute = Sticky.compute;
+            Sticky.compute = function () { Cost.compute++; return compute.apply(this, arguments); };
+        }
+        var frame = function () { return new Promise(function (resolve) { var fn = function () { setTimeout(resolve, 0); }; fn.untimed = true; requestAnimationFrame(fn); }); };
+
+        function loaded() {
+            return new Promise(function (resolve, reject) {
+                var timer = setTimeout(function () { reject(new Error('no transparent:load ' + location.pathname + ' ' + document.documentElement.className + ' ' + (document.querySelector('#page') || {}).childElementCount)); }, 5000);
+                window.addEventListener('transparent:load', function () { clearTimeout(timer); setTimeout(resolve, 60); }, { once: true });
+            });
+        }
+        async function again() { var next = loaded(); document.getElementById('to-perf').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); await next; }
+
+        // 120 frames of the reader's scroll, 37 px each: the cost per frame.
+        async function measure() {
+            window.scrollTo({ top: 0, behavior: 'instant' });
+            await H.after(700);
+            Cost.ms = Cost.style = Cost.rect = Cost.compute = 0;
+            var frames = 120;
+            for (var i = 1; i <= frames; i++) {
+                window.scrollTo({ top: i * 37, behavior: 'instant' });
+                await frame();
+            }
+            var per = function (n) { return Math.round(100 * n / frames) / 100; };
+            return { ms: Math.round(1000 * Cost.ms / frames) / 1000, compute: per(Cost.compute), getComputedStyle: per(Cost.style), getBoundingClientRect: per(Cost.rect) };
+        }
+        var listeners = function () {
+            var all = H.listeners(/^(window|document|html|body) /), out = {};
+            Object.keys(all).forEach(function (key) { if (/ (scroll|wheel|mousewheel|touchstart|touchend|touchmove|mousedown|resize|orientationchange|keydown|click|DOMContentLoaded|load|beforeunload|focusin)$/.test(key)) out[key] = all[key]; });
+            return out;
+        };
+
+        await new Promise(function (resolve) { window.addEventListener('load', resolve, { once: true }); });
+        if (sticky) Sticky.ready({ scrollsnap: false, autoscroll: false, swipehint: false });
+        Transparent.ready({ identifier: '#page', progress_bar: 'off' });
+        await H.after(80);
+        await again();
+        StickyStops.attach(window, { settle: 320, reach: 140 });
+        await H.after(80);
+
+        var out = { fresh: { listeners: listeners(), frame: await measure() } };
+        for (var n = 0; n < 30; n++) await again();
+        out.after30 = { listeners: listeners(), frame: await measure() };
+
+        // A swap itself: the time from the click to transparent:load, the median of ten.
+        var swaps = [];
+        for (n = 0; n < 10; n++) { var t = performance.now(); await again(); swaps.push(performance.now() - t - 60); }
+        swaps.sort(function (a, b) { return a - b; });
+        out.swap_ms = Math.round(swaps[5]);
+        H.note(JSON.stringify(out));
+        H.done();
+    })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
+</script>
+</body>
+</html>

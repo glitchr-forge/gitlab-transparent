@@ -347,6 +347,26 @@
         this.focusTarget.addEventListener('focusin', this.onFocus, true);
         Flow.onResize(this.onResize);
 
+        // The page's stops are measured once and kept while the page keeps
+        // its shape: the progress, told at every frame of a scroll, read
+        // every stop's box and style again each time (on a page of forty
+        // sections, 80 boxes and 160 computed styles a frame). The page
+        // changing size, or nodes coming and going, says to measure again;
+        // so do a resize, refresh(), a rest and a key - which always measure.
+        this.dirty = true;
+        this.kept = false;
+        this.observers = [];
+        if (this.isWindow && typeof ResizeObserver === 'function' && typeof MutationObserver === 'function' && document.body) {
+            var self = this;
+            var touch = function () { self.dirty = true; };
+            var sized = new ResizeObserver(touch);
+            sized.observe(document.body);
+            var changed = new MutationObserver(touch);
+            changed.observe(document.body, { childList: true, subtree: true });
+            this.observers = [sized, changed];
+            this.kept = true;
+        }
+
         this.refresh();
     }
 
@@ -355,6 +375,9 @@
         Flow.offInterrupt(this.scroller, this.onInterrupt);
         this.focusTarget.removeEventListener('focusin', this.onFocus, true);
         Flow.offResize(this.onResize);
+        for (var o = 0; o < this.observers.length; o++) this.observers[o].disconnect();
+        this.observers = [];
+        this.kept = false;
         clearTimeout(this.timer);
         clearTimeout(this.glideTimer);
         if (this.frame !== null) Flow.cancelFrame(this.tick);
@@ -438,10 +461,29 @@
         return true;
     };
 
-    Stops.prototype.measure = function () {
+    /** A stop's place from its box, the scroller's origin, scroll position and padding, and the stop's own margin. */
+    Stops.prototype.place = function (rect, frame, margin) {
+        return (this.horizontal ? rect.left : rect.top) - frame.origin + frame.top - frame.padding - margin;
+    };
+
+    /** What every stop's place is counted from: read once per measure, not once per stop. */
+    Stops.prototype.frameOf = function () {
+        return { origin: this.isWindow ? 0 : this.edge(this.scroller), top: this.top(), padding: this.padding() };
+    };
+
+    /**
+     * The stops, measured: [{element, top, end, bandUp, bandDown}], top to
+     * bottom. measure(true) gives the last measure back when the page has
+     * kept its shape since (the window's stops, see the constructor).
+     */
+    Stops.prototype.measure = function (kept) {
+        if (kept === true && this.kept && !this.dirty) return this.stops;
+
         var options = this.options;
         var elements = this.root.querySelectorAll(options.selector);
         var max = this.max();
+        var frame = this.frameOf();
+        var viewport = this.viewport();
         var stops = [];
         var i;
 
@@ -449,7 +491,9 @@
             var el = elements[i];
             if (!el.getClientRects().length) continue; // display: none
             if (!this.owns(el)) continue;
-            var position = this.position(el);
+            var rect = el.getBoundingClientRect();
+            var margin = this.margin(el);
+            var position = this.place(rect, frame, margin);
             var top = clamp(Math.round(position), 0, max);
             stops.push({
                 element: el,
@@ -463,9 +507,11 @@
                 top: top,
                 // Where its bottom meets the bottom of the screen: the end of
                 // its free reading. The top itself for a stop the screen holds.
-                end: Math.min(Math.max(top, Math.round(position + this.padding() + this.margin(el) + this.size(el) - this.viewport())), max),
+                end: Math.min(Math.max(top, Math.round(position + frame.padding + margin + (this.horizontal ? rect.width : rect.height) - viewport)), max),
                 bandUp: Math.max(0, toPixels(el.dataset.stickyBandUp, el, options.bandUp)),
-                bandDown: Math.max(0, toPixels(el.dataset.stickyBandDown, el, options.bandDown))
+                bandDown: Math.max(0, toPixels(el.dataset.stickyBandDown, el, options.bandDown)),
+                // Kept for the check a kept measure is given at each frame (see progress).
+                margin: margin
             });
         }
         stops.sort(function (a, b) { return a.top - b.top; });
@@ -494,7 +540,22 @@
         }
 
         this.stops = unique;
+        this.max_ = max;
+        this.padding_ = frame.padding;
+        this.dirty = false;
         return unique;
+    };
+
+    /**
+     * Whether a kept stop is still where it was measured: its box read again
+     * (one read; the padding and its margin as measured). A stop that moves
+     * with the scroll - pinned, in a pinned block - or that a transition
+     * moves changes neither the page's size nor its nodes.
+     */
+    Stops.prototype.still = function (stop) {
+        if (stop.bottom) return this.max() === this.max_;
+        var frame = { origin: this.isWindow ? 0 : this.edge(this.scroller), top: this.top(), padding: this.padding_ };
+        return clamp(Math.round(this.place(stop.element.getBoundingClientRect(), frame, stop.margin)), 0, this.max_) === stop.top;
     };
 
     /** A tall stop's last screen, as a place to glide to. */
@@ -901,7 +962,8 @@
      * sticky:progress when it changed. null with fewer than two stops.
      */
     Stops.prototype.progress = function () {
-        var stops = this.measure();
+        var kept = this.kept && !this.dirty;
+        var stops = this.measure(true);
         var style = this.root.style;
 
         if (stops.length < 2) {
@@ -917,6 +979,15 @@
         var y = this.top();
         var i = 0;
         while (i < stops.length - 2 && y >= stops[i + 1].top) i++;
+
+        // A kept measure is checked where it is used: the two stops the
+        // scroll is between, read again. Moved, everything is measured anew.
+        if (kept && !(this.still(stops[i]) && this.still(stops[i + 1]))) {
+            stops = this.measure();
+            if (stops.length < 2) return this.progress();
+            i = 0;
+            while (i < stops.length - 2 && y >= stops[i + 1].top) i++;
+        }
 
         var upper = stops[i];
         var lower = stops[i + 1];

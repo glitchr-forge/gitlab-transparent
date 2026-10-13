@@ -52,13 +52,13 @@
         answers = [];
         Ajaxer.send('ping', {}, function (data) { answers.push(data); });
         Ajaxer.send('ping', {}, function (data) { answers.push(data); });
-        await H.after(300);
+        await H.until(function () { return answers.length >= 1; }, 3000); await H.after(60);
         H.check(answers.length === 1, 'two sends within the throttle go once', answers.length);
         Ajaxer.setThrottle('ping', 0);
         answers = [];
         Ajaxer.send('ping', {}, function (data) { answers.push(data); });
         Ajaxer.send('ping', {}, function (data) { answers.push(data); });
-        await H.after(300);
+        await H.until(function () { return answers.length >= 2; }, 3000); await H.after(60);
         H.check(answers.length === 2, 'with the throttle off both go', answers.length);
 
         // Durations with a unit: "250ms" is a window of 250 ms (not off), "1s" is one second (not 1 ms).
@@ -66,18 +66,18 @@
         answers = [];
         Ajaxer.send('ping', {}, function (data) { answers.push(data); });
         Ajaxer.send('ping', {}, function (data) { answers.push(data); });
-        await H.after(150);
+        await H.until(function () { return answers.length >= 1; }, 3000); await H.after(60);
         H.check(answers.length === 1, '"250ms" throttles two quick sends to one', answers.length);
         await H.after(300);
         Ajaxer.send('ping', {}, function (data) { answers.push(data); });
-        await H.after(150);
+        await H.until(function () { return answers.length >= 2; }, 3000); await H.after(60);
         H.check(answers.length === 2, 'and the window closes after 250 ms', answers.length);
         Ajaxer.setThrottle('ping', '1s');
         await H.after(250);
         Ajaxer.send('ping', {}, function (data) { answers.push(data); });
         await H.after(150);
         Ajaxer.send('ping', {}, function (data) { answers.push(data); });
-        await H.after(300);
+        await H.until(function () { return answers.length >= 3; }, 3000); await H.after(60);
         H.check(answers.length === 3, '"1s" holds the window for a second (not 1 ms)', answers.length);
         Ajaxer.setThrottle('ping', 0);
 
@@ -120,16 +120,18 @@
 
         // loader_throttle: once shown, the loader stays at least that long (stored and never read up to 1.0.2).
         Ajaxer.setLoaderDebounce('slow', 0);
-        Ajaxer.setLoaderThrottle('slow', '300ms');
+        Ajaxer.setLoaderThrottle('slow', '600ms');
         Ajaxer.setUrl('slow', '/site/api?ms=60');
+        target.classList.remove('ajaxer-success');
         Ajaxer.send('slow', {});
-        await H.after(160);
+        await H.until(function () { return target.classList.contains('ajaxer-success'); }, 2000);
         H.check(loader.classList.contains('ajaxer-call') && target.classList.contains('ajaxer-success'), 'with loader_throttle the loader outlasts a quick answer', loader.className + ' / ' + target.className);
-        await H.after(260);
+        await H.after(700);
         H.check(!loader.classList.contains('ajaxer-call'), 'and goes once its time is up', loader.className);
         Ajaxer.setLoaderThrottle('slow', 0);
+        target.classList.remove('ajaxer-success');
         Ajaxer.send('slow', {});
-        await H.after(160);
+        await H.until(function () { return target.classList.contains('ajaxer-success'); }, 2000);
         H.check(!loader.classList.contains('ajaxer-call'), 'without it, the loader goes with the answer', loader.className);
 
         // query_limit: one call at a time. Not cancelable, the newcomer is refused; cancelable, the one in flight is aborted.

@@ -6,7 +6,8 @@
 // --dump-dom and a virtual time budget: under virtual time the renderer produces frames only
 // now and then, so requestAnimationFrame and the scroll events - everything the scroll modules
 // are made of - stand still. Here the pages run in real time; a page has TIMEOUT ms (15000) to
-// replace "pending" in #result.
+// replace "pending" in #result. `node tests/run.mjs perf/scroll.html` runs the measurements of
+// tests/perf/ the same way (they are not part of the suite: named, never globbed).
 //
 // The pages are served over HTTP (a server of this script's, on a free port of 127.0.0.1): the
 // navigation needs an origin - a history it may push to, requests it may send - and tests/site.mjs
@@ -104,6 +105,8 @@ async function run(cdp, page, origin) {
     await cdp.send('Page.enable', {}, sessionId);
     // In front: a tab behind another draws no frame, and the scroll modules are made of frames.
     await cdp.send('Page.bringToFront', {}, sessionId);
+    // CPU=4: a processor four times slower, for the measurements (a phone's, about).
+    if (+process.env.CPU > 1) await cdp.send('Emulation.setCPUThrottlingRate', { rate: +process.env.CPU }, sessionId);
     await cdp.send('Runtime.enable', {}, sessionId);
     const console_ = [];
     cdp.on((msg) => {
@@ -140,7 +143,8 @@ try {
     const origin = 'http://127.0.0.1:' + server.address().port;
     browser = await launch();
     const cdp = await connect(browser.url);
-    const pages = readdirSync(here).filter((f) => f.endsWith('.html') && (!only.length || only.includes(f))).sort();
+    // Every page of tests/, or the ones named - which may be in a folder (perf/scroll.html: the measurements, not part of the suite).
+    const pages = only.length ? only : readdirSync(here).filter((f) => f.endsWith('.html')).sort();
     for (const page of pages) {
         const result = await run(cdp, page, origin);
         const ok = result.split('\n').every((line) => line.startsWith('ok'));

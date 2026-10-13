@@ -119,6 +119,61 @@
         d.style.scrollMarginTop = '';
         document.documentElement.style.scrollPaddingTop = '';
 
+        // The progress, told at each frame of a scroll, does not read every stop again: the measure is kept while
+        // the page keeps its shape (up to 1.0.2: two boxes and four computed styles per stop, per frame).
+        stops.refresh();
+        await H.frame();
+        var reads = { style: 0, rect: 0 };
+        var style = window.getComputedStyle, rect = Element.prototype.getBoundingClientRect;
+        window.getComputedStyle = function () { reads.style++; return style.apply(window, arguments); };
+        Element.prototype.getBoundingClientRect = function () { reads.rect++; return rect.call(this); };
+        var told = [];
+        var tell = function (e) { told.push(e.detail.progress); };
+        window.addEventListener('sticky:progress', tell);
+        StickyStops.pause();
+        for (var f = 1; f <= 10; f++) { H.scroll(top('a') + f * 20); await H.frame(); }
+        window.getComputedStyle = style;
+        Element.prototype.getBoundingClientRect = rect;
+        H.check(told.length >= 8 && told[told.length - 1] > told[0], 'the progress is told at each frame of a scroll', told.length);
+        H.check(reads.style <= 10 && reads.rect <= 30, 'for two boxes read a frame, not every stop\'s box and style', JSON.stringify(reads) + ' over 10 frames, 5 stops');
+
+        // The progress is drawn in the frame of the scroll it follows, not the one after (1.0.0 to 1.0.2: the
+        // scroll was heard in the frame, and what it queued waited for the next).
+        var property = function () { return document.documentElement.style.getPropertyValue('--sticky-progress'); };
+        H.scroll(top('a') + 400);
+        await new Promise(function (resolve) { requestAnimationFrame(function () { setTimeout(resolve, 0); }); });
+        var first = property();
+        H.scroll(top('a') + 500);
+        await new Promise(function (resolve) { requestAnimationFrame(function () { setTimeout(resolve, 0); }); });
+        H.check(property() !== first && Math.abs(parseFloat(property()) - 500 / (top('b') - top('a'))) < 0.01, 'the progress is written in the frame of its scroll', first + ' -> ' + property());
+
+        // The page changing says to measure again: a stop that comes (nodes), one pushed down (the page's size)...
+        var count = stops.measure(true).length;
+        var extra = document.createElement('section'); extra.id = 'extra'; extra.className = 'sticky-stop';
+        document.body.insertBefore(extra, document.querySelector('footer'));
+        await H.frame();
+        H.check(stops.measure(true).length === count + 1, 'a stop added to the page is measured without being asked', stops.measure(true).length + ' vs ' + (count + 1));
+        var before = stops.measure(true).filter(function (s) { return s.element === d; })[0].top;
+        document.getElementById('a').style.height = 'calc(100vh + 70px)';
+        await H.frame();
+        H.check(stops.measure(true).filter(function (s) { return s.element === d; })[0].top === before + 70, 'a stop pushed down by what grew above it too', stops.measure(true).filter(function (s) { return s.element === d; })[0].top + ' vs ' + (before + 70));
+        // ...and one that moves while the page keeps its size and its nodes is found out where the scroll is.
+        before = stops.measure(true).filter(function (s) { return s.element === d; })[0].top;
+        document.getElementById('tall').style.height = 'calc(250vh - 50px)';
+        extra.style.height = 'calc(100vh + 50px)';
+        await H.frame();
+        told = [];
+        H.scroll(before - 100);
+        await H.frame();
+        H.check(stops.measure(true).filter(function (s) { return s.element === d; })[0].top === before - 50 && stops.state.to === d, 'a stop that moved while the page kept its size is measured again when the scroll comes to it', stops.measure(true).filter(function (s) { return s.element === d; })[0].top + ' vs ' + (before - 50) + ' ' + JSON.stringify({ told: told.length, to: stops.state.to.id, from: stops.state.from.id, dirty: stops.dirty, y: y(), now: top('d'), sh: document.documentElement.scrollHeight }));
+        window.removeEventListener('sticky:progress', tell);
+        StickyStops.resume();
+        extra.remove();
+        document.getElementById('a').style.height = '';
+        document.getElementById('tall').style.height = '';
+        H.scroll(0);
+        await H.after(SETTLE * 3);
+
         // One listener of each kind, through the core.
         var l = H.listeners(/^window (scroll|wheel|touchstart|mousedown|resize|keydown)$/);
         H.check(l['window scroll'] === 1 && l['window keydown'] === 1 && l['window wheel'] === 1, 'one native listener per kind on the window', JSON.stringify(l));
