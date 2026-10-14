@@ -232,6 +232,32 @@
         H.check(Cookie.banner().id === 'made' && Cookie.banner().parentNode === $id('here'), 'template: a function; container: where it goes');
         wipe();
 
+        // ── How long, in the site's words ───────────────────────────────────
+        var lasts = function () { return all('entry-duration').map(function (el) { return el.textContent + ' [' + el.getAttribute('data-cookie-entry-duration') + ']'; }).join(' | '); };
+        var kept = function () {
+            return {
+                necessary: { required: true, storage: [{ name: 'SID', duration: 'session' }, { name: 'CART', duration: '30d', durationLabel: 'a month' }] },
+                analytics: { storage: [{ name: '_pk_*', duration: '13mo' }, { name: 'VISITOR', duration: 3600 }, { name: 'SEEN', durationLabel: 'for the visit' }] }
+            };
+        };
+        Cookie.ready({ autoOpen: false, categories: kept() });
+        Cookie.open('details');
+        H.check(lasts() === 'session [session] | a month [30d] | 13mo [13mo] | 3600 [3600] | for the visit []', 'a duration is printed as declared unless the entry has words for it (durationLabel); the attribute keeps the duration declared', lasts());
+        H.check(Cookie.category('necessary').storage[1].duration === '30d' && Cookie.category('necessary').storage[1].durationLabel === 'a month', 'and a script reads both');
+        wipe();
+        Cookie.ready({ autoOpen: false, categories: kept(), durations: { session: 'until the browser closes', '13mo': '13 months', '30d': 'thirty days' } });
+        Cookie.open('details');
+        H.check(lasts() === 'until the browser closes [session] | a month [30d] | 13 months [13mo] | 3600 [3600] | for the visit []', 'durations: a table of the site\'s words by duration; the entry\'s own words first', lasts());
+        Cookie.ready({ durations: { '3600': 'an hour' } });
+        H.check(lasts() === 'until the browser closes [session] | a month [30d] | 13 months [13mo] | an hour [3600] | for the visit []', 'given again, the table adds up and the rows follow', lasts());
+        wipe();
+        var asked = [];
+        Cookie.ready({ autoOpen: false, categories: kept(), durations: function (duration, entry, seconds) { asked.push([duration, entry.name, seconds]); return seconds === null ? null : Math.round(seconds / 86400) + ' days'; } });
+        Cookie.open('details');
+        H.check(lasts() === 'session [session] | a month [30d] | 390 days [13mo] | 0 days [3600] | for the visit []', 'durations: a function of the duration, the entry and its seconds; nothing returned leaves the duration as declared', lasts());
+        H.check(JSON.stringify(asked[0]) === '["session","SID",null]' && asked.some(function (call) { return call[0] === '13mo' && call[2] === 13 * 2592000; }), 'called with what was declared', JSON.stringify(asked));
+        wipe();
+
         // ── Less motion ─────────────────────────────────────────────────────
         var reduced = Cookie.reduced;
         Cookie.reduced = function () { return true; };

@@ -125,7 +125,10 @@ server that translates its texts does:
 ```
 
 It is read when the page is loaded (and after every page the navigation swaps
-in), as `Cookie.ready()` would be called with it.
+in), as `Cookie.ready()` would be called with it. The block is looked for
+under `data-cookie-config` whatever the site's `prefix` - a page can announce
+its prefix there -, under the site's prefix (`data-consent-config`), and where
+the `config` option says (a selector: `config: 'script[data-settings]'`).
 
 ## Categories
 
@@ -152,7 +155,8 @@ Cookie.granted('chat');      // what a script should do now: the answer, else th
 
 ## What is stored
 
-Each entry: `{type, name, category, duration, purpose, path, domain}` - under a
+Each entry: `{type, name, category, duration, durationLabel, purpose, path,
+domain}` - under a
 category's `storage`, in the configuration's `storage` list (with its
 `category`), or by `Cookie.storage(entry)`.
 
@@ -160,9 +164,23 @@ category's `storage`, in the configuration's `storage` list (with its
 | --- | --- |
 | `type` | `cookie` (default), `local` (`localStorage`) or `session` (`sessionStorage`) |
 | `name` | the name, or a pattern with `*` (`_pk_*`, `USER/*`); a `RegExp` in a script |
-| `duration` | how long it is kept: seconds, or `"30d"`, `"12h"`, `"13mo"`, `"1y"`, `"session"`. The lifetime of a cookie written through the library; shown in the detailed section |
+| `duration` | how long it is kept: seconds, or `"30d"`, `"12h"`, `"13mo"`, `"1y"`, `"session"`. The lifetime of a cookie written through the library; shown in the detailed section, in the site's words when it has some (below) |
+| `durationLabel` | the site's words for that duration, shown in its place |
+| `label` | the site's words for the name, shown in its place |
 | `purpose` | the site's words for what it is for |
 | `path`, `domain` | of the cookie, when it is not the site's default (needed to erase a third party's) |
+
+The duration is the cookie's; what the visitor reads of it is the site's.
+An entry's `durationLabel` first, else the `durations` option, else the
+duration as declared (`30d`):
+
+```js
+durations: { '30d': '30 jours', '13mo': '13 mois', session: 'Le temps de la visite' }     // by duration as declared
+durations: function (duration, entry, seconds) { return seconds ? Math.round(seconds / 86400) + ' jours' : null; }
+```
+
+A function that returns nothing leaves the duration as declared. The element
+keeps it in its attribute (`data-cookie-entry-duration="30d"`).
 
 Reading and writing through the library goes by the declaration:
 
@@ -202,6 +220,11 @@ whose `implicit` (for `default`) and `erase` (name prefixes of cookies) are
 understood too. `options.feature` (a name, or `{name, label}`) adds the
 feature to the category's list, in the detailed section.
 `Cookie.unuse(category, onGrant)` takes it back.
+
+The order of the scripts does not matter: a feature registered before its
+category is declared follows the declaration when it comes - `onGrant` runs
+(and `cookie:grant` is sent) if the category is declared on until refused or
+required, `onRevoke` if it was on and is declared off.
 
 Elements of the page wait for a category too, inert until it is granted:
 
@@ -250,6 +273,37 @@ The HTML is the site's, or the library's minimal one:
   `refuse`, `customize`, `detailsTitle`, `detailsText`, `acceptAll`,
   `refuseAll` (else `accept` and `refuse`), `save`, `close`, `required`.
 
+The bare default is for a site that has no banner of its own (`bare:
+'auto'`). Once the site has shown one - found in a page, or named by `root`
+or `template` - a page where it put none gets none: nothing is built there,
+the question (and its countdown) waits for the next page that has a banner.
+`bare: true` builds the default on such a page, `bare: false` never builds it.
+
+### Several places in a page
+
+A page may have several places for the banner - a footer, a bar that folds
+away on a phone, a corner -, each with its `data-cookie-banner`. One is the
+live banner; the others stay hidden.
+
+- By itself, the library takes the first whose parent the visitor can see
+  (not `display: none`, `visibility: hidden`, transparent or under `hidden`),
+  else the first of the page. A banner left where it cannot be seen opens, the
+  next time, in a place that can.
+- `root` names it: an element, a selector, or a function returning one,
+  asked again at each opening - the live banner then goes where it says.
+- `Cookie.mount(target)` puts the live banner there, as it is (its view, its
+  switches, its countdown, the focus): in the place of another
+  `[data-cookie-banner]`, which takes the place it leaves and stays hidden;
+  before a `<template data-cookie-banner>`; or at the end of any other
+  element. Called before there is a banner, with a `[data-cookie-banner]`, it
+  names the one that becomes it. It returns the banner (`null` when there is
+  none); a place the site chose this way is kept, seen or not.
+
+```js
+Cookie.mount('#footer [data-cookie-banner]');     // the panel now sits in the footer
+button.addEventListener('click', function () { Cookie.mount(button.parentNode); Cookie.open(); });
+```
+
 The parts are found by attribute, wherever they are in the banner:
 
 | Attribute | Part |
@@ -262,7 +316,7 @@ The parts are found by attribute, wherever they are in the banner:
 | `data-cookie-details` | the detailed section (a modal dialog) |
 | `data-cookie-categories` | where the rows go |
 | `<template data-cookie-row>` | the site's row, cloned per category; else a default row |
-| `data-cookie-toggle`, `data-cookie-label`, `data-cookie-description`, `data-cookie-required`, `data-cookie-entries`, `data-cookie-features` | in a row: the checkbox (`role="switch"`), the words, the mark of a required category (`texts.required`), the lists of what it stores (an item per entry, `data-cookie-entry="cookie"` with its `-name`, `-duration` and `-purpose`) and governs |
+| `data-cookie-toggle`, `data-cookie-label`, `data-cookie-description`, `data-cookie-required`, `data-cookie-entries`, `data-cookie-features` | in a row: the checkbox (`role="switch"`), the words, the mark of a required category (`texts.required`), the lists of what it stores (an item per entry, `data-cookie-entry="cookie"` with its `-name`, `-duration` - in the site's words, the duration declared in the attribute - and `-purpose`) and governs |
 | `data-cookie-save` | keeps the switches as set |
 | `data-cookie-close` | closes without answering |
 | `data-cookie-countdown`, `data-cookie-count` | the countdown's sentence (shown only while it counts) and the seconds left |
@@ -290,9 +344,12 @@ countdown: { duration: '10s', action: 'default' }     // or countdown: '10s' - t
 | `refuse` | every category off, but the required ones |
 | `none` | nothing: the countdown ends, the banner stays and waits |
 
-It waits while the page is hidden (another tab), goes on across the pages the
-navigation swaps in, and stops for good once the visitor opens the detailed
-section or answers. `countdown: false`, `0` or
+It runs only while the question can be read: it waits while the page is
+hidden (another tab), while the banner is not on screen (a parent folded
+away, `display: none`, `hidden`, `visibility: hidden`, transparent) and on a
+page that shows no banner. It goes on across the pages the navigation swaps
+in, and stops for good once the visitor opens the detailed section or
+answers. `countdown: false`, `0` or
 nothing: no countdown. `dismiss` gives a click outside the banner the same
 choice of four (`none` by default).
 
@@ -304,7 +361,9 @@ a countdown or a click outside.
 The visitor is asked again when `version` is not the one they answered, when
 a category that is not on demand has no answer (a new one), or when the answer
 is older than `record.lifetime`. With a new version or an expired answer, the
-old answers no longer count: the categories are back to their `default`.
+old answers no longer count: the categories are back to their `default` -
+with `legacy` too: the `localStorage` `cookie/<KEY>` the library keeps in
+step are erased with the answer they copied, never read to bring it back.
 `Cookie.forget()` erases the answer. A banner the visitor closed without
 answering (`data-cookie-close`, `Cookie.close()`) is not put again at each page
 the navigation swaps in: it comes back at the next page loaded, or when there
@@ -344,7 +403,7 @@ pulse (`classes.tick` is not set) and the root has `classes.reduced`.
 | `undeclared` | `'deny'` | an entry read or written through the library without a declaration: `deny` or `allow` |
 | `record` | `{store: 'cookie', name: 'cookie-consent', lifetime: '180d'}` | where the answer is kept, and for how long. `store`: `cookie`, `local`, or `{read(), write(text), clear()}`. A cookie also takes `path`, `domain`, `sameSite`, `secure`, by default those of `cookie` |
 | `cookie` | `{path: '/', domain: null, sameSite: 'Lax', secure: 'auto'}` | the attributes of every cookie the library writes; `secure: 'auto'` is `Secure` on https |
-| `legacy` | `true` | keep `localStorage` `cookie/<KEY>` in step, as `@glitchr/cookie` kept its consents, and take the answers found there when there is no record yet |
+| `legacy` | `true` | keep `localStorage` `cookie/<KEY>` in step, as `@glitchr/cookie` kept its consents, and take the answers found there for a visitor the library has no record of yet - a migration, once: `localStorage` `<record.name>.seen` says this browser has had a record, and from then on a record that is gone or no longer counts is a question to ask again |
 | `countdown` | `false` | `{duration, action}`, see [The countdown](#the-countdown) |
 | `dismiss` | `'none'` | what a click outside the banner answers: `none`, `default`, `accept`, `refuse` |
 | `signals` | `{gpc: false, dnt: false}` | see [Privacy signals](#privacy-signals) |
@@ -353,11 +412,15 @@ pulse (`classes.tick` is not set) and the root has `classes.reduced`.
 | `position` | `null` | any word, written in `data-cookie-position` for the stylesheet |
 | `container` | `null` | where a banner the library builds is put (a selector or an element); the end of `<body>` |
 | `template` | `null` | the banner's HTML: a selector, an element, a string of HTML, a function |
+| `root` | `null` | which element of the page is the banner, when it has several places for it: an element, a selector, a function (asked again at each opening). See [Several places in a page](#several-places-in-a-page) |
+| `bare` | `'auto'` | the bare default banner: `'auto'` for a site that has no banner of its own, `true` wherever a page has none, `false` never |
+| `config` | `null` | a selector of the page's configuration blocks, besides `data-cookie-config` and the prefix's own |
 | `prefix` | `'data-cookie'` | the prefix of every attribute above |
 | `hooks` | `{}` | an attribute's full name, by part: `{open: 'data-consent-open'}` |
 | `classes` | see the code | the class of each part of the default banner and of each state: `root`, `summary`, `text`, `actions`, `button`, `details`, `list`, `row`, `open`, `pending`, `customizing`, `counting`, `tick`, `reduced`... |
 | `variables` | `{}` | CSS custom properties set on the banner: `{'--cookie-accent': '#24447c'}` |
 | `texts` | `{}` | every word: a string, or `{html: '...'}` |
+| `durations` | `{}` | the site's words for the durations declared: `{'30d': '30 jours'}`, or a function `(duration, entry, seconds)` |
 | `observe` | `false` | watch the page for inert elements added later |
 
 ## Methods
@@ -371,6 +434,7 @@ Cookie.grant(key | keys)         Cookie.revoke(key | keys)                      
 Cookie.use(category, [options], onGrant, onRevoke)        Cookie.unuse(category, onGrant)
 Cookie.cookies / Cookie.local / Cookie.session            // .get(name) .set(name, value[, options]) .remove(name)
 Cookie.open([view])              Cookie.close()           Cookie.banner()       Cookie.scan([root])
+Cookie.mount(target)             // the live banner put there: another [data-cookie-banner]'s place, or any element
 Cookie.onConsent(fn)             Cookie.signals()         Cookie.reduced()
 Cookie.destroy()                 // as loaded: no category, no declaration, no banner (the answer kept stays)
 ```

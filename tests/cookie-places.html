@@ -1,0 +1,132 @@
+<!doctype html>
+<!--
+  Where the banner is, on a page that has several places for it (a bar folded away, a footer, a
+  corner - each with its [data-cookie-banner]): the one the visitor can see is taken before a
+  hidden one; Cookie.mount() puts the one live banner in the place of another, or in any
+  element, as it is, and names the one to become the banner before there is any; the `root`
+  option names it (an element, a selector, a function asked again at each opening); a banner left
+  where the visitor cannot see it moves to a place they can at the next opening. And where a
+  page's configuration is found: under the library's own prefix whatever the site's (a page
+  announces its prefix there), under the site's, and where the `config` option says. Opened by
+  tests/run.mjs in a headless browser; the page writes its verdict in #result.
+-->
+<html>
+<head><meta charset="utf-8"><title>cookie places</title></head>
+<body>
+<header id="bar" style="display: none"><div id="first" data-cookie-banner hidden><p data-cookie-text="text"></p><button type="button" data-cookie-accept>yes</button>
+    <div data-cookie-details hidden><ul data-cookie-categories></ul><button type="button" data-cookie-save>keep</button></div></div></header>
+<footer id="foot"><div id="second" data-cookie-banner hidden><p data-cookie-text="text"></p><button type="button" data-cookie-accept>yes</button>
+    <div data-cookie-details hidden><ul data-cookie-categories></ul><button type="button" data-cookie-save>keep</button></div></div></footer>
+<div id="corner"><div id="third" data-cookie-banner hidden><p data-cookie-text="text"></p><button type="button" data-cookie-accept>yes</button></div></div>
+<aside id="side"></aside>
+<script type="application/json" data-cookie-config>{"prefix": "data-site", "config": "script[data-settings]", "autoOpen": false, "categories": {"one": {"label": "One"}}}</script>
+<script type="application/json" data-site-config>{"categories": {"two": {"label": "Two"}}}</script>
+<script type="application/json" data-settings>{"categories": {"three": {"label": "Three"}}}</script>
+<pre id="result">pending</pre>
+<script src="harness.js"></script>
+<script src="../src/js/core.js"></script>
+<script src="../src/js/cookie.js"></script>
+<script>
+    (async function () {
+        var H = Harness;
+        var $id = function (id) { return document.getElementById(id); };
+        var bar = $id('bar'), foot = $id('foot'), corner = $id('corner'), side = $id('side');
+        var first = $id('first'), second = $id('second'), third = $id('third');
+        var keys = function () { return Cookie.categories().map(function (category) { return category.key; }).join(); };
+        var where = function () { return [first, second, third].map(function (el) { return el.parentNode.id; }).join(); };
+        // As the page was written, as a first visit.
+        function wipe() {
+            Cookie.destroy();
+            document.cookie.split(';').forEach(function (pair) { var name = pair.trim().split('=')[0]; if (name) document.cookie = name + '=; max-age=0; path=/'; });
+            localStorage.clear();
+            bar.appendChild(first); foot.appendChild(second); corner.appendChild(third);
+            [first, second, third].forEach(function (el) { el.hidden = true; });
+            bar.style.display = 'none'; foot.style.display = '';
+        }
+        var options = function (more) { return Object.assign({ categories: { necessary: { required: true }, analytics: { label: 'Audience' } }, texts: { text: 'A question' } }, more || {}); };
+
+        await new Promise(function (resolve) { if (document.readyState === 'complete') resolve(); else window.addEventListener('load', resolve, { once: true }); });
+
+        // ── The page's configuration ────────────────────────────────────────
+        H.check(Cookie.options.prefix === 'data-site' && keys() === 'one,two,three', 'a block under the library\'s own prefix announces the site\'s prefix and the selector of its blocks: all are read, in the page\'s order', Cookie.options.prefix + ' ' + keys());
+        var late = document.createElement('script');
+        late.type = 'application/json';
+        late.setAttribute('data-cookie-config', '');
+        late.textContent = '{"categories": {"four": {"label": "Four"}}}';
+        document.body.appendChild(late);
+        window.dispatchEvent(new Event('transparent:load'));
+        H.check(keys() === 'one,two,three,four', 'a page that comes later is read under the library\'s prefix although the site has its own', keys());
+        window.dispatchEvent(new Event('transparent:load'));
+        H.check(Cookie.categories().length === 4, 'each block once');
+        late.parentNode.removeChild(late);
+        Array.prototype.forEach.call(document.querySelectorAll('script[type="application/json"]'), function (el) { el.parentNode.removeChild(el); });
+        wipe();
+
+        // ── The place the visitor can see ───────────────────────────────────
+        Cookie.ready(options());
+        H.check(Cookie.banner() === second && second.hidden === false && first.hidden === true && first.textContent.indexOf('A question') === -1, 'of several places, the first the visitor can see is the banner - not one in a bar folded away', Cookie.banner() && Cookie.banner().id);
+        wipe();
+        foot.style.display = 'none'; corner.style.display = 'none';
+        Cookie.ready(options());
+        H.check(Cookie.banner() === first, 'none to be seen: the first of the page', Cookie.banner() && Cookie.banner().id);
+        corner.style.display = '';
+        wipe();
+
+        // ── Cookie.mount() ──────────────────────────────────────────────────
+        H.check(typeof Cookie.mount === 'function', 'Cookie.mount() is there');
+        Cookie.ready(options());
+        Cookie.open('details');
+        var box = second.querySelector('[data-cookie-toggle="analytics"]');
+        box.checked = true;
+        box.focus();
+        var moved = Cookie.mount(third);
+        H.check(moved === second && Cookie.banner() === second && where() === 'bar,corner,foot' && third.hidden === true, 'the live banner takes the place of another, which takes the place it leaves, hidden', where());
+        H.check(second.hidden === false && second.classList.contains('is-customizing') && box.checked === true && document.activeElement === box, 'as it is: open, its switches as set, the focus where it was');
+        Cookie.mount('#side');
+        H.check(second.parentNode === side && where() === 'bar,side,foot', 'or goes at the end of any element (here by a selector)', where());
+        Cookie.save();
+        H.check(Cookie.granted('analytics') === true && second.hidden === true, 'and answers from there');
+        H.check(Cookie.mount('#nowhere') === second && Cookie.mount(null) === second, 'a place that is not in the page changes nothing');
+        wipe();
+
+        Cookie.ready(options({ autoOpen: false }));
+        H.check(Cookie.banner() === null && Cookie.mount(third) === third && Cookie.banner() === third && third.hidden === true, 'named before there is a banner, a place becomes it');
+        Cookie.open('banner');
+        H.check(third.hidden === false && third.textContent.indexOf('A question') !== -1 && second.hidden === true, 'and shows the question');
+        Cookie.close();
+        corner.style.display = 'none';
+        Cookie.open('banner');
+        H.check(Cookie.banner() === third && third.parentNode === corner, 'a place the site chose is kept, seen or not');
+        corner.style.display = '';
+        wipe();
+
+        // ── The `root` option ───────────────────────────────────────────────
+        Cookie.ready(options({ root: '#first' }));
+        H.check(Cookie.banner() === first && first.hidden === false, 'root: the banner the site names (a selector), seen or not', Cookie.banner() && Cookie.banner().id);
+        wipe();
+        var wanted = third;
+        Cookie.ready(options({ root: function () { return wanted; } }));
+        H.check(Cookie.banner() === third && third.hidden === false, 'root: a function');
+        Cookie.close();
+        wanted = second;
+        Cookie.open('banner');
+        H.check(Cookie.banner() === third && where() === 'bar,corner,foot' && third.hidden === false && second.hidden === true, 'asked again at each opening: the live banner goes where it now says', where());
+        wipe();
+        Cookie.ready(options({ root: '#nowhere' }));
+        H.check(Cookie.banner() === second && document.querySelectorAll('[data-cookie-banner]').length === 3, 'a root that is not in the page: the page\'s places as without it, and nothing built', String(Cookie.banner() && Cookie.banner().id));
+        wipe();
+
+        // ── Left where the visitor cannot see it ────────────────────────────
+        Cookie.ready(options());
+        H.check(Cookie.banner() === second, 'the footer\'s, to begin with');
+        Cookie.close();
+        foot.style.display = 'none'; bar.style.display = '';
+        Cookie.open('banner');
+        H.check(Cookie.banner() === second && where() === 'foot,bar,corner' && second.hidden === false, 'its footer folded away, the banner opens in a place the visitor can see', where());
+        foot.style.display = ''; bar.style.display = 'none';
+        wipe();
+        H.done();
+    })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
+</script>
+</body>
+</html>

@@ -1,5 +1,62 @@
 # Changelog
 
+## 1.2.1 - 2026-10-14
+
+What plugging the cookie module under a site's own consent panel showed, and
+a navigation that takes a refused form for what it is.
+
+- **navigation** - a page of the site is shown whatever its status. A form
+  the server refuses comes back with its errors under 422 (what Symfony
+  answers for an invalid form): it was handed to `Transparent.rescue()` -
+  `Rescue mode.. called` in the console, the whole document replaced - like
+  every answer that was not a 200. Now an answer in which the navigation
+  finds the page's block, in a layout it can swap, is swapped in like any
+  other, at its address, without a word in the console: 422, 201, the site's
+  own page for a 404, a 403, a 500 or a 503. An answer that is no page of the
+  site (a proxy's 502, a debug trace) is rescued and said as before.
+  **changes**: `Transparent.isRescueMode()` stays `false` after such a page.
+- **cookie**
+  - **How long an entry is kept is said in the site's words**: an entry's
+    `durationLabel`, else the new `durations` option - a table by duration as
+    declared (`{"30d": "30 jours"}`) or a function `(duration, entry,
+    seconds)`. The detailed section printed `30d` as declared. The element
+    keeps the declared duration in `data-cookie-entry-duration`.
+  - **An answer that expired is asked again with `legacy: true`** (the
+    default). The record's cookie gone at the end of its `lifetime`, the
+    answer was taken back from the `localStorage` `cookie/<KEY>` the module
+    keeps in step, and the visitor was never asked again. Those keys are now
+    an answer to take over only for a visitor the module has no record of
+    yet (`localStorage` `<record.name>.seen` says it has had one); they are
+    erased once the record is gone, too old or of another `version`.
+  - **`Cookie.use()` before the category is declared**: a category declared
+    afterwards as `default: true` or `required: true` starts the feature
+    (`onGrant`, `cookie:grant`), one declared off stops it. The options of a
+    configuration are applied before its categories.
+  - **Several places for the banner in a page**: of several
+    `[data-cookie-banner]`, the first whose parent the visitor can see is
+    taken, not the first of the document. `Cookie.mount(target)` puts the one
+    live banner in the place of another (which takes the place it leaves) or
+    at the end of any element, as it is; the `root` option names the banner
+    (an element, a selector, a function asked again at each opening). A
+    banner left where it cannot be seen opens in a place that can.
+  - **No banner where the site put none**: a site that has a banner of its
+    own (found in a page, or named by `root` or `template`) no longer gets
+    the bare default on a page without one - the question waits for the next
+    page that has. `bare: true` asks for the default there, `bare: false`
+    never builds it; `"auto"`, the default, builds it for a site that has no
+    banner at all, as before.
+  - **The countdown waits while the banner cannot be seen** - a parent that
+    is `display: none`, `hidden`, `visibility: hidden` or transparent, a page
+    that shows no banner - and not only while the tab is hidden.
+  - **A page's configuration** (`<script type="application/json"
+    data-cookie-config>`) is found under the library's prefix whatever the
+    site's - a page can announce its prefix there -, under the site's, and
+    where the new `config` option (a selector) says.
+
+`tests/navigation-status.html` and `tests/cookie-places.html` are new;
+`tests/cookie.html`, `cookie-banner.html`, `cookie-countdown.html` and
+`cookie-navigation.html` have the rest. Suite green (22 pages).
+
 ## 1.2.0 - 2026-10-14
 
 A sixth module: the cookies and the visitor's consent, `@glitchr/cookie`

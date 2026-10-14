@@ -5,7 +5,8 @@
   the same and still asking, across the pages the navigation swaps in; the inert elements of a
   page that arrives by the navigation wait as those of the first page do, wake at the answer, and
   those of the next page arriving are awake at once; a banner written in a page that is swapped
-  out gives way to the one of the page that comes. Opened by tests/run.mjs in a headless browser;
+  out gives way to the one of the page that comes - and to none on a page where the site put none
+  (the question waits, its countdown too), unless the site asks for the default banner. Opened by tests/run.mjs in a headless browser;
   the page writes its verdict in #result.
 -->
 <html>
@@ -88,14 +89,41 @@
         var own = $id('own-banner');
         H.check(own !== null && Cookie.banner() === own && own.hidden === false && $id('own-words').textContent === 'the site\'s words', 'a banner written in the page is the banner');
         await click('to-one');
-        H.check(!own.isConnected && Cookie.banner() !== own && Cookie.banner() !== null && Cookie.banner().isConnected && Cookie.banner().hidden === false && Cookie.pending() === true, 'swapped out with its page, the next page\'s takes its place (here the default), still asking');
+        H.check(!own.isConnected && Cookie.banner() === null && document.querySelector('[data-cookie-banner]') === null && Cookie.pending() === true, 'swapped out with its page for a page where the site put none: nothing is built there, the question waits', String(Cookie.banner() && Cookie.banner().outerHTML));
+        await click('to-own');
+        var again = $id('own-banner');
+        H.check(again !== own && Cookie.banner() === again && again.hidden === false && Cookie.pending() === true, 'and is put again by the next page that has a banner');
+        press($id('own-accept'));
+        H.check(Cookie.pending() === false && Cookie.granted('analytics') === true && again.hidden === true, 'whose button answers');
+
+        // A countdown does not run on a page that shows no banner.
+        Cookie.forget();
+        Cookie.destroy();
+        Cookie.ready({ categories: { analytics: { label: 'Audience' } }, countdown: { duration: '400ms', action: 'accept' } });
+        H.check(Cookie.banner() === again && again.hidden === false, 'asked again on the page that has the banner');
+        await click('to-one');
+        await H.after(900);
+        H.check(Cookie.banner() === null && Cookie.pending() === true && Cookie.state('analytics') === null, 'a countdown waits on a page without a banner: no answer where no question could be read', String(Cookie.state('analytics')));
+        await click('to-own');
+        await H.until(function () { return !Cookie.pending(); }, 2000);
+        H.check(Cookie.pending() === false && Cookie.granted('analytics') === true, 'and goes on where there is one');
+
+        // The default banner, for a site that asks for it.
+        Cookie.forget();
+        Cookie.destroy();
+        Cookie.ready({ bare: true, categories: { analytics: { label: 'Audience' } }, texts: { accept: 'Agree' } });
+        own = $id('own-banner');
+        H.check(Cookie.banner() === own && own.hidden === false, 'bare: true - the page\'s banner first');
+        await click('to-one');
         var second = Cookie.banner();
+        H.check(!own.isConnected && second !== null && second !== own && second.isConnected && second.hidden === false && second.querySelector('[data-cookie-accept]').textContent === 'Agree' && Cookie.pending() === true, 'then the default one on a page that has none, still asking');
         await click('to-own');
         H.check(Cookie.banner() === second && second.hidden === false && $id('own-banner').hidden === true, 'one banner asks at a time');
         press($id('own-accept'));
         H.check(Cookie.pending() === false && Cookie.granted('analytics') === true && second.hidden === true, 'and a button of the page answers as well');
         Cookie.forget();
         Cookie.destroy();
+        H.check(Cookie.defaults.bare === 'auto', 'by default the bare banner is for a site that has none of its own');
         H.done();
     })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
 </script>

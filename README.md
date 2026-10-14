@@ -108,9 +108,12 @@ data-cookie-config>` in the page; defaults in `Cookie.defaults`: `version`
 sameSite: "Lax", secure: "auto"}`), `countdown` (`false`; `{duration, action}`
 with `action` `"default"`, `"accept"`, `"refuse"` or `"none"`), `dismiss`
 (`"none"`), `signals` (`{gpc: false, dnt: false}`), `autoOpen` (`true`),
-`reopen` (`"details"`), `position`, `container`, `template`, `prefix`
-(`"data-cookie"`), `hooks`, `classes`, `variables`, `texts` (`{}`: every word
-the visitor reads), `observe` (`false`), `legacy` (`true`), `debug`. The
+`reopen` (`"details"`), `position`, `container`, `template`, `root` (which
+element is the banner, of several places), `bare` (`"auto"`: the default banner
+for a site that has none), `config` (a selector of the page's configuration),
+`prefix` (`"data-cookie"`), `hooks`, `classes`, `variables`, `texts` (`{}`:
+every word the visitor reads), `durations` (`{}`: the words for `"30d"`),
+`observe` (`false`), `legacy` (`true`), `debug`. The
 methods of `@glitchr/cookie` are kept. See [docs/cookie.md](docs/cookie.md).
 
 ## Tests

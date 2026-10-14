@@ -104,6 +104,28 @@
         await H.after(600);
         H.check(states() === 'true,false,false' && source === 'refuse', 'an answer given in time is the answer', states() + ' ' + source);
 
+        // ── While the banner cannot be seen ─────────────────────────────────
+        var fold = document.createElement('div');
+        fold.id = 'fold';
+        document.body.appendChild(fold);
+        var hidings = {
+            'display: none': function (on) { fold.style.display = on ? 'none' : ''; },
+            'the hidden attribute': function (on) { fold.hidden = on; },
+            'visibility: hidden': function (on) { fold.style.visibility = on ? 'hidden' : ''; }
+        };
+        for (var how in hidings) {
+            wipe(); source = null;
+            hidings[how](true);
+            Cookie.ready(options({ container: '#fold', countdown: { duration: '300ms', action: 'accept' } }));
+            await H.after(800);
+            H.check(Cookie.banner().parentNode === fold && Cookie.pending() === true && source === null, 'under a parent the visitor cannot see (' + how + '), the countdown waits: no answer to a question nobody could read', states() + ' ' + source);
+            hidings[how](false);
+            await H.until(function () { return !Cookie.pending(); }, 2000);
+            H.check(Cookie.pending() === false && states() === 'true,true,true' && source === 'countdown', 'and goes on once it shows', states() + ' ' + source);
+        }
+        wipe();
+        fold.parentNode.removeChild(fold);
+
         // ── Under a privacy signal ──────────────────────────────────────────
         wipe(); source = null;
         var signals = Cookie.signals;

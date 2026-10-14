@@ -49,6 +49,10 @@
 
     // @glitchr/cookie's localStorage keys: "cookie/<GROUP>" = true | false.
     var LEGACY = 'cookie/';
+    // After the record's name, in localStorage: this browser has had a record of the module's.
+    var SEEN = '.seen';
+    // The attribute prefix a page's configuration block is always looked for under, whatever the site's own.
+    var PREFIX = 'data-cookie';
     // Where the seconds left go in the countdown's sentence.
     var COUNT = '{count}';
 
@@ -70,6 +74,9 @@
         position: null,
         container: null,
         template: null,
+        root: null,
+        bare: 'auto',
+        config: null,
         prefix: 'data-cookie',
         hooks: {},
         classes: {
@@ -82,11 +89,12 @@
         },
         variables: {},
         texts: {},
+        durations: {},
         observe: false
     };
 
     // The options that are maps: given twice, they add up.
-    var MAPS = ['record', 'cookie', 'signals', 'hooks', 'classes', 'variables', 'texts'];
+    var MAPS = ['record', 'cookie', 'signals', 'hooks', 'classes', 'variables', 'texts', 'durations'];
 
     var Options = Cookie.options = { groups: [] };
 
@@ -144,6 +152,8 @@
         if (!ID) return null;
         definition = definition || {};
         var cat = cats[ID];
+        // A feature registered before this declaration follows what it changes (a category on until refused, a required one).
+        var was = (cat && !fill && (cat.on.length || cat.off.length)) ? granted(cat) : null;
         if (!cat) {
             cat = cats[ID] = { id: ID, key: String(key).trim(), label: null, description: null, default: false, required: false, onDemand: !!runtime, used: false, features: [], on: [], off: [] };
             order.push(ID);
@@ -167,7 +177,14 @@
         // `erase`: omnibase/consent's name prefixes of a third party's cookies.
         (definition.erase || []).forEach(function (prefix) { store({ type: 'cookie', name: prefix + '*', category: ID }); });
         (definition.features || []).forEach(function (feature) { addFeature(cat, feature); });
+        if (was !== null && granted(cat) !== was) turn(cat, !was);
         return cat;
+    }
+
+    /** A category that went on, or off: its features are told, then the page. */
+    function turn(cat, on) {
+        (on ? cat.on : cat.off).slice().forEach(run);
+        emit(on ? 'cookie:grant' : 'cookie:revoke', { category: cat.key });
     }
 
     function addFeature(cat, feature) {
@@ -352,7 +369,7 @@
             var names = [];
             try { for (var i = 0; i < s.length; i++) names.push(s.key(i)); } catch (e) { return; }
             names.filter(entry.match).forEach(function (name) {
-                if (entry.type === 'local' && (name === kept || name.indexOf(LEGACY) === 0)) return;
+                if (entry.type === 'local' && (name === kept || name === seenName() || name.indexOf(LEGACY) === 0)) return;
                 log('erase', entry.type, name, '(' + cat.key + ')');
                 try { s.removeItem(name); } catch (e) { /* storage closed: nothing to erase */ }
             });
@@ -397,11 +414,42 @@
             var parsed = kept ? JSON.parse(kept) : null;
             if (plain(parsed) && plain(parsed.c)) record = parsed;
         } catch (e) { record = null; }
+        if (record) mark();
         return record;
     }
 
     function persist() {
         try { recordStore().write(JSON.stringify(record)); } catch (e) { log('the answer could not be kept', e); }
+        mark();
+    }
+
+    // Whether this browser has had a record of the module's: kept in
+    // localStorage beside @glitchr/cookie's keys, it outlives the record (a
+    // cookie goes at the end of its lifetime). Those keys are an answer to
+    // take over only for a visitor who never had one - once the module has
+    // kept a record they are its own copies, and a record that is gone, too
+    // old or of another version is a question to put again.
+    function seenName() { return String(setting('record').name) + SEEN; }
+    function seen() {
+        var s = web('local');
+        try { return !!s && s.getItem(seenName()) !== null; } catch (e) { return false; }
+    }
+    function mark() {
+        if (!setting('legacy')) return;
+        var s = web('local');
+        try { if (s && s.getItem(seenName()) === null) s.setItem(seenName(), '1'); } catch (e) { /* closed: the keys are read as before */ }
+    }
+
+    /** @glitchr/cookie's keys of the categories, erased: copies of an answer that no longer counts. */
+    function unkeep(all) {
+        var s = web('local');
+        if (!s) return;
+        var names = [];
+        try {
+            if (all) { for (var i = 0; i < s.length; i++) if (s.key(i).indexOf(LEGACY) === 0) names.push(s.key(i)); }
+            else names = order.map(function (ID) { return LEGACY + ID; });
+        } catch (e) { names = []; }
+        names.forEach(function (name) { try { s.removeItem(name); } catch (e) { /* closed */ } });
     }
 
     /** The record is of this version of the categories, and not too old. */
@@ -436,8 +484,9 @@
         var counts = kept ? valid() : true;
         if (!counts) return null;
         if (kept && cat.id in kept.c) return !!kept.c[cat.id];
-        // An answer @glitchr/cookie kept (localStorage "cookie/<GROUP>") is taken over, once.
-        if (setting('legacy')) {
+        // An answer @glitchr/cookie kept (localStorage "cookie/<GROUP>") is taken over, once: by a visitor
+        // the module has no record of yet, category after category while the record is that takeover's.
+        if (setting('legacy') && (kept ? kept.s === 'legacy' : !seen())) {
             var old = legacyRead(cat.id);
             if (old !== null) {
                 if (!record) record = fresh('legacy');
@@ -505,12 +554,7 @@
 
         if (!load() || !valid()) {
             // What an older answer left in @glitchr/cookie's keys no longer counts either.
-            if (record && setting('legacy')) {
-                var s = web('local');
-                var old = [];
-                try { for (var i = 0; s && i < s.length; i++) if (s.key(i).indexOf(LEGACY) === 0) old.push(s.key(i)); } catch (e) { old = []; }
-                old.forEach(function (name) { try { s.removeItem(name); } catch (e) { /* closed */ } });
-            }
+            if (setting('legacy') && (record || seen())) unkeep(true);
             record = fresh(source);
         }
         var version = setting('version');
@@ -548,14 +592,8 @@
             if (!is && said.indexOf(ID) !== -1) eraseCategory(cat);
             if (is !== before[ID]) (is ? on : off).push(cat);
         });
-        on.forEach(function (cat) {
-            cat.on.slice().forEach(run);
-            emit('cookie:grant', { category: cat.key });
-        });
-        off.forEach(function (cat) {
-            cat.off.slice().forEach(run);
-            emit('cookie:revoke', { category: cat.key });
-        });
+        on.forEach(function (cat) { turn(cat, true); });
+        off.forEach(function (cat) { turn(cat, false); });
         scan();
         emit('cookie:consent', {
             categories: now,
@@ -667,7 +705,7 @@
     Cookie.scan = function (rootNode) { scan(rootNode); return this; };
 
     // ── The interface ────────────────────────────────────────────────────
-    var ui = { root: null, built: false, bare: false, view: null, opener: null, closed: false, auto: false, timer: null, left: 0, last: 0, action: null, bound: false, observer: null };
+    var ui = { root: null, built: false, bare: false, own: false, seat: null, chosen: false, view: null, opener: null, closed: false, auto: false, timer: null, left: 0, last: 0, action: null, bound: false, observer: null };
 
     function hook(name) {
         var hooks = setting('hooks');
@@ -765,28 +803,81 @@
         (container && container.nodeType === 1 ? container : document.body).appendChild(el);
     }
 
-    /** The banner: the site's (an element or a <template> with data-cookie-banner, or the `template` option), else a bare one. */
+    /** What the visitor can see: in the page, not under display: none, visibility: hidden or opacity: 0 - its own or a parent's. */
+    function visible(el) {
+        if (!el || !el.isConnected) return false;
+        if (typeof el.checkVisibility === 'function') return el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
+        // A browser without it: the same question put to the styles, up the parents - not to the sizes, which a
+        // document that is not laid out (a test's) does not have.
+        for (var node = el; node && node.nodeType === 1; node = node.parentElement) {
+            var style = window.getComputedStyle(node);
+            if (node.hidden || style.display === 'none' || style.opacity === '0') return false;
+            if (node === el && (style.visibility === 'hidden' || style.visibility === 'collapse')) return false;
+        }
+        return true;
+    }
+
+    /** A place for the banner the visitor can see: the banner itself is hidden until it has something to ask, so its parent says. */
+    function hosted(el) { return !!el && el.isConnected && (!el.parentElement || visible(el.parentElement)); }
+
+    /** An element named by an option: itself, a selector, or a function giving either. */
+    function named(value) {
+        if (typeof value === 'function') value = value(Cookie);
+        if (typeof value === 'string') { try { value = document.querySelector(value); } catch (e) { value = null; } }
+        return value && value.nodeType === 1 ? value : null;
+    }
+
+    /** Among the page's [data-cookie-banner]: the first one the visitor can see, else the first. */
+    function pick(but) {
+        var all = Array.prototype.filter.call(document.querySelectorAll(sel('banner')), function (el) { return el !== but; });
+        return all.filter(hosted)[0] || (but ? null : all[0]) || null;
+    }
+
+    /**
+     * The banner: the one the site names (Cookie.mount(), the `root` option),
+     * its `template`, an element or a <template> with data-cookie-banner in
+     * the page - one the visitor can see before a hidden one. The bare one is
+     * built only for a site that has none of its own (`bare`: "auto"), or
+     * that asks for it (true): a page where the site put no banner gets none.
+     */
     function ensure() {
         if (ui.root && ui.root.isConnected) return ui.root;
         if (!document.body) return null;
         var found = null;
         var built = false;
-        var template = setting('template');
-        if (typeof template === 'function') template = template(Cookie);
-        if (typeof template === 'string') {
-            if (/^\s*</.test(template)) {
-                var holder = document.createElement('template');
-                holder.innerHTML = template;
-                found = holder.content.firstElementChild;
-            } else {
-                template = document.querySelector(template);
-            }
+        var own = false;
+        if (ui.seat && ui.seat.isConnected) found = ui.seat;
+        ui.seat = null;
+        ui.chosen = !!found;
+        if (!found && setting('root') !== null && setting('root') !== undefined) {
+            own = true;
+            found = named(setting('root'));
+            if (found && !found.isConnected) found = null;
         }
-        if (!found && template && template.nodeType === 1) found = template;
-        if (!found) found = document.querySelector(sel('banner'));
+        var template = setting('template');
+        if (!found && template !== null && template !== undefined) {
+            own = true;
+            if (typeof template === 'function') template = template(Cookie);
+            if (typeof template === 'string') {
+                if (/^\s*</.test(template)) {
+                    var holder = document.createElement('template');
+                    holder.innerHTML = template;
+                    found = holder.content.firstElementChild;
+                } else {
+                    template = document.querySelector(template);
+                }
+            }
+            if (!found && template && template.nodeType === 1) found = template;
+        }
+        if (!found) found = pick();
         if (found && found.tagName === 'TEMPLATE') found = document.importNode(found.content, true).firstElementChild;
+        if (found || own) ui.own = true;
         var bare = !found;
-        if (bare) found = build();
+        if (bare) {
+            var wanted = setting('bare');
+            if (wanted === false || (wanted !== true && ui.own)) { ui.root = null; return null; }
+            found = build();
+        }
         // Put in the page here, it is taken out by destroy(); found in the page, it is the page's.
         if (!found.isConnected) { place(found); built = true; }
         found.setAttribute(hook('banner'), '');
@@ -796,6 +887,38 @@
         ui.bare = bare;
         dress();
         return found;
+    }
+
+    /**
+     * The one live banner, put elsewhere: in the place of another
+     * [data-cookie-banner] of the page (which takes the place it leaves,
+     * hidden), before a <template data-cookie-banner>, or at the end of any
+     * other element. As it is: its view, its switches, its countdown, the focus.
+     */
+    function move(target, slot) {
+        var rootEl = ui.root;
+        if (target === rootEl || rootEl.contains(target)) return;
+        if (!slot && rootEl.parentNode === target) return;
+        var held = rootEl.contains(document.activeElement) ? document.activeElement : null;
+        if (!slot) target.appendChild(rootEl);
+        else if (target.tagName === 'TEMPLATE') target.parentNode.insertBefore(rootEl, target);
+        else {
+            var here = document.createComment('');
+            rootEl.parentNode.replaceChild(here, rootEl);
+            target.parentNode.replaceChild(rootEl, target);
+            here.parentNode.replaceChild(target, here);
+            target.hidden = true;
+        }
+        if (held && held.isConnected) { try { held.focus(); } catch (e) { /* no longer focusable */ } }
+    }
+
+    /** At an opening: the banner the site names now (`root`), else - left where the visitor cannot see it - another place of the page they can. */
+    function reseat() {
+        if (!ui.root || !ui.root.isConnected) return;
+        var wanted = null;
+        if (setting('root') !== null && setting('root') !== undefined) wanted = named(setting('root'));
+        else if (!ui.chosen && !hosted(ui.root)) wanted = pick(ui.root);
+        if (wanted && wanted.isConnected && wanted !== ui.root) move(wanted, true);
     }
 
     /** A configuration that comes after the banner (another language's words, a position): the bare one is built again, the site's gets its words. */
@@ -867,6 +990,24 @@
 
     var serial = 0;
 
+    function blank(value) { return value === undefined || value === null || value === ''; }
+
+    /**
+     * How long an entry is kept, in the site's words: its own `durationLabel`,
+     * else what the `durations` option says of its duration - a table by
+     * duration as declared ({"30d": ...}) or a function (duration, entry,
+     * seconds) -, else the duration as declared.
+     */
+    function lasting(entry) {
+        if (!blank(entry.durationLabel)) return entry.durationLabel;
+        var raw = entry.duration;
+        var table = setting('durations');
+        var said;
+        if (typeof table === 'function') said = table(raw, entry, seconds(raw));
+        else if (plain(table) && !blank(raw) && Object.prototype.hasOwnProperty.call(table, String(raw))) said = table[String(raw)];
+        return blank(said) ? raw : said;
+    }
+
     function row(cat, list) {
         var classes = setting('classes');
         var own = ui.root.querySelector('template' + sel('row'));
@@ -937,9 +1078,10 @@
                 stored.hidden = !mine.length;
                 mine.forEach(function (entry) {
                     var item = make('li', 'entry', classes.entry, entry.type);
-                    [['name', entry.label === undefined ? String(entry.name) : entry.label], ['duration', entry.duration], ['purpose', entry.purpose]].forEach(function (pair) {
+                    [['name', entry.label === undefined ? String(entry.name) : entry.label], ['duration', lasting(entry)], ['purpose', entry.purpose]].forEach(function (pair) {
                         if (pair[1] === undefined || pair[1] === null || pair[1] === '') return;
-                        var span = make('span', 'entry-' + pair[0]);
+                        // The duration as declared stays in the attribute, for a stylesheet or a script.
+                        var span = make('span', 'entry-' + pair[0], null, pair[0] === 'duration' && entry.duration !== undefined && entry.duration !== null ? String(entry.duration) : undefined);
                         span.textContent = String(pair[1]);
                         item.appendChild(span);
                     });
@@ -1008,6 +1150,7 @@
     }
 
     function show(view, opener) {
+        if (ui.view === null) reseat();
         if (!ensure()) return;
         if (view !== 'banner' && view !== 'details') view = setting('reopen') === 'banner' ? 'banner' : 'details';
         var details = part('details');
@@ -1068,7 +1211,11 @@
     /** After an answer: the switches as answered, the banner closed once nothing is left to ask. */
     function settle() {
         ui.closed = false;
-        if (!ui.root) return;
+        if (!ui.root) {
+            // A question no page has shown yet (none has a banner): answered, it is no longer open.
+            if (!pending()) { ui.view = null; ui.auto = false; }
+            return;
+        }
         if (pending()) { rows(); paint(); return; }
         var was = ui.view;
         ui.view = null;
@@ -1103,9 +1250,17 @@
         paint();
     }
 
+    /** Whether the question can be read now: the page in front, the banner in it and on screen (not in a folded bar, a hidden footer). */
+    function readable() {
+        if (document.hidden || !ui.root || !ui.root.isConnected || ui.root.hidden) return false;
+        var summary = part('summary');
+        return visible(summary && ui.root.contains(summary) ? summary : ui.root);
+    }
+
     function tick() {
         var now = Date.now();
-        if (!document.hidden) ui.left -= now - ui.last;
+        var read = readable();
+        if (read) ui.left -= now - ui.last;
         ui.last = now;
         if (ui.left <= 0) {
             var action = ui.action;
@@ -1116,7 +1271,8 @@
         }
         // Until the next whole second, so that the number shown is the time left.
         var next = ui.left - (Math.ceil(ui.left / 1000) - 1) * 1000;
-        ui.timer = setTimeout(tick, Math.max(20, Math.min(1000, next)));
+        // While it cannot be read, a look now and then: the time left stands still.
+        ui.timer = setTimeout(tick, read ? Math.max(20, Math.min(1000, next)) : 200);
         paint();
     }
 
@@ -1166,6 +1322,8 @@
         if (!document.body) return;
         scan();
         if (!order.length) return;
+        // What an answer that is gone, too old or of another version left in @glitchr/cookie's keys no longer counts.
+        if (setting('legacy') && seen() && !valid()) unkeep(false);
         if (!ui.bound) {
             ui.bound = true;
             document.addEventListener('click', onClick);
@@ -1188,13 +1346,17 @@
             return decide(map, 'signal');
         }
 
-        // A banner the navigation swapped out with its page: the new page's takes its place, as it was.
-        if (ui.root && !ui.root.isConnected) {
+        // A banner the navigation swapped out with its page: the new page's takes its place, as it was -
+        // and a page without one shows none, the question waiting for the next page that has.
+        if (ui.view !== null && (!ui.root || !ui.root.isConnected)) {
             ui.root = null;
-            if (ui.view !== null && ensure()) paint();
+            if (ensure()) paint();
+        } else if (ui.root && !ui.root.isConnected) {
+            ui.root = null;
         }
         if (open.length && ui.view === null && !ui.closed && setting('autoOpen')) {
             show('banner');
+            if (ui.view === null) return;   // no banner on this page: asked at the next one that has
             ui.auto = true;
             startCountdown();
         } else if (!open.length && ui.view === 'banner' && ui.auto) {
@@ -1208,12 +1370,23 @@
 
     /** At each moment a page is in: a configuration the page hands over, then the rest. */
     function page() {
-        var name = hook('config');
-        Array.prototype.forEach.call(document.querySelectorAll('script[type="application/json"][' + name + ']'), function (el) {
-            if (el.__cookieRead) return;
-            el.__cookieRead = true;
-            try { Cookie.ready(JSON.parse(el.textContent)); } catch (e) { setTimeout(function () { throw e; }, 0); }
-        });
+        // Under the site's prefix, under the library's own - a page announces its prefix there -, and where
+        // the `config` option says; a block may name another (its prefix, its selector): looked for again.
+        for (var round = 0; round < 5; round++) {
+            var blocks = [];
+            ['script[type="application/json"][' + hook('config') + ']', 'script[type="application/json"][' + PREFIX + '-config]', setting('config')].forEach(function (selector) {
+                if (typeof selector !== 'string' || !selector) return;
+                var found;
+                try { found = document.querySelectorAll(selector); } catch (e) { return; }
+                Array.prototype.forEach.call(found, function (el) { if (!el.__cookieRead && blocks.indexOf(el) === -1) blocks.push(el); });
+            });
+            if (!blocks.length) break;
+            blocks.sort(function (a, b) { return a.compareDocumentPosition(b) & 4 ? -1 : 1; });
+            blocks.forEach(function (el) {
+                el.__cookieRead = true;
+                try { Cookie.ready(JSON.parse(el.textContent)); } catch (e) { setTimeout(function () { throw e; }, 0); }
+            });
+        }
         if (ready) start();
     }
 
@@ -1224,7 +1397,7 @@
             key: cat.key, label: cat.label === null ? cat.key : cat.label, description: cat.description,
             default: cat.default, required: cat.required, onDemand: cat.onDemand,
             storage: entries.filter(function (entry) { return entry.category === cat.id; }).map(function (entry) {
-                return { type: entry.type, name: entry.name, duration: entry.duration, purpose: entry.purpose };
+                return { type: entry.type, name: entry.name, label: entry.label, duration: entry.duration, durationLabel: entry.durationLabel, purpose: entry.purpose };
             }),
             features: cat.features.slice(),
             state: answer(cat), granted: granted(cat)
@@ -1310,6 +1483,30 @@
     Cookie.close = function () { hide(true); return this; };
     /** The banner's element, once there is one. */
     Cookie.banner = function () { return ui.root; };
+    /**
+     * Put the banner there (an element or a selector), as it is - several
+     * places of a page share the one live banner: another
+     * [data-cookie-banner], whose place it takes (that one takes the place it
+     * leaves, hidden), or any element, at whose end it goes. Before there is
+     * a banner, a [data-cookie-banner] named here is the one that becomes
+     * it. Returns the banner, null when there is none.
+     */
+    Cookie.mount = function (target) {
+        target = named(target);
+        if (!target || !target.isConnected) return ui.root && ui.root.isConnected ? ui.root : null;
+        var slot = target.hasAttribute(hook('banner'));
+        if (!ui.root || !ui.root.isConnected) {
+            ui.root = null;
+            if (slot) ui.seat = target;
+            if (!ensure()) return null;
+            if (!slot) move(target, false);
+            paint();
+        } else {
+            move(target, slot);
+        }
+        ui.chosen = true;
+        return ui.root;
+    };
     /** fn(detail) at each answer. */
     Cookie.onConsent = function (fn) {
         window.addEventListener('cookie:consent', function (event) { fn(event.detail, event); });
@@ -1329,7 +1526,7 @@
             document.removeEventListener('click', onClick);
             document.removeEventListener('keydown', onKey);
         }
-        ui = { root: null, built: false, bare: false, view: null, opener: null, closed: false, auto: false, timer: null, left: 0, last: 0, action: null, bound: false, observer: null };
+        ui = { root: null, built: false, bare: false, own: false, seat: null, chosen: false, view: null, opener: null, closed: false, auto: false, timer: null, left: 0, last: 0, action: null, bound: false, observer: null };
         cats = {};
         order = [];
         entries = [];
@@ -1415,21 +1612,21 @@
     };
 
     Cookie.configure = function (options) {
+        options = options || {};
         for (var key in options) {
             if (!Object.prototype.hasOwnProperty.call(options, key)) continue;
             var value = options[key];
-            if (value === undefined) continue;
-            if (key === 'categories') {
-                if (Array.isArray(value)) value.forEach(function (definition) { declare(definition.key, definition, false, false); });
-                else if (plain(value)) Object.keys(value).forEach(function (name) { declare(name, value[name] || {}, false, false); });
-                continue;
-            }
-            if (key === 'storage') { (Array.isArray(value) ? value : [value]).forEach(store); continue; }
+            if (value === undefined || key === 'categories' || key === 'storage') continue;
             if (MAPS.indexOf(key) !== -1 && plain(value) && plain(Options[key])) Options[key] = Object.assign({}, Options[key], value);
             else Options[key] = value;
         }
         // Where the answer is kept may have changed: read again when next asked.
         record = undefined;
+        // Then what is declared, under the options as they now stand: a category may tell a feature registered before it.
+        var given = options.categories;
+        if (Array.isArray(given)) given.forEach(function (definition) { declare(definition.key, definition, false, false); });
+        else if (plain(given)) Object.keys(given).forEach(function (name) { declare(name, given[name] || {}, false, false); });
+        if (Object.prototype.hasOwnProperty.call(options, 'storage') && options.storage !== undefined) (Array.isArray(options.storage) ? options.storage : [options.storage]).forEach(store);
         log('configuration', Options);
         return this;
     };

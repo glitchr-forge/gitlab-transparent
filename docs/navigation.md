@@ -72,5 +72,20 @@ When the connection drops or the server cannot be reached (status 0, nothing
 received), the page stays as it is, at its address, and is announced again as
 a swap announces one (`DOMContentLoaded`, `transparent:load`, `load`): what a
 site put on for the wait - a curtain, a progress bar - comes off through the
-handlers it already has. jQuery's `ajaxError` tells the failure. A page the
-server answers with an error (4xx, 5xx) is shown as it came.
+handlers it already has. jQuery's `ajaxError` tells the failure.
+
+## A page under another status than 200
+
+A status does not make an answer unusable. When the answer is a page of the
+site - the block the navigation swaps (`identifier`) is in it, in a layout it
+can swap - it is shown like any other: in place, at its address, with its
+history entry (which keeps the status), and nothing is said in the console.
+That is a form the server refuses, sent back with its errors under 422 (what
+Symfony answers for an invalid form), a creation under 201, and the site's
+own page for what is missing, forbidden or broken (404, 403, 500, 503).
+
+An answer that is no such page - a proxy's 502, a debug trace, a bare server
+error - is a failure: `Transparent.rescue()` says so in the console
+(`Rescue mode.. called`; `Unexpected XHR response` for a 5xx), replaces the
+document with what came, and `Transparent.isRescueMode()` is `true` from
+then on.

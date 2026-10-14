@@ -7,7 +7,9 @@
   everything erased at a refusal; the features that start at the grant and stop at the withdrawal;
   the page's inert elements (a script, a template, a frame, a placeholder); the record of the
   answer (a cookie with the attributes asked for, localStorage, a store of the site's own); an
-  answer @glitchr/cookie kept, taken over; a group that is a category. Opened by tests/run.mjs in
+  answer @glitchr/cookie kept, taken over - by a visitor the module has no record of, never to
+  bring back an answer that expired or is of another version; a feature registered before its
+  category is declared; a group that is a category. Opened by tests/run.mjs in
   a headless browser; the page writes its verdict in #result.
 -->
 <html>
@@ -189,6 +191,72 @@
         localStorage.setItem('cookie/LOCATION', 'true');
         Cookie.ready({ autoOpen: false, categories: categories() });
         H.check(Cookie.state('analytics') === false && Cookie.state('location') === true && Cookie.pending() === false && has('cookie-consent'), 'the answers found in localStorage cookie/<KEY> are taken over: the visitor is not asked again');
+
+        H.check(JSON.parse(decodeURIComponent(document.cookie.split('; ').filter(function (pair) { return pair.indexOf('cookie-consent=') === 0; })[0].split('=')[1])).s === 'legacy', 'kept as a record of the module, marked as taken over');
+        localStorage.setItem('cookie/CHAT', 'true');
+        Cookie.category('chat', { label: 'Chat' });
+        H.check(Cookie.state('chat') === true, 'a category declared later is taken over too, while the record is still that takeover');
+        Cookie.save({ chat: false });
+        localStorage.setItem('cookie/NEWS', 'true');
+        Cookie.category('news', { label: 'News' });
+        H.check(Cookie.state('chat') === false && Cookie.state('news') === null && Cookie.pending() === true, 'once the visitor has answered the module, those keys are no answer any more', String(Cookie.state('news')));
+
+        // ── An answer that expires ──────────────────────────────────────────
+        wipe();
+        Cookie.ready({ autoOpen: false, categories: categories(), record: { lifetime: '30d' } });
+        Cookie.accept();
+        H.check(Cookie.pending() === false && localStorage.getItem('cookie/ANALYTICS') === 'true', 'answered: @glitchr/cookie\'s keys are kept in step (legacy)');
+        // The record's cookie at the end of its lifetime: the browser drops it.
+        document.cookie = 'cookie-consent=; max-age=0; path=/';
+        Cookie.destroy();
+        Cookie.ready({ autoOpen: false, categories: categories(), record: { lifetime: '30d' } });
+        H.check(Cookie.pending() === true && Cookie.state('analytics') === null && Cookie.granted('analytics') === false && Cookie.answered() === false, 'the record expired: the visitor is asked again, the answer is not taken back from those keys', String(Cookie.state('analytics')));
+        H.check(localStorage.getItem('cookie/ANALYTICS') === null && Cookie.checkConsent('ANALYTICS') === null, 'which no longer say yes either');
+        Cookie.refuse();
+        H.check(Cookie.pending() === false && Cookie.state('analytics') === false && localStorage.getItem('cookie/ANALYTICS') === 'false', 'the new answer is the answer');
+
+        wipe();
+        Cookie.ready({ autoOpen: false, version: 1, categories: categories() });
+        Cookie.accept();
+        Cookie.destroy();
+        Cookie.ready({ autoOpen: false, version: 2, categories: categories() });
+        H.check(Cookie.pending() === true && Cookie.state('analytics') === null && localStorage.getItem('cookie/ANALYTICS') === null, 'nor an answer to another version of the categories', String(localStorage.getItem('cookie/ANALYTICS')));
+
+        wipe();
+        localStorage.setItem('choice', JSON.stringify({ v: null, t: Math.floor(Date.now() / 1000) - 100, c: { ANALYTICS: 1, PREFERENCES: 1, LOCATION: 1 }, s: 'accept' }));
+        localStorage.setItem('cookie/ANALYTICS', 'true');
+        Cookie.ready({ autoOpen: false, categories: categories(), record: { store: 'local', name: 'choice', lifetime: '50s' } });
+        H.check(Cookie.pending() === true && Cookie.state('analytics') === null && localStorage.getItem('cookie/ANALYTICS') === null, 'nor one older than its lifetime, kept where it does not go by itself');
+
+        // ── A feature registered before its category is declared ────────────
+        wipe();
+        var early = { on: 0, off: 0, events: [] };
+        var note = function (e) { early.events.push(e.type + ' ' + e.detail.category); };
+        window.addEventListener('cookie:grant', note);
+        window.addEventListener('cookie:revoke', note);
+        H.check(Cookie.use('maps', function () { early.on++; }, function () { early.off++; }) === false && early.on === 0, 'a feature registered before its category is known: off for now');
+        Cookie.ready({ autoOpen: false, categories: { maps: { label: 'Maps', default: true } } });
+        H.check(early.on === 1 && early.off === 0 && Cookie.granted('maps') === true && early.events.join() === 'cookie:grant maps', 'the category then declared on until refused: the feature starts', JSON.stringify(early));
+        H.check(Cookie.category('maps').onDemand === false && Cookie.category('maps').label === 'Maps', 'and the category is the site\'s, with its words');
+        Cookie.category('maps', { default: false });
+        H.check(early.on === 1 && early.off === 1 && early.events.join() === 'cookie:grant maps,cookie:revoke maps', 'declared off again: it stops', JSON.stringify(early));
+        Cookie.category('maps', { required: true });
+        H.check(early.on === 2, 'declared required: it starts', JSON.stringify(early));
+        wipe();
+        Cookie.ready({ autoOpen: false, categories: { maps: { label: 'Maps' } } });
+        Cookie.refuse();
+        Cookie.destroy();
+        early = { on: 0, off: 0, events: [] };
+        Cookie.use('maps', { implicit: true }, function () { early.on++; }, function () { early.off++; });
+        Cookie.ready({ autoOpen: false, categories: { maps: { label: 'Maps', default: true } } });
+        H.check(early.on === 0 && early.off === 0 && Cookie.granted('maps') === false, 'a visitor who said no is not overruled by the order of the scripts', JSON.stringify(early));
+        window.removeEventListener('cookie:grant', note);
+        window.removeEventListener('cookie:revoke', note);
+        wipe();
+        localStorage.setItem('cookie/PREFERENCES', 'true');
+        localStorage.setItem('cookie/ANALYTICS', 'false');
+        localStorage.setItem('cookie/LOCATION', 'true');
+        Cookie.ready({ autoOpen: false, categories: categories() });
 
         // ── On demand ───────────────────────────────────────────────────────
         var shown = 0;
