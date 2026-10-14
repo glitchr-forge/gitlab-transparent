@@ -177,10 +177,15 @@
 
         // ── A page that fails ───────────────────────────────────────────────
         await click('to-one');
+        // The site's own page for it is a page like another (tests/navigation-status.html has the rest).
+        await click('to-error');
+        H.check($id('failure') !== null && location.pathname === '/site/error' && Transparent.isRescueMode() === false && window.__marker === 'kept', 'a page that fails (500) with the site\'s page for it is shown in place');
+        await click('to-one');
+        // No page of the site in the answer: the document is replaced by what came.
         H.expect(/Rescue mode/); H.expect(/Unexpected XHR response/); H.expect(/Storage/);
-        $id('to-error').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-        await H.until(function () { return $id('failure') !== null; }, 3000);
-        H.check($id('failure') !== null && Transparent.isRescueMode() === true, 'a page that fails (500) is shown as it came');
+        $id('to-broken').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        await H.until(function () { return $id('bare') !== null; }, 3000);
+        H.check($id('bare') !== null && Transparent.isRescueMode() === true, 'a failure without one (502) is shown as it came');
         H.done();
     })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
 </script>

@@ -3222,6 +3222,7 @@
             if( strippedUrlHref == strippedResponseUrl )
                 responseURL = url.href; // NB: xhr.responseURL strips away #fragments
 
+            var failed = false;
             if(!responseText) {
 
                 if(!request && responseText === null) {
@@ -3257,11 +3258,9 @@
                     return;
                 }
 
-                if(status >= 500) {
-
-                    console.error("Unexpected XHR response from "+uuid+": error code "+request.status);
-                    console.error(sessionStorage);
-                }
+                // Said below, once the answer is parsed: only a failure that
+                // brings no page of the site is worth the console's attention.
+                failed = status >= 500;
 
                 if(!Transparent.hasResponse(uuid))
                     Transparent.setResponse(uuid, responseText);
@@ -3286,6 +3285,23 @@
             }
             if (!dom) {
                 dom = new DOMParser().parseFromString(responseText, "text/html");
+            }
+
+            // A status other than 200 does not make an answer unusable: a form
+            // the server refuses comes back with its errors under 422 (what
+            // Symfony answers for an invalid form), a creation under 201, a
+            // page that is missing, forbidden or broken under the site's own
+            // error page (404, 403, 500, 503). When the answer is a page of
+            // the site - the block the navigation swaps is in it, in a layout
+            // it can swap - it is shown like any other, at its address, and
+            // nothing is said in the console: nothing went wrong here. Only
+            // an answer that is no such page (a bare server error, a debug
+            // trace, a proxy's page) is a failure, handed to rescue().
+            var usable = status == 200 || (Transparent.isPage(dom) && Transparent.isCompatiblePage(dom, method, data));
+            if(failed && !usable) {
+
+                console.error("Unexpected XHR response from "+uuid+": error code "+request.status);
+                console.error(sessionStorage);
             }
             if(request && request.getResponseHeader("Content-Type") == "application/json") {
 
@@ -3324,7 +3340,7 @@
                 if(responseURL) location.href = responseURL;
                 else location.reload();
 
-            } else if(status != 200) {
+            } else if(!usable) {
 
                 // Blatant error received..
                 return Transparent.rescue(dom);

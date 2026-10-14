@@ -1,0 +1,98 @@
+<!doctype html>
+<!--
+  The navigation and the statuses a site answers with (tests/site.mjs): a form the server refuses
+  comes back with its errors under 422 and is shown like any page - in place, at its address,
+  the reader's place kept when it is sent again, nothing said in the console, no rescue; so are
+  a creation (201) and the site's own pages for what is missing, forbidden or broken (404, 403,
+  500, 503); Back gives such a page back from the cache. An answer that is no page of the site
+  (a proxy's 502) is still the failure it was: said in the console, the document replaced.
+  Opened by tests/run.mjs in a headless browser; the page writes its verdict in #result.
+-->
+<html>
+<head><meta charset="utf-8"><link rel="stylesheet" href="/tests/site.css"><title>navigation-status</title></head>
+<body>
+<div id="page" data-layout="main"><h1>Start</h1><a id="to-one" href="/site/page/one">one</a></div>
+<div id="loader"></div>
+<pre id="result">pending</pre>
+<script src="jquery.js"></script>
+<script src="harness.js"></script>
+<script src="../src/js/core.js"></script>
+<script src="../src/js/transparent.js"></script>
+<script>
+    (async function () {
+        var H = Harness;
+        var $id = function (id) { return document.getElementById(id); };
+        var y = function () { return Math.round(window.scrollY); };
+        var heading = function () { var h = document.querySelector('#page h1'); return h ? h.textContent : null; };
+        window.__marker = 'kept';
+
+        // What the library says in the console.
+        var said = [];
+        ['error', 'warn'].forEach(function (level) {
+            var native = console[level];
+            console[level] = function () { said.push(Array.prototype.map.call(arguments, String).join(' ')); return native.apply(console, arguments); };
+        });
+
+        function loaded() {
+            return new Promise(function (resolve, reject) {
+                var timer = setTimeout(function () { reject(new Error('no transparent:load (at ' + location.pathname + ')')); }, 4000);
+                window.addEventListener('transparent:load', function () {
+                    clearTimeout(timer);
+                    requestAnimationFrame(function () { setTimeout(function () { H.after(40).then(resolve); }, 0); });
+                }, { once: true });
+            });
+        }
+        async function click(id) {
+            var next = loaded();
+            $id(id).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+            await next;
+        }
+        async function travel(by) { var next = loaded(); history[by](); await next; }
+        var quiet = function () { return said.length === 0 && Transparent.isRescueMode() === false && window.__marker === 'kept'; };
+        var at = function (status) { var p = $id('said'); return location.pathname === '/site/status/' + status && heading() === 'Status ' + status && !!p && p.textContent === String(status); };
+
+        await new Promise(function (resolve) { window.addEventListener('load', resolve, { once: true }); });
+        Transparent.ready({ identifier: '#page', nest: [], progress_bar: 'off', smoothscroll_duration: '100ms' });
+        await H.after(60);
+        await H.frame();
+
+        // ── A form the server refuses (422) ─────────────────────────────────
+        await click('to-one');
+        await click('invalid-go');
+        H.check(at(422) && $id('said').getAttribute('data-method') === 'POST', 'a form refused under 422 shows the page that came back, at its address', location.pathname + ' ' + heading());
+        H.check(quiet(), 'in place, without a word in the console and without a rescue', JSON.stringify(said) + ' ' + Transparent.isRescueMode());
+        H.check(history.state && history.state.status === 422, 'its history entry keeps the status', JSON.stringify(history.state));
+        H.scroll(1234);
+        await H.frame();
+        await click('invalid-go');
+        H.check(at(422) && y() === 1234 && quiet(), 'sent again and refused again, the reader keeps their place', y() + ' ' + JSON.stringify(said));
+
+        // ── A creation (201) ────────────────────────────────────────────────
+        await click('to-one');
+        await click('create-go');
+        H.check(at(201) && quiet(), 'a form answered under 201 shows its page', location.pathname + ' ' + JSON.stringify(said));
+
+        // ── The site's own error pages ──────────────────────────────────────
+        var pages = { missing: 404, forbidden: 403, failed: 500, away: 503 };
+        for (var name in pages) {
+            await click('to-one');
+            await click('to-' + name);
+            H.check(at(pages[name]) && quiet(), 'the site\'s page under ' + pages[name] + ' is shown in place, quietly', location.pathname + ' ' + heading() + ' ' + JSON.stringify(said));
+        }
+        await click('to-one');
+        await travel('back');
+        H.check(at(503) && quiet(), 'Back gives such a page back', location.pathname + ' ' + JSON.stringify(said));
+        await travel('forward');
+        H.check(heading() === 'One' && quiet(), 'and the navigation goes on', heading());
+
+        // ── An answer that is no page of the site ───────────────────────────
+        H.expect(/Rescue mode/); H.expect(/Unexpected XHR response/); H.expect(/Storage/);
+        $id('to-broken').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        await H.until(function () { return $id('bare') !== null; }, 3000);
+        H.check($id('bare') !== null && Transparent.isRescueMode() === true, 'a failure that brings no page of the site (502) is rescued as before: shown as it came');
+        H.check(said.some(function (line) { return /Unexpected XHR response/.test(line) && /502/.test(line); }) && said.some(function (line) { return /Rescue mode/.test(line); }), 'and said in the console', JSON.stringify(said));
+        H.done();
+    })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
+</script>
+</body>
+</html>

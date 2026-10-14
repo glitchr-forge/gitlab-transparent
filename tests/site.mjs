@@ -1,5 +1,5 @@
 // The small site the navigation tests browse, served by tests/run.mjs under /site/: pages of one
-// layout (#page is the block the navigation swaps), a form's answers, a page that fails, a
+// layout (#page is the block the navigation swaps), a form's answers, pages under a status of their own, a page that fails, a
 // connection that drops, pictures that arrive late without a size, and a back office that opens
 // as a nest (it answers with the X-Transparent-Nest header).
 const HEAD = '<meta charset="utf-8"><link rel="stylesheet" href="/tests/site.css">';
@@ -33,7 +33,11 @@ const pages = {
             <button type="submit" name="action" value="save" id="post-save">save</button>
             <button type="submit" name="action" value="publish" id="post-publish"><span id="post-publish-icon">publish</span></button>
         </form>
-        <form id="refused" method="post" action="/site/refuse"><input name="title" value="x"><button type="submit" id="refused-go">send</button></form>`,
+        <form id="refused" method="post" action="/site/refuse"><input name="title" value="x"><button type="submit" id="refused-go">send</button></form>
+        <form id="invalid" method="post" action="/site/status/422"><input name="title" value="x"><button type="submit" id="invalid-go">send</button></form>
+        <form id="create" method="post" action="/site/status/201"><input name="title" value="x"><button type="submit" id="create-go">create</button></form>
+        <a id="to-missing" href="/site/status/404">missing</a><a id="to-forbidden" href="/site/status/403">forbidden</a>
+        <a id="to-failed" href="/site/status/500">failed</a><a id="to-away" href="/site/status/503">away</a><a id="to-broken" href="/site/broken">broken</a>`,
     two: () => `<h1>Two</h1><a id="to-one" href="/site/page/one">one</a><canvas id="kept-canvas" width="10" height="10"></canvas>${sections(6)}<h2 id="deep">Deep</h2>${sections(3, 't')}`,
     styled: () => `<h1>Styled</h1><a id="to-one" href="/site/page/one">one</a>`,
     // A long page that is not whole when it comes in: each section gets its height a moment later, one after
@@ -107,7 +111,16 @@ export async function handle(req, res, url) {
         await readBody(req);
         return send(res, 200, layout('Refused', `<h1>Refused</h1><a id="to-one" href="/site/page/one">one</a>${sections(6)}<p id="refusal">no</p><form id="refused" method="post" action="/site/refuse"><input name="title" value="x"><button type="submit" id="refused-go">send</button></form>${sections(3, 'r')}`));
     }
-    if (path === '/site/error') return send(res, 500, layout('Error', '<h1 id="failure">It failed</h1>'));
+    if ((m = path.match(/^\/site\/status\/(\d{3})$/))) {
+        // A page of the site under a status of its own: a form refused with its errors (422), a creation (201),
+        // the site's page for what is missing, forbidden or broken (404, 403, 500, 503).
+        if (req.method === 'POST') await readBody(req);
+        return send(res, +m[1], layout('Status ' + m[1], `<h1>Status ${m[1]}</h1><a id="to-one" href="/site/page/one">one</a>${sections(6)}<p id="said" data-method="${req.method}">${m[1]}</p>
+            <form id="invalid" method="post" action="/site/status/422"><input name="title" value="x"><button type="submit" id="invalid-go">send</button></form>${sections(3, 'r')}`));
+    }
+    // A failure that brings no page of the site: what a server or a proxy says by itself.
+    if (path === '/site/broken') return send(res, 502, '<html><head><title>Bad gateway</title></head><body><h1 id="bare">Bad gateway</h1></body></html>');
+    if (path === '/site/error') return send(res, 500, layout('Error', '<h1 id="failure">It failed</h1><a id="to-one" href="/site/page/one">one</a>'));
     if (path === '/site/drop') return req.socket.destroy();
     if (path === '/site/slow') {
         await new Promise((f) => setTimeout(f, +url.searchParams.get('ms') || 300));
