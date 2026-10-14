@@ -667,7 +667,7 @@
     Cookie.scan = function (rootNode) { scan(rootNode); return this; };
 
     // ── The interface ────────────────────────────────────────────────────
-    var ui = { root: null, built: false, view: null, opener: null, closed: false, auto: false, timer: null, left: 0, last: 0, action: null, bound: false, observer: null };
+    var ui = { root: null, built: false, bare: false, view: null, opener: null, closed: false, auto: false, timer: null, left: 0, last: 0, action: null, bound: false, observer: null };
 
     function hook(name) {
         var hooks = setting('hooks');
@@ -785,15 +785,33 @@
         if (!found && template && template.nodeType === 1) found = template;
         if (!found) found = document.querySelector(sel('banner'));
         if (found && found.tagName === 'TEMPLATE') found = document.importNode(found.content, true).firstElementChild;
-        if (!found) found = build();
+        var bare = !found;
+        if (bare) found = build();
         // Put in the page here, it is taken out by destroy(); found in the page, it is the page's.
         if (!found.isConnected) { place(found); built = true; }
         found.setAttribute(hook('banner'), '');
 
         ui.root = found;
         ui.built = built;
+        ui.bare = bare;
         dress();
         return found;
+    }
+
+    /** A configuration that comes after the banner (another language's words, a position): the bare one is built again, the site's gets its words. */
+    function redress() {
+        if (!ui.root || !ui.root.isConnected) return;
+        if (!ui.bare) return dress();
+        var old = ui.root;
+        var held = old.contains(document.activeElement);
+        ui.root = build();
+        old.parentNode.replaceChild(ui.root, old);
+        ui.root.setAttribute(hook('banner'), '');
+        dress();
+        if (held && ui.view === 'details') {
+            var details = part('details');
+            try { (focusable(details)[0] || details).focus(); } catch (e) { /* nothing to hold the focus */ }
+        }
     }
 
     /** The banner made ready: its state, its words, its rows, what a screen reader is told. */
@@ -1311,7 +1329,7 @@
             document.removeEventListener('click', onClick);
             document.removeEventListener('keydown', onKey);
         }
-        ui = { root: null, built: false, view: null, opener: null, closed: false, auto: false, timer: null, left: 0, last: 0, action: null, bound: false, observer: null };
+        ui = { root: null, built: false, bare: false, view: null, opener: null, closed: false, auto: false, timer: null, left: 0, last: 0, action: null, bound: false, observer: null };
         cats = {};
         order = [];
         entries = [];
@@ -1337,8 +1355,11 @@
     };
 
     Cookie.ready = function (options) {
+        // What the banner is made of, configured after it was made: it is made again.
+        var again = ready && !!options && ['texts', 'classes', 'hooks', 'prefix', 'position', 'variables'].some(function (key) { return options[key] !== undefined; });
         Cookie.configure(options || {});
         ready = true;
+        if (again) redress();
 
         log('ready');
         window.dispatchEvent(new Event('cookie:ready'));

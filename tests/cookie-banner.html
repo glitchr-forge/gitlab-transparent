@@ -71,6 +71,14 @@
         await H.after(300);
         H.check(Cookie.pending() === true && banner.hidden === false, 'it waits: a silence is not an answer');
 
+        // Words that come later (another language's, with the page the navigation brings).
+        Cookie.ready({ texts: { accept: 'D\'accord', title: 'Une question' } });
+        H.check(Cookie.banner().isConnected && !banner.isConnected && q('accept').textContent === 'D\'accord' && q('text', 'title').textContent === 'Une question' && q('refuse').textContent === 'Decline' && Cookie.banner().hidden === false && document.querySelectorAll('[data-cookie-banner]').length === 1,
+            'a configuration that comes later rewords the banner, shown as it was');
+        Cookie.ready({ texts: { accept: 'Agree', title: 'A question' } });
+        banner = Cookie.banner();
+        summary = q('summary');
+
         // ── Refuse, accept ──────────────────────────────────────────────────
         heard.length = 0;
         click(q('refuse'));
