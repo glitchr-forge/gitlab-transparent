@@ -1,0 +1,86 @@
+<!doctype html>
+<!--
+  StickyStops along a row (data-sticky-axis="x", attached by itself, its keys on): ArrowRight and
+  ArrowLeft go from stop to stop when the key is pressed in the row, are left to the browser at
+  the last and the first stop, in a field of the row, with a modifier, and when pressed elsewhere
+  on the page; ArrowDown in the row is not the row's. A row with data-sticky-keys="false" leaves
+  every key alone. Opened by tests/run.mjs in a headless browser; the page writes its verdict in
+  #result.
+-->
+<html>
+<head>
+<meta charset="utf-8"><title>stops, a row's keys</title>
+<style>
+    html { scroll-behavior: auto; }
+    body { margin: 0; }
+    .row { display: flex; overflow-x: auto; width: 300px; height: 100px; }
+    .row > div { flex: 0 0 300px; height: 100px; }
+    #result { position: fixed; left: 0; bottom: 0; margin: 0; }
+</style>
+</head>
+<body>
+<div id="row" class="row" tabindex="0" data-sticky-axis="x" data-sticky-duration="120">
+    <div class="sticky-stop"><input id="field" type="text"></div><div class="sticky-stop"></div><div class="sticky-stop"></div>
+</div>
+<div id="quiet" class="row" tabindex="0" data-sticky-axis="x" data-sticky-keys="false">
+    <div class="sticky-stop"></div><div class="sticky-stop"></div>
+</div>
+<p id="elsewhere" tabindex="0">elsewhere</p>
+<pre id="result">pending</pre>
+<script src="harness.js"></script>
+<script src="../src/js/core.js"></script>
+<script src="../src/js/stops.js"></script>
+<script>
+    (async function () {
+        var H = Harness;
+        var row = document.getElementById('row');
+        var quiet = document.getElementById('quiet');
+        function x() { return Math.round(row.scrollLeft); }
+        async function at(to) { await H.until(function () { return H.near(x(), to, 1); }, 3000); await H.after(60); return H.near(x(), to, 1); }
+
+        await H.frame();
+        H.check(StickyStops.get(row) !== null && StickyStops.get(row).options.keys === true, 'the row attached itself, its keys on');
+
+        var right = H.key('ArrowRight', {}, row);
+        H.check(right.defaultPrevented && await at(300), 'ArrowRight in the row goes to the next stop', right.defaultPrevented + ' ' + x());
+        right = H.key('ArrowRight', {}, row);
+        H.check(right.defaultPrevented && await at(600), 'ArrowRight again goes to the last stop', right.defaultPrevented + ' ' + x());
+        right = H.key('ArrowRight', {}, row);
+        await H.after(200);
+        H.check(!right.defaultPrevented && H.near(x(), 600, 1), 'ArrowRight at the last stop is left to the browser', right.defaultPrevented + ' ' + x());
+
+        var down = H.key('ArrowDown', {}, row);
+        var ctrl = H.key('ArrowLeft', { ctrlKey: true }, row);
+        var typed = H.key('ArrowLeft', {}, document.getElementById('field'));
+        var away = H.key('ArrowLeft', {}, document.getElementById('elsewhere'));
+        await H.after(200);
+        H.check(!down.defaultPrevented, 'ArrowDown in the row is not the row\'s', down.defaultPrevented);
+        H.check(!ctrl.defaultPrevented, 'Ctrl+ArrowLeft is left alone', ctrl.defaultPrevented);
+        H.check(!typed.defaultPrevented, 'ArrowLeft in a field of the row is the field\'s', typed.defaultPrevented);
+        H.check(!away.defaultPrevented, 'ArrowLeft pressed elsewhere on the page is left alone', away.defaultPrevented);
+        H.check(H.near(x(), 600, 1), 'and the row did not move for any of them', x());
+
+        var left = H.key('ArrowLeft', {}, row);
+        H.check(left.defaultPrevented && await at(300), 'ArrowLeft in the row goes back a stop', left.defaultPrevented + ' ' + x());
+        H.key('ArrowLeft', {}, row);
+        H.check(await at(0), 'ArrowLeft again reaches the first stop', x());
+        left = H.key('ArrowLeft', {}, row);
+        await H.after(200);
+        H.check(!left.defaultPrevented && x() === 0, 'ArrowLeft at the first stop is left to the browser', left.defaultPrevented + ' ' + x());
+
+        // A key held down: one stop at a time.
+        H.key('ArrowRight', {}, row);
+        for (var i = 0; i < 6; i++) H.key('ArrowRight', { repeat: true }, row);
+        H.check(await at(300), 'a key held down goes one stop at a time', x());
+        await H.after(200);
+        H.check(H.near(x(), 300, 1), 'the repeats did not carry the row past the stop', x());
+
+        var off = H.key('ArrowRight', {}, quiet);
+        await H.after(200);
+        H.check(!off.defaultPrevented && quiet.scrollLeft === 0, 'a row with data-sticky-keys="false" leaves the key to the browser', off.defaultPrevented + ' ' + quiet.scrollLeft);
+
+        H.done();
+    })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
+</script>
+</body>
+</html>

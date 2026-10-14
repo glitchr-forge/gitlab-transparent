@@ -1,0 +1,135 @@
+<!doctype html>
+<!--
+  The magnets with scrollsnap_hold: false - a way to a magnet the reader may take. A wheel, a
+  finger or a key on the way stops the page where it is: nothing is set on <html> (no
+  .sticky-prevent-scroll at any time), the page answers at once, and the snap does not start
+  again against the gesture - it waits for the scroll to have rested (debounce), then acts as it
+  always does. The held way (the default) is tests/sticky-magnets.html.
+  Opened by tests/run.mjs in a headless browser; the page writes its verdict in #result.
+-->
+<html>
+<head>
+<meta charset="utf-8"><title>sticky magnets, interruptible</title>
+<style>
+    html { scroll-behavior: auto; scroll-padding-top: 0; }
+    body { margin: 0; }
+    section { height: 100vh; }
+    /* src/css/sticky.scss */
+    .sticky-prevent-scroll { overflow: hidden; block-size: 100%; }
+    #result { position: fixed; left: 0; bottom: 0; margin: 0; }
+</style>
+</head>
+<body>
+<section id="one" class="sticky-magnet">One</section>
+<section id="two" class="sticky-magnet">Two</section>
+<section id="three" class="sticky-magnet">Three</section>
+<section id="four" class="sticky-magnet">Four</section>
+<pre id="result">pending</pre>
+<script src="jquery.js"></script>
+<script src="harness.js"></script>
+<script src="../src/js/core.js"></script>
+<script src="../src/js/sticky.js"></script>
+<script>
+    (async function () {
+        var H = Harness;
+        var html = document.documentElement;
+        var DEBOUNCE = 300;
+        function top(id) { return document.getElementById(id).offsetTop; }
+        function y() { return Math.round(window.scrollY); }
+        function wait(ms) { return new Promise(function (f) { setTimeout(f, ms); }); }
+        var locked = 0;
+        new MutationObserver(function () { if (html.classList.contains('sticky-prevent-scroll')) locked++; }).observe(html, { attributes: true, attributeFilter: ['class'] });
+        /** One notch of the wheel: heard by the page, and scrolling it when its overflow lets it. */
+        function notch(delta) {
+            document.body.dispatchEvent(new WheelEvent('wheel', { deltaY: delta, bubbles: true }));
+            if (getComputedStyle(html).overflowY !== 'hidden') window.scrollBy({ top: delta, behavior: 'instant' });
+            requestAnimationFrame(function () {});
+        }
+        async function rest(id) {
+            Flow.release(null, window);
+            window.scrollTo({ top: top(id), behavior: 'instant' });
+            await H.after(DEBOUNCE + 250);
+        }
+        /**
+         * The reader leaves the magnet and the page sets off for the next: true once it is on its way, well
+         * short of it. Two notches: after a rest longer than `debounce` the library has forgotten where the
+         * page was, and the first scroll it hears is the one it measures the next from - a third when the
+         * second brought the page where the library last saw it move (the test puts the page back at once).
+         */
+        async function leave() {
+            notch(50);
+            await H.frame();
+            notch(50);
+            await H.frame();
+            if ($(html).prop('user-scroll') !== false) notch(50);
+        }
+        async function onTheWay(from, to) {
+            await leave();
+            await H.until(function () { return $(html).prop('user-scroll') === false && y() > top(from) + 155; }, 2000);
+            return $(html).prop('user-scroll') === false && y() < top(to) - 100;
+        }
+        /** The page was stopped at `at` by `what`: it stays there, is the reader's, and answers. */
+        async function taken(what, at, to) {
+            await H.after(450);
+            H.check(H.near(y(), at, 1), what + ' on the way stops the page where it is', y() + ' vs ' + at + ' (the magnet: ' + top(to) + ')');
+            H.check($(html).prop('user-scroll') !== false, what + ' on the way gives the scroll back to the reader', $(html).prop('user-scroll'));
+            H.check(!html.classList.contains('sticky-prevent-scroll') && getComputedStyle(html).overflowY !== 'hidden', what + ' on the way: nothing holds the page', html.className);
+        }
+
+        H.check(Sticky.settings.scrollsnap_hold === true, 'scrollsnap_hold is true by default', Sticky.settings.scrollsnap_hold);
+        Sticky.ready({ scrollsnap: true, passive: false, scrollsnap_hold: false, smoothscroll_duration: '900ms', debounce: DEBOUNCE + 'ms' });
+        await H.after(60);
+
+        // A wheel on the way.
+        await rest('one');
+        H.check(await onTheWay('one', 'two'), 'leaving the first magnet sets the page on its way to the second', y());
+        notch(40);
+        var from = y();
+
+        // The reader goes on at once: each notch moves the page by itself, the snap does not take it again.
+        for (var i = 0; i < 3; i++) { await wait(80); notch(40); }
+        await H.frame();
+        H.check(H.near(y(), from + 120, 1) && $(html).prop('user-scroll') !== false, 'the snap does not start again against the reader\'s gesture', y() + ' vs ' + (from + 120));
+        var at = y();
+        await taken('a wheel', at, 'two');
+        from = at - 120;
+
+        // Once the scroll has rested, the snap acts as it always does: a notch leads to the next magnet.
+        await H.after(DEBOUNCE + 250);
+        H.check(H.near(y(), from + 120, 1), 'at rest the page is left where the reader put it', y() + ' vs ' + (from + 120));
+        // (From near the first magnet: the snap takes a scroll that heads away from the nearest magnet.)
+        window.scrollTo({ top: top('one') + 60, behavior: 'instant' });
+        await H.after(DEBOUNCE + 250);
+        await leave();
+        await H.until(function () { return H.near(y(), top('two'), 2) && $(html).prop('user-scroll') !== false; }, 3000);
+        H.check(H.near(y(), top('two'), 2), 'after a rest, leaving leads to the next magnet again', y() + ' vs ' + top('two'));
+
+        // A key on the way (the keys are not the magnets\': scrollsnap_keys is off): the reader\'s, left to the browser.
+        await rest('one');
+        H.check(await onTheWay('one', 'two'), 'on the way again', y());
+        at = y();
+        var key = H.key('ArrowDown');
+        H.check(!key.defaultPrevented, 'a key on the way is left to the browser', key.defaultPrevented);
+        await taken('a key', at, 'two');
+
+        // A finger.
+        await rest('one');
+        H.check(await onTheWay('one', 'two'), 'on the way a third time', y());
+        at = y();
+        var finger = new Touch({ identifier: 1, target: document.body, clientX: 10, clientY: 10 });
+        document.body.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, touches: [finger], changedTouches: [finger] }));
+        await taken('a finger', at, 'two');
+
+        // A modifier pressed on its own is no gesture: the page arrives.
+        await rest('one');
+        H.check(await onTheWay('one', 'two'), 'on the way a fourth time', y());
+        H.key('Shift');
+        await H.until(function () { return H.near(y(), top('two'), 2); }, 3000);
+        H.check(H.near(y(), top('two'), 2), 'a modifier key alone does not stop the way', y() + ' vs ' + top('two'));
+
+        H.check(locked === 0, '<html> never carried .sticky-prevent-scroll', locked);
+        H.done();
+    })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
+</script>
+</body>
+</html>

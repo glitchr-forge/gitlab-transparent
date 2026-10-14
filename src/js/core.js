@@ -1,4 +1,5 @@
-// Flow - the shared core of the modules (navigation, sticky, stops, sortable).
+// Flow - the shared core of the modules (navigation, sticky, stops, sortable,
+// ajaxer, cookie).
 //
 // What the modules used to carry each on their own, once: the units ("250ms",
 // "2rem", "15%"), the scroll padding, the scrollers (which element scrolls, the
@@ -24,7 +25,7 @@
 
     var document = window.document;
 
-    var Flow = { core: true, version: '1.0.4' };
+    var Flow = { core: true, version: '1.2.0' };
 
     // ── jQuery ───────────────────────────────────────────────────────────
     // A bundler's ProvidePlugin gives the bare `jQuery` identifier; a page

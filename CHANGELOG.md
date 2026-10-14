@@ -1,5 +1,108 @@
 # Changelog
 
+## 1.2.0 - 2026-10-14
+
+A sixth module: the cookies and the visitor's consent, `@glitchr/cookie`
+1.0.53 brought in with its history. Nothing changes for a page that does not
+load it; it is in the whole library's entry and has one of its own.
+
+- **cookie** (new) - `@glitchr/flowjs/cookie`, the `Cookie` global, on the
+  core, without jQuery. [docs/cookie.md](docs/cookie.md).
+  - **Categories** of consent are the site's to declare (`categories`,
+    `Cookie.category()`): a key, a label and a description in the site's
+    words, on or off before any answer (`default`), refusable or not
+    (`required`), what each stores and governs. None is written in the
+    library.
+  - **What is stored** is declared under a category - cookies, `localStorage`
+    and `sessionStorage` entries, by name or pattern, with a duration and a
+    purpose. `Cookie.cookies`, `Cookie.local` and `Cookie.session` read and
+    write by that declaration: nothing under a category that is not granted
+    (said in the console with `debug`), nothing undeclared unless `undeclared:
+    "allow"`, and everything a category declares is erased when it is refused
+    or withdrawn.
+  - **Features** start at a grant and stop at a withdrawal:
+    `Cookie.use(category, [options], onGrant, onRevoke)` (the shape of
+    omnibase/consent's `Consent.use()`), or inert elements of the page -
+    `<script type="text/plain" data-cookie-category>`, `<template>`, anything
+    with `data-cookie-src`, `data-cookie-placeholder`. Events on `window`:
+    `cookie:consent`, `cookie:grant`, `cookie:revoke`, `cookie:open`,
+    `cookie:close`.
+  - **The interface**: a banner (accept, refuse, customize) and a detailed
+    section (a switch per category, accept all, refuse all, save), opened
+    again at any time by anything with `data-cookie-open`. Its HTML is the
+    site's (an element or a `<template>` found by its `data-cookie-*`
+    attributes, or the `template` option) or a bare default; the attributes'
+    prefix and names, the classes, the CSS variables, the position and every
+    word (`texts`) are options. The detailed section is a modal dialog: focus
+    kept inside, Escape, focus given back; `prefers-reduced-motion` is
+    followed.
+  - **The countdown is an option**, off by default - a silence is not a
+    consent: `countdown: {duration, action}` with `action` `"default"`,
+    `"accept"`, `"refuse"` or `"none"`. `dismiss` does the same for a click
+    outside the banner.
+  - **The answer** is a record (version, date, a yes or no per category) kept
+    in a cookie whose name, lifetime, path, domain, `SameSite` and `Secure`
+    are options, or in `localStorage`, or in a store of the site's. The
+    visitor is asked again when `version` changes, when a category is new, or
+    when the answer is older than its lifetime. `signals: {gpc, dnt}` makes
+    Global Privacy Control and Do Not Track a refusal, if the site asks.
+  - A configuration can be handed by the page (`<script
+    type="application/json" data-cookie-config>`), read at each page the
+    navigation swaps in; the banner stays across those pages and their inert
+    elements are woken or left asleep as they arrive.
+  - **From `@glitchr/cookie`**: every method of 1.0.53 keeps its name and its
+    meaning (`ready`, `configure`, `set`, `get`, `delete`, `checkConsent`,
+    `setConsent`, `hasConsents`, `getConsents`, `declare`, `addGroup`,
+    `refresh`, `onConfirm`, `onDeny`, `onCheck`, the option accessors), the
+    consents stay in `localStorage` `cookie/<GROUP>` and the cookies are
+    `GROUP/NAME`. **changes**: jQuery is no longer needed - `cookie:confirm`,
+    `cookie:deny` and `cookie:check` are native events on `window`, which
+    `$(window).on()` hears as before; a group whose name is a declared
+    category's key follows that category (written only while it is granted,
+    where a bare group is written until refused).
+- `src/css/cookie.scss` - an optional, minimal look for the banner, drawn from
+  `--cookie-*` properties; no entry imports it.
+
+`tests/cookie.html` (the 1.0.53 methods, categories, storage, features, inert
+elements, the record), `tests/cookie-banner.html` (the banner, the detailed
+section, the keyboard, asking again, signals, the site's own HTML, no sentence
+in the module), `tests/cookie-countdown.html` (none, and its four endings),
+`tests/cookie-navigation.html` (with the navigation).
+
+## 1.1.0 - 2026-10-14
+
+Two options for the magnets (`.sticky-magnet`), both leaving a site as it was
+until it sets them.
+
+- **sticky** - `scrollsnap_hold` (`true`): the way to a magnet holds the
+  scroll, as in 1.0.4. `false` makes it the reader's to take: nothing is set
+  on `<html>` (no `.sticky-prevent-scroll`), a wheel, a finger, a press or a
+  key on the way stops the page where it is, and the snap waits for the scroll
+  to have been quiet for `debounce` before it acts again - it does not start
+  against the gesture that stopped it.
+- **sticky** - `scrollsnap_keys` (`false`): the arrow keys go from magnet to
+  magnet, down the page (ArrowDown, ArrowUp) and along a row that scrolls
+  sideways (ArrowRight, ArrowLeft, pressed in the row or with the pointer over
+  it), under the scroller's `scroll-padding`. Left to the browser past the
+  last magnet, along an axis without magnets, in a field, on a widget, in a
+  dialog, with a modifier, inside an element that scrolls by itself, and when
+  the page took the key - the rules of the stops' `keys`. A key held down goes
+  one magnet at a time; two presses lead two magnets further. A key's way
+  follows `scrollsnap_hold`.
+- **sticky** - new: `Sticky.toMagnet(scroller, {top, left})`, the way both
+  take, and `Sticky.getMagnetPositions(scroller, axis)`. One keydown listener
+  on the window.
+- The stops already went from stop to stop along a `data-sticky-axis="x"` row
+  with ArrowLeft and ArrowRight (`keys`); `tests/stops-row-keys.html` now says
+  so.
+
+`tests/sticky-magnets-interruptible.html` (a wheel, a key, a finger on the
+way: stopped in place, nothing held, no restart against the reader, the snap
+back after a rest; a modifier alone stops nothing), `tests/sticky-magnet-keys.html`
+(down and up the page, along a row, the bounds, what is left alone, a key
+held, two presses, the held and the taken way), `tests/stops-row-keys.html`.
+The held way of 1.0.4 is unchanged: `tests/sticky-magnets.html` as it was.
+
 ## 1.0.4 - 2026-10-14
 
 ### A page that stopped answering, fixed
