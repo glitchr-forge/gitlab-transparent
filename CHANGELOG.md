@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.1 - 2026-10-16
+
+- **cookie** - the `ignore` option: the elements whose clicks are not on the
+  page (`[data-cookie-ignore]` by default; a selector, an element or a list of
+  them, `false` for none). A click inside one is no click outside the banner:
+  it answers nothing by `dismiss` and does not count as leaving the question.
+  A site that set `dismiss` to an answer had it given, and the question
+  closed, by a click on a developer's toolbar (Symfony's web debug toolbar),
+  the visitor never knowing what was kept. `Cookie.ignored(element)` says it
+  for a site's own script. Nothing changes for a site that does not use it.
+  tests/cookie-countdown.html.
+
 ## 1.3.0 - 2026-10-16
 
 - **stops** - each way on its own: the `up` and `down` options (`true` by

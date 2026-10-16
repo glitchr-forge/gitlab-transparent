@@ -68,6 +68,7 @@
         legacy: true,
         countdown: false,
         dismiss: 'none',
+        ignore: '[data-cookie-ignore]',
         signals: { gpc: false, dnt: false },
         autoOpen: true,
         reopen: 'details',
@@ -734,6 +735,24 @@
         return ui.root.contains(el) || (!!details && details.contains(el));
     }
 
+    /** Whether the element is in one the ignore option names: its clicks are not on the page. */
+    function ignored(el) {
+        var list = setting('ignore');
+        if (!list) return false;
+        if (!Array.isArray(list)) list = [list];
+        for (var i = 0; i < list.length; i++) {
+            var one = list[i];
+            if (!one) continue;
+            if (typeof one === 'string') {
+                try { if (el.closest(one)) return true; } catch (e) { log('ignore: not a selector', one); }
+            } else if (one.nodeType === 1 && one.contains(el)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    Cookie.ignored = ignored;
+
     /** Whether the visitor asked for less motion. */
     Cookie.reduced = function () { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); };
 
@@ -1292,6 +1311,8 @@
         if (target.closest(sel('save'))) return Cookie.save();
         if (target.closest(sel('close'))) return leave();
         if (inside(target)) return;
+        // A click on what is not the page's (a developer's toolbar, an overlay of the browser's): not one elsewhere.
+        if (ignored(target)) return;
         // A click elsewhere, the question left without a word.
         var dismiss = setting('dismiss');
         if (ui.view === 'banner' && dismiss && dismiss !== 'none' && pending()) decide(choice(dismiss, true), 'dismiss');

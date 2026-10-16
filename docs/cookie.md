@@ -353,6 +353,18 @@ answers. `countdown: false`, `0` or
 nothing: no countdown. `dismiss` gives a click outside the banner the same
 choice of four (`none` by default).
 
+A click on what is not the page's - a developer's toolbar, an overlay a
+browser extension puts in the page - is no click outside: `ignore` names
+those elements (`[data-cookie-ignore]` by default; a selector, an element, or
+a list of them), and a click inside one neither answers by `dismiss` nor
+counts as leaving the question. `Cookie.ignored(element)` says whether an
+element is one of them, for a site's own script that closes something on a
+click elsewhere.
+
+```js
+ignore: ['[data-cookie-ignore]', '.sf-toolbar', '[id^="sfwdt"]']   // the Symfony debug toolbar too
+```
+
 A category covered by a privacy signal the site honours is never turned on by
 a countdown or a click outside.
 
@@ -406,6 +418,7 @@ pulse (`classes.tick` is not set) and the root has `classes.reduced`.
 | `legacy` | `true` | keep `localStorage` `cookie/<KEY>` in step, as `@glitchr/cookie` kept its consents, and take the answers found there for a visitor the library has no record of yet - a migration, once: `localStorage` `<record.name>.seen` says this browser has had a record, and from then on a record that is gone or no longer counts is a question to ask again |
 | `countdown` | `false` | `{duration, action}`, see [The countdown](#the-countdown) |
 | `dismiss` | `'none'` | what a click outside the banner answers: `none`, `default`, `accept`, `refuse` |
+| `ignore` | `'[data-cookie-ignore]'` | the elements whose clicks are not on the page (a developer's toolbar): a selector, an element or a list; never a click outside. `false`: none |
 | `signals` | `{gpc: false, dnt: false}` | see [Privacy signals](#privacy-signals) |
 | `autoOpen` | `true` | show the banner by itself while an answer is wanted |
 | `reopen` | `'details'` | what `data-cookie-open` and `Cookie.open()` show once answered: `details` or `banner` |
@@ -436,6 +449,7 @@ Cookie.cookies / Cookie.local / Cookie.session            // .get(name) .set(nam
 Cookie.open([view])              Cookie.close()           Cookie.banner()       Cookie.scan([root])
 Cookie.mount(target)             // the live banner put there: another [data-cookie-banner]'s place, or any element
 Cookie.onConsent(fn)             Cookie.signals()         Cookie.reduced()
+Cookie.ignored(element)          // in an element the ignore option names: not a click on the page
 Cookie.destroy()                 // as loaded: no category, no declaration, no banner (the answer kept stays)
 ```
 

@@ -5,7 +5,8 @@
   categories take their defaults ("default"), all go on ("accept"), all go off ("refuse"), or
   nothing happens and the banner stays ("none"); it stops for good once the visitor opens the
   detailed section, and an answer given in time is the answer; a category under a privacy signal
-  the site honours is not turned on by it; a click outside the banner answers as `dismiss` says;
+  the site honours is not turned on by it; a click outside the banner answers as `dismiss` says, one
+  in an element `ignore` names (a developer's toolbar) does not;
   with less motion asked for, the number does not pulse. Opened by tests/run.mjs in a headless
   browser; the page writes its verdict in #result.
 -->
@@ -13,6 +14,8 @@
 <head><meta charset="utf-8"><title>cookie countdown</title></head>
 <body>
 <button type="button" id="elsewhere">elsewhere</button>
+<div id="toolbar" data-cookie-ignore><button type="button" id="tool">a developer's toolbar</button></div>
+<div class="sf-toolbar"><span id="sfwdt1"><button type="button" id="sftool">another toolbar</button></span></div>
 <pre id="result">pending</pre>
 <script src="harness.js"></script>
 <script src="../src/js/core.js"></script>
@@ -146,6 +149,26 @@
         H.check(Cookie.pending() === true, 'with dismiss: "default", a click inside the banner is not one outside');
         click($id('elsewhere'));
         H.check(Cookie.pending() === false && states() === 'true,true,false' && source === 'dismiss', 'a click outside keeps the defaults', states() + ' ' + source);
+
+        // ── A click on what is not the page's ───────────────────────────────
+        wipe(); source = null;
+        Cookie.ready(options({ dismiss: 'accept' }));
+        click($id('tool'));
+        H.check(Cookie.pending() === true && source === null && !Cookie.banner().hidden, 'a click in [data-cookie-ignore] (the default ignore) answers nothing, the question stays', states() + ' ' + source);
+        H.check(Cookie.ignored($id('tool')) === true && Cookie.ignored($id('elsewhere')) === false, 'Cookie.ignored() says which clicks are not on the page');
+        click($id('sftool'));
+        H.check(Cookie.pending() === false && source === 'dismiss', 'a selector the ignore option does not name is the page', states() + ' ' + source);
+        wipe(); source = null;
+        Cookie.ready(options({ dismiss: 'accept', ignore: ['[data-cookie-ignore]', '.sf-toolbar', '[id^="sfwdt"]'] }));
+        click($id('sftool'));
+        click($id('tool'));
+        H.check(Cookie.pending() === true && source === null && !Cookie.banner().hidden, 'ignore takes a list of selectors', states() + ' ' + source);
+        Cookie.ready(options({ dismiss: 'accept', ignore: ['nothing[', $id('toolbar')] }));
+        click($id('tool'));
+        H.check(Cookie.pending() === true && source === null, 'an element, and a selector that is none, are taken for what they are', states() + ' ' + source);
+        Cookie.ready(options({ dismiss: 'accept', ignore: false }));
+        click($id('tool'));
+        H.check(Cookie.pending() === false && states() === 'true,true,true' && source === 'dismiss', 'ignore: false, every click outside the banner is one elsewhere', states() + ' ' + source);
 
         // ── Less motion ─────────────────────────────────────────────────────
         wipe();

@@ -107,7 +107,8 @@ data-cookie-config>` in the page; defaults in `Cookie.defaults`: `version`
 "cookie-consent", lifetime: "180d"}`), `cookie` (`{path: "/", domain: null,
 sameSite: "Lax", secure: "auto"}`), `countdown` (`false`; `{duration, action}`
 with `action` `"default"`, `"accept"`, `"refuse"` or `"none"`), `dismiss`
-(`"none"`), `signals` (`{gpc: false, dnt: false}`), `autoOpen` (`true`),
+(`"none"`), `ignore` (`"[data-cookie-ignore]"`: what is not the page's, a
+developer's toolbar - a click there is no click outside), `signals` (`{gpc: false, dnt: false}`), `autoOpen` (`true`),
 `reopen` (`"details"`), `position`, `container`, `template`, `root` (which
 element is the banner, of several places), `bare` (`"auto"`: the default banner
 for a site that has none), `config` (a selector of the page's configuration),
