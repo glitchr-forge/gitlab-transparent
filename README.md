@@ -86,7 +86,7 @@ scroll, `scrollsnap_keys` `false`: the arrows go from magnet to magnet),
 **StickyStops** - `StickyStops.attach(scroller, {...})`, defaults in
 `StickyStops.defaults`: `selector` (`".sticky-stop"`), `settle` (160), `tolerance`
 (3), `reach` (`Infinity`), `duration` (0), `easing`, `bandUp`/`bandDown` (0),
-`progress` (`true`), `smooth` (`true`), `axis` (`"y"`), `keys` (`false`), `end`
+`up`/`down` (`true`: a scroll heading that way is taken to a stop), `progress` (`true`), `smooth` (`true`), `axis` (`"y"`), `keys` (`false`), `end`
 (`false`). Full description in [docs/sticky.md](docs/sticky.md).
 
 **StickySortable** - `new StickySortable(container, {...})` or

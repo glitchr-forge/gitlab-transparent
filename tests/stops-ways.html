@@ -1,0 +1,134 @@
+<!doctype html>
+<!--
+  StickyStops, each way on its own: with `up: false` a scroll heading up rests where the reader left
+  it - not carried on to the stop above, not settled back down - while a scroll heading down still
+  goes on to its stop, and a nudge down still settles back up (it is the downward scroll's); a stop
+  marked data-sticky-up="true" keeps its pull upwards all the same (the full sky at the top of a
+  page). `down: false` is the mirror image, and the keys go from stop to stop whatever the options -
+  ArrowUp down the page, ArrowLeft and ArrowRight along a row free both ways (data-sticky-up and
+  data-sticky-down "false" on the row), where a scroll comes to rest wherever it was left.
+  smooth: false, so that every glide is a jump the page can measure at once.
+  Opened by tests/run.mjs in a headless browser; the page writes its verdict in #result.
+-->
+<html>
+<head>
+<meta charset="utf-8"><title>stops, each way</title>
+<style>
+    html { scroll-behavior: auto; }
+    body { margin: 0; }
+    section { height: 100vh; }
+    #result { position: fixed; top: 0; left: 0; margin: 0; }
+    .row { display: flex; overflow-x: auto; width: 300px; height: 100px; }
+    .row > div { flex: 0 0 300px; height: 100px; }
+</style>
+</head>
+<body>
+<section id="sky" class="sticky-stop" data-sticky-up="true"></section>
+<section id="a" class="sticky-stop"></section>
+<section id="b" class="sticky-stop" data-sticky-band-up="100" data-sticky-band-down="100"></section>
+<section id="c" class="sticky-stop"></section>
+<footer style="height: 50vh">
+    <div id="row" class="row" tabindex="0" data-sticky-axis="x" data-sticky-up="false" data-sticky-down="false">
+        <div class="sticky-stop"></div><div class="sticky-stop"></div><div class="sticky-stop"></div>
+    </div>
+</footer>
+<pre id="result">pending</pre>
+<script src="harness.js"></script>
+<script src="../src/js/core.js"></script>
+<script src="../src/js/stops.js"></script>
+<script>
+    (async function () {
+        var H = Harness;
+        var SETTLE = 40;
+        var top = function (id) { return Math.round(document.getElementById(id).getBoundingClientRect().top + window.scrollY); };
+        var y = function () { return Math.round(window.scrollY); };
+        var rest = async function (to) { H.scroll(to); await H.after(SETTLE * 3); };
+
+        // Going back up is free; going down still settles.
+        var stops = StickyStops.attach(window, { smooth: false, keys: true, settle: SETTLE, up: false });
+        var measured = stops.measure();
+        H.check(measured[0].up === true && measured[1].up === false && measured[1].down === true, 'the option, and a stop\'s own word', JSON.stringify(measured.map(function (s) { return [s.up, s.down]; })));
+        await H.frame();
+
+        await rest(top('b') - 300);
+        H.check(H.near(y(), top('b')), 'up: false - a rest heading down still goes on to the next stop', y() + ' vs ' + top('b'));
+
+        await rest(top('b') + 50);
+        H.check(H.near(y(), top('b')), 'a nudge down inside the band still settles back up', y() + ' vs ' + top('b'));
+
+        await rest(top('c') - 300);
+        H.check(H.near(y(), top('c')), 'on down to c', y() + ' vs ' + top('c'));
+
+        // Heading up from c, past c's band: free - neither on to b nor back to c.
+        var at = top('c') - 400;
+        await rest(at);
+        H.check(H.near(y(), at), 'up: false - a rest heading up stays where the reader left it', y() + ' vs ' + at);
+
+        // Heading up inside b's band below it... (from below b, upwards): free as well.
+        at = top('b') + 60;
+        await rest(at);
+        H.check(H.near(y(), at), 'up: false - nor is a scroll up settled back down', y() + ' vs ' + at);
+
+        // Up between a and the sky: the sky says data-sticky-up="true", it takes the reader.
+        await rest(top('a'));
+        await H.after(SETTLE * 2);
+        await rest(top('a') - 300);
+        H.check(H.near(y(), top('sky')), 'a stop marked data-sticky-up="true" still pulls a reader heading up', y() + ' vs ' + top('sky'));
+
+        // The keys are asked for: they go from stop to stop whatever the options.
+        await rest(top('b'));
+        await H.after(SETTLE * 2);
+        H.key('ArrowUp');
+        await H.after(SETTLE * 3);
+        H.check(H.near(y(), top('a')), 'ArrowUp still goes to the stop above', y() + ' vs ' + top('a'));
+
+        // The mirror image: down: false.
+        stops.detach();
+        await H.after(SETTLE * 2);
+        stops = StickyStops.attach(window, { smooth: false, settle: SETTLE, down: false });
+        await rest(top('b'));
+        await H.after(SETTLE * 2);
+        at = top('c') - 300;
+        await rest(at);
+        H.check(H.near(y(), at), 'down: false - a rest heading down stays where the reader left it', y() + ' vs ' + at);
+        await rest(top('b') + 300);
+        H.check(H.near(y(), top('b')), 'down: false - a rest heading up still goes on to the stop above', y() + ' vs ' + top('b'));
+
+        stops.detach();
+
+        // Sideways, a row free both ways: its keys still go from stop to stop.
+        var row = document.getElementById('row');
+        var x = function () { return Math.round(row.scrollLeft); };
+        var along = StickyStops.get(row);
+        H.check(along && along.options.up === false && along.options.down === false && along.options.keys === true, 'the row read its two attributes, its keys on', along && JSON.stringify([along.options.up, along.options.down, along.options.keys]));
+        row.scrollLeft = 120;
+        await H.after(along.options.settle * 3);
+        H.check(H.near(x(), 120, 1), 'a scroll along the row rests where it was left', x());
+        row.scrollLeft = 0;
+        await H.after(along.options.settle * 3);
+        var right = H.key('ArrowRight', {}, row);
+        await H.until(function () { return H.near(x(), 300, 1); }, 3000);
+        H.check(right.defaultPrevented && H.near(x(), 300, 1), 'ArrowRight still goes to the next stop', right.defaultPrevented + ' ' + x());
+        await H.after(along.options.settle * 3);
+        var left = H.key('ArrowLeft', {}, row);
+        await H.until(function () { return H.near(x(), 0, 1); }, 3000);
+        H.check(left.defaultPrevented && H.near(x(), 0, 1), 'ArrowLeft still goes back a stop', left.defaultPrevented + ' ' + x());
+
+        // And down the page, both ways free: the arrows still go section to section.
+        await H.after(SETTLE * 2);
+        stops = StickyStops.attach(window, { smooth: false, keys: true, settle: SETTLE, up: false, down: false });
+        await rest(top('a'));
+        await H.after(SETTLE * 2);
+        H.key('ArrowDown');
+        await H.after(SETTLE * 3);
+        H.check(H.near(y(), top('b')), 'up and down both off: ArrowDown still goes to the next section', y() + ' vs ' + top('b'));
+        H.key('ArrowUp');
+        await H.after(SETTLE * 3);
+        H.check(H.near(y(), top('a')), 'and ArrowUp back', y() + ' vs ' + top('a'));
+
+        stops.detach();
+        H.done();
+    })().catch(function (e) { Harness.check(false, 'run', e && e.stack || e); Harness.done(); });
+</script>
+</body>
+</html>

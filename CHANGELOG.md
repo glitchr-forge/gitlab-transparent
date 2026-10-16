@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.0 - 2026-10-16
+
+- **stops** - each way on its own: the `up` and `down` options (`true` by
+  default, so nothing changes until a site asks). With `up: false` a scroll
+  heading up comes to rest where the reader left it - not carried on to the
+  stop above, not settled back down - while a scroll heading down still goes
+  on to its stop; `down: false` the other way round. A stop says it for itself
+  with `data-sticky-up` / `data-sticky-down` (`"false"`, or `"true"` against
+  the option: a full sky that keeps its pull upwards on a page where going
+  back up is free); a sideways row takes the same two attributes. The keys go
+  from stop to stop whatever the options. tests/stops-ways.html.
+
 ## 1.2.1 - 2026-10-14
 
 What plugging the cookie module under a site's own consent panel showed, and

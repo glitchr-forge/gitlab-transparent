@@ -17,6 +17,19 @@
 //    overshot into that band (a trackpad flick past a stop near the top);
 //  - before the first stop: the mirror image.
 //
+// Each way on its own (the `up` and `down` options, both on by default): with
+// `up: false` a scroll heading up comes to rest wherever the reader left it -
+// neither carried on to the stop above nor settled back to the one below -
+// while a scroll heading down is still taken to its stop; `down: false` the
+// other way round. It is the READER's direction that counts: a nudge down
+// that settles back up is the downward scroll's. A stop can say it for
+// itself, data-sticky-up="false" (or "true") and data-sticky-down: a reader
+// heading up is not taken to that stop, whatever the option says - the full
+// sky at the top of a page may keep its pull upwards on a site where going
+// back up is otherwise free. On a sideways row, up is towards its start (the
+// left) and down towards its end, and the row says it with the same two
+// attributes. The keys are not concerned: a key is asked for.
+//
 // A stop taller than the screen is read freely: from its top to where its
 // bottom meets the bottom of the screen, nothing pulls. Its band below counts
 // from that end, and a scroll heading up into it from the next stop settles
@@ -154,6 +167,8 @@
         easing: 'cubic-bezier(.65, 0, .35, 1)', // the curve of that glide: a CSS cubic-bezier(), its four numbers, a CSS name, or a function
         bandUp: 0,       // px, for a stop without data-sticky-band-up
         bandDown: 0,     // px, for a stop without data-sticky-band-down
+        up: true,        // a scroll heading up (left) is taken to a stop; false: it rests where the reader left it
+        down: true,      // the same, heading down (right)
         progress: true,  // the custom properties and sticky:progress events
         smooth: true,    // glide, rather than jump, to a stop
         axis: 'y',       // 'x': the stops are met sideways, by their left edge (an element scroller)
@@ -510,6 +525,9 @@
                 end: Math.min(Math.max(top, Math.round(position + frame.padding + margin + (this.horizontal ? rect.width : rect.height) - viewport)), max),
                 bandUp: Math.max(0, toPixels(el.dataset.stickyBandUp, el, options.bandUp)),
                 bandDown: Math.max(0, toPixels(el.dataset.stickyBandDown, el, options.bandDown)),
+                // Whether a reader heading up (down) is taken to it.
+                up: flag(el.dataset.stickyUp, options.up),
+                down: flag(el.dataset.stickyDown, options.down),
                 // Kept for the check a kept measure is given at each frame (see progress).
                 margin: margin
             });
@@ -519,7 +537,7 @@
         // The end of the scroll as a last stop (the `end` option): what follows the last section - a
         // footer - is reached in one glide, and left in one, wherever it is. Not bound by `reach`.
         if (options.end && max > 0 && (!stops.length || max - stops[stops.length - 1].top > options.tolerance)) {
-            stops.push({ element: this.root, top: max, end: max, bandUp: Math.max(0, toPixels(undefined, this.root, options.bandUp)), bandDown: 0, bottom: true });
+            stops.push({ element: this.root, top: max, end: max, bandUp: Math.max(0, toPixels(undefined, this.root, options.bandUp)), bandDown: 0, up: flag(undefined, options.up), down: flag(undefined, options.down), bottom: true });
         }
 
         // Two stops at the same place are one stop.
@@ -560,7 +578,13 @@
 
     /** A tall stop's last screen, as a place to glide to. */
     function ending(stop) {
-        return stop.end === stop.top ? stop : { element: stop.element, top: stop.end, end: stop.end };
+        return stop.end === stop.top ? stop : { element: stop.element, top: stop.end, end: stop.end, up: stop.up, down: stop.down };
+    }
+
+    /** An on/off attribute ("false", "0", "off", "no": off; anything else: on), or the fallback without one. */
+    function flag(value, fallback) {
+        if (value === undefined || value === null) return fallback !== false;
+        return !/^(false|0|off|no)$/i.test(String(value).trim());
     }
 
     /** The farthest a glide may go, in px. */
@@ -678,6 +702,15 @@
         return true;
     };
 
+    /**
+     * approach(), for a scroll the reader made heading `way` (1 down, -1 up):
+     * unless the stop does not take a reader going that way (`up`, `down`).
+     */
+    Stops.prototype.toward = function (stop, way) {
+        if ((way < 0 ? stop.up : stop.down) === false) return false;
+        return this.approach(stop);
+    };
+
     Stops.prototype.settle = function () {
         this.timer = null;
 
@@ -722,7 +755,7 @@
         // an overshoot from below - goes to the stop. Otherwise free.
         if (y < first.top) {
             var overshotUp = from > first.top + tolerance;
-            if (y > first.top - first.bandUp && (direction > 0 || overshotUp)) this.approach(first);
+            if (y > first.top - first.bandUp && (direction > 0 || overshotUp)) this.toward(first, direction > 0 ? 1 : -1);
             return;
         }
 
@@ -730,7 +763,7 @@
         // overshoot from above - goes back to the stop. Otherwise free.
         if (y > last.end) {
             var overshotDown = from < last.end - tolerance;
-            if (y < last.end + last.bandDown && (direction < 0 || overshotDown)) this.approach(ending(last));
+            if (y < last.end + last.bandDown && (direction < 0 || overshotDown)) this.toward(ending(last), direction < 0 ? -1 : 1);
             return;
         }
 
@@ -741,8 +774,8 @@
             var lower = stops[i + 1];
             if (y <= upper.end || y >= lower.top) continue;
 
-            if (direction > 0) this.approach(y < upper.end + upper.bandDown ? ending(upper) : lower);
-            else if (direction < 0) this.approach(y > lower.top - lower.bandUp ? lower : ending(upper));
+            if (direction > 0) this.toward(y < upper.end + upper.bandDown ? ending(upper) : lower, 1);
+            else if (direction < 0) this.toward(y > lower.top - lower.bandUp ? lower : ending(upper), -1);
             return;
         }
     };
@@ -1118,7 +1151,7 @@
     };
 
     // The rows marked data-sticky-axis="x" (or "y"), with their options from
-    // data-sticky-keys / -duration / -easing / -settle / -reach / -tolerance.
+    // data-sticky-keys / -duration / -easing / -settle / -reach / -tolerance / -up / -down.
     function rowOptions(el) {
         var data = el.dataset;
         var options = { axis: data.stickyAxis === 'x' ? 'x' : 'y', keys: data.stickyKeys !== 'false' };
@@ -1128,6 +1161,8 @@
         });
         if (data.stickyReach !== undefined) options.reach = data.stickyReach;
         if (data.stickyEasing) options.easing = data.stickyEasing;
+        if (data.stickyUp !== undefined) options.up = flag(data.stickyUp, true);
+        if (data.stickyDown !== undefined) options.down = flag(data.stickyDown, true);
         return options;
     }
 

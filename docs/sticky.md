@@ -166,6 +166,19 @@ Gentler stops, for a page that should be discovered rather than led:
   page or along a row (`data-sticky-easing` on a row).
 - `settle` (ms, `160` by default): how long the scroll must have been quiet
   before anything happens.
+- `up` and `down` (`true` by default): each way on its own. With `up: false`
+  a scroll heading up rests where the reader left it - neither carried on to
+  the stop above nor settled back to the one below - while a scroll heading
+  down still goes on to its stop: the page leads the way down and lets the
+  reader wander back up. `down: false` is the other way round. The reader's
+  direction is what counts (a nudge down that settles back up belongs to the
+  downward scroll), and the keys are not concerned - a key is asked for. A
+  stop says it for itself with `data-sticky-up` and `data-sticky-down`
+  (`"false"`, or `"true"` against the option): a reader heading up is not
+  taken to a stop marked `data-sticky-up="false"`, and one marked
+  `data-sticky-up="true"` - a full sky at the top of the page - keeps its pull
+  upwards where going back up is otherwise free. On a sideways row up is
+  towards its start, and the row takes the same two attributes.
 
 ```js
 StickyStops.attach(window, { reach: 140, settle: 320, duration: 700, bandUp: 140, bandDown: 140 });
@@ -237,7 +250,7 @@ The window attaches itself when the document has stops at `DOMContentLoaded`
 or `load`. Otherwise, and for scrolling elements:
 
 ```js
-StickyStops.attach(scroller, { settle: 160, tolerance: 3, reach: Infinity, duration: 0, easing: 'cubic-bezier(.65, 0, .35, 1)', bandUp: 0, bandDown: 0, progress: true, smooth: true, axis: 'y', keys: false });
+StickyStops.attach(scroller, { settle: 160, tolerance: 3, reach: Infinity, duration: 0, easing: 'cubic-bezier(.65, 0, .35, 1)', bandUp: 0, bandDown: 0, up: true, down: true, progress: true, smooth: true, axis: 'y', keys: false });
 StickyStops.get(scroller).state;      // the last progress, or null
 StickyStops.get(scroller).refresh();  // after content moved
 StickyStops.pause(); StickyStops.resume();  // while a script scrolls the page itself; nests
